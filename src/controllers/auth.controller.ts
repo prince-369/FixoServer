@@ -1,0 +1,626 @@
+import { Request, Response } from 'express';
+import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
+import axios from 'axios';
+import User from '../models/User';
+import Worker from '../models/Worker';
+import Admin from '../models/Admin';
+import RefreshToken from '../models/RefreshToken';
+import PasswordResetToken from '../models/PasswordResetToken';
+import { generateAccessToken, generateRefreshTokenString } from '../utils/generateToken';
+import { generateOTP, storeOTP, verifyOTP, sendOTP } from '../services/sms.service';
+import { sendPasswordResetEmail } from '../services/email.service';
+import { uploadBufferToCloudinary } from '../services/cloudinary.service';
+
+const REFRESH_TOKEN_DAYS = 7;
+const EMAIL_RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
+const OTP_RESET_TOKEN_TTL_MS = 10 * 60 * 1000;
+
+type PasswordResetRole = 'customer' | 'worker';
+
+// Strong password regex: min 8 chars, 1 uppercase, 1 lowercase, 1 digit, 1 special char
+const STRONG_PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]).{8,}$/;
+
+const validateStrongPassword = (password: string): string | null => {
+  if (password.length < 8) return 'Password must be at least 8 characters';
+  if (!/[a-z]/.test(password)) return 'Password must include a lowercase letter';
+  if (!/[A-Z]/.test(password)) return 'Password must include an uppercase letter';
+  if (!/\d/.test(password)) return 'Password must include a number';
+  if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) return 'Password must include a special character';
+  return null;
+};
+
+const hashResetToken = (token: string): string => {
+  return crypto.createHash('sha256').update(token).digest('hex');
+};
+
+const createResetToken = async (
+  userId: string,
+  role: PasswordResetRole,
+  ttlMs: number
+): Promise<{ rawToken: string; tokenHash: string }> => {
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  const tokenHash = hashResetToken(rawToken);
+
+  await PasswordResetToken.deleteMany({ userId, role });
+  await PasswordResetToken.create({
+    userId,
+    role,
+    tokenHash,
+    expiresAt: new Date(Date.now() + ttlMs),
+  });
+
+  return { rawToken, tokenHash };
+};
+
+const consumeResetToken = async (
+  rawToken: string
+): Promise<{ id: string; role: PasswordResetRole } | null> => {
+  const tokenHash = hashResetToken(rawToken);
+
+  const tokenDoc = await PasswordResetToken.findOneAndDelete({
+    tokenHash,
+    expiresAt: { $gt: new Date() },
+  });
+
+  if (!tokenDoc) return null;
+  return { id: tokenDoc.userId.toString(), role: tokenDoc.role };
+};
+
+const sendEmailResetLink = async (
+  email: string,
+  userId: string,
+  role: PasswordResetRole
+): Promise<boolean> => {
+  const { rawToken, tokenHash } = await createResetToken(userId, role, EMAIL_RESET_TOKEN_TTL_MS);
+  const sent = await sendPasswordResetEmail(email, rawToken);
+
+  if (!sent) {
+    await PasswordResetToken.deleteOne({ tokenHash });
+    return false;
+  }
+
+  return true;
+};
+
+// ─── Helper: Set auth tokens & cookie ───
+const issueTokens = async (res: Response, userId: string, role: 'customer' | 'worker' | 'admin') => {
+  const accessToken = generateAccessToken({ id: userId, role });
+  const refreshToken = generateRefreshTokenString();
+
+  // Store refresh token in DB
+  await RefreshToken.create({
+    userId,
+    role,
+    token: refreshToken,
+    expiresAt: new Date(Date.now() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000),
+  });
+
+  // Set refresh token as httpOnly cookie
+  res.cookie('refreshToken', refreshToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000,
+    path: '/',
+  });
+
+  return accessToken;
+};
+
+// ─── Customer Registration ───
+export const registerCustomer = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { fullName, email, phone, password } = req.body;
+
+    // Validate strong password
+    const pwdError = validateStrongPassword(password);
+    if (pwdError) {
+      res.status(400).json({ message: pwdError });
+      return;
+    }
+
+    const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
+    if (existingUser) {
+      res.status(400).json({ message: 'Email or phone number already registered' });
+      return;
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    const user = await User.create({
+      fullName,
+      email,
+      phone,
+      password: hashedPassword,
+    });
+
+    const accessToken = await issueTokens(res, user._id.toString(), 'customer');
+
+    res.status(201).json({
+      message: 'Registration successful',
+      accessToken,
+      user: {
+        id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        phone: user.phone,
+        profileImage: user.profileImage,
+      },
+    });
+  } catch (error) {
+    console.error('Register customer error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─── Customer Google OAuth ───
+export const googleAuthCustomer = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { credential } = req.body;
+
+    // Verify Google token
+    const googleRes = await axios.get(
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${credential}`
+    );
+
+    const { email, name, sub: googleId, picture } = googleRes.data;
+
+    let user = await User.findOne({ $or: [{ googleId }, { email }] });
+
+    if (user) {
+      if (!user.googleId) {
+        user.googleId = googleId;
+        await user.save();
+      }
+    } else {
+      // Need phone number — send back a flag
+      res.status(200).json({
+        needsPhone: true,
+        googleData: { email, fullName: name, googleId, profileImage: picture },
+      });
+      return;
+    }
+
+    const accessToken = await issueTokens(res, user._id.toString(), 'customer');
+
+    res.json({
+      message: 'Login successful',
+      accessToken,
+      user: {
+        id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        phone: user.phone,
+        profileImage: user.profileImage,
+      },
+    });
+  } catch (error) {
+    console.error('Google auth error:', error);
+    res.status(500).json({ message: 'Google authentication failed' });
+  }
+};
+
+// Complete Google registration (after getting phone number)
+export const completeGoogleRegistration = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { email, fullName, googleId, profileImage, phone } = req.body;
+
+    const existingPhone = await User.findOne({ phone });
+    if (existingPhone) {
+      res.status(400).json({ message: 'Phone number already registered' });
+      return;
+    }
+
+    const user = await User.create({
+      fullName,
+      email,
+      phone,
+      googleId,
+      profileImage,
+    });
+
+    const accessToken = await issueTokens(res, user._id.toString(), 'customer');
+
+    res.status(201).json({
+      message: 'Registration successful',
+      accessToken,
+      user: {
+        id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        phone: user.phone,
+        profileImage: user.profileImage,
+      },
+    });
+  } catch (error) {
+    console.error('Complete Google registration error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─── Customer Login ───
+export const loginCustomer = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { identifier, password } = req.body;
+
+    const isEmail = identifier.includes('@');
+    const query = isEmail ? { email: identifier } : { phone: identifier };
+
+    const user = await User.findOne(query).select('+password');
+    if (!user) {
+      res.status(401).json({ message: 'Invalid credentials' });
+      return;
+    }
+
+    if (!user.password) {
+      res.status(401).json({ message: 'Please login with Google' });
+      return;
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      res.status(401).json({ message: 'Invalid credentials' });
+      return;
+    }
+
+    const accessToken = await issueTokens(res, user._id.toString(), 'customer');
+
+    res.json({
+      message: 'Login successful',
+      accessToken,
+      user: {
+        id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        phone: user.phone,
+        profileImage: user.profileImage,
+      },
+    });
+  } catch (error) {
+    console.error('Login customer error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─── Worker Registration ───
+export const registerWorker = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { fullName, phone, email, password } = req.body;
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+
+    if (!files?.aadhaarFront?.[0] || !files?.aadhaarBack?.[0]) {
+      res.status(400).json({ message: 'Aadhaar card front and back photos are required' });
+      return;
+    }
+
+    // Validate strong password
+    const pwdError = validateStrongPassword(password);
+    if (pwdError) {
+      res.status(400).json({ message: pwdError });
+      return;
+    }
+
+    const existingWorker = await Worker.findOne({ phone });
+    if (existingWorker) {
+      res.status(400).json({ message: 'Phone number already registered' });
+      return;
+    }
+
+    // Upload Aadhaar images to Cloudinary
+    const [frontUpload, backUpload] = await Promise.all([
+      uploadBufferToCloudinary(files.aadhaarFront[0].buffer, 'aadhaar'),
+      uploadBufferToCloudinary(files.aadhaarBack[0].buffer, 'aadhaar'),
+    ]);
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    const worker = await Worker.create({
+      fullName,
+      phone,
+      email: email || undefined,
+      password: hashedPassword,
+      aadhaarFront: frontUpload.url,
+      aadhaarBack: backUpload.url,
+      accountStatus: 'test',
+    });
+
+    const accessToken = await issueTokens(res, worker._id.toString(), 'worker');
+
+    res.status(201).json({
+      message: 'Registration successful. Complete your profile to start working.',
+      accessToken,
+      worker: {
+        id: worker._id,
+        fullName: worker.fullName,
+        phone: worker.phone,
+        accountStatus: worker.accountStatus,
+        profileCompleted: worker.profileCompleted,
+      },
+    });
+  } catch (error) {
+    console.error('Register worker error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─── Worker Login ───
+export const loginWorker = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { phone, password } = req.body;
+
+    const worker = await Worker.findOne({ phone }).select('+password');
+    if (!worker) {
+      res.status(401).json({ message: 'Invalid credentials' });
+      return;
+    }
+
+    const isMatch = await bcrypt.compare(password, worker.password);
+    if (!isMatch) {
+      res.status(401).json({ message: 'Invalid credentials' });
+      return;
+    }
+
+    const accessToken = await issueTokens(res, worker._id.toString(), 'worker');
+
+    res.json({
+      message: 'Login successful',
+      accessToken,
+      worker: {
+        id: worker._id,
+        fullName: worker.fullName,
+        phone: worker.phone,
+        accountStatus: worker.accountStatus,
+        profileCompleted: worker.profileCompleted,
+        isActive: worker.isActive,
+        balance: worker.balance,
+      },
+    });
+  } catch (error) {
+    console.error('Login worker error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─── Admin Login ───
+export const loginAdmin = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { email, password } = req.body;
+
+    const admin = await Admin.findOne({ email }).select('+password');
+    if (!admin) {
+      res.status(401).json({ message: 'Invalid credentials' });
+      return;
+    }
+
+    const isMatch = await bcrypt.compare(password, admin.password);
+    if (!isMatch) {
+      res.status(401).json({ message: 'Invalid credentials' });
+      return;
+    }
+
+    const accessToken = await issueTokens(res, admin._id.toString(), 'admin');
+
+    res.json({
+      message: 'Login successful',
+      accessToken,
+      admin: { id: admin._id, email: admin.email, role: admin.role },
+    });
+  } catch (error) {
+    console.error('Login admin error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─── Forgot Password ───
+export const forgotPassword = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { identifier, role } = req.body;
+    const isEmail = identifier.includes('@');
+
+    if (role === 'customer') {
+      const query = isEmail ? { email: identifier } : { phone: identifier };
+      const user = await User.findOne(query);
+      if (!user) {
+        res.status(404).json({ message: 'Account not found' });
+        return;
+      }
+
+      if (isEmail) {
+        const sent = await sendEmailResetLink(identifier, user._id.toString(), 'customer');
+        if (!sent) {
+          res.status(503).json({ message: 'Unable to send reset email right now. Please try again.' });
+          return;
+        }
+        res.json({ message: 'Password reset link sent to your email', method: 'email' });
+      } else {
+        const otp = generateOTP();
+        const sent = await sendOTP(identifier, otp);
+        if (!sent) {
+          res.status(503).json({ message: 'Unable to send OTP right now. Please try email reset.' });
+          return;
+        }
+        await storeOTP(identifier, otp);
+        res.json({ message: 'OTP sent to your phone number', method: 'phone' });
+      }
+    } else if (role === 'worker') {
+      const worker = await Worker.findOne({ phone: identifier });
+      if (!worker) {
+        // Try email if worker has one
+        if (isEmail) {
+          const workerByEmail = await Worker.findOne({ email: identifier });
+          if (!workerByEmail) {
+            res.status(404).json({ message: 'Account not found' });
+            return;
+          }
+          const sent = await sendEmailResetLink(identifier, workerByEmail._id.toString(), 'worker');
+          if (!sent) {
+            res.status(503).json({ message: 'Unable to send reset email right now. Please try again.' });
+            return;
+          }
+          res.json({ message: 'Password reset link sent to your email', method: 'email' });
+          return;
+        }
+        res.status(404).json({ message: 'Account not found' });
+        return;
+      }
+
+      if (isEmail && worker.email) {
+        const sent = await sendEmailResetLink(worker.email, worker._id.toString(), 'worker');
+        if (!sent) {
+          res.status(503).json({ message: 'Unable to send reset email right now. Please try again.' });
+          return;
+        }
+        res.json({ message: 'Password reset link sent to your email', method: 'email' });
+      } else {
+        const otp = generateOTP();
+        const sent = await sendOTP(identifier, otp);
+        if (!sent) {
+          res.status(503).json({ message: 'Unable to send OTP right now. Please try email reset.' });
+          return;
+        }
+        await storeOTP(identifier, otp);
+        res.json({ message: 'OTP sent to your phone number', method: 'phone' });
+      }
+    }
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─── Verify OTP ───
+export const verifyOTPHandler = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { phone, otp } = req.body;
+
+    const isValid = await verifyOTP(phone, otp);
+    if (!isValid) {
+      res.status(400).json({ message: 'Invalid or expired OTP' });
+      return;
+    }
+
+    const customer = await User.findOne({ phone });
+    const worker = customer ? null : await Worker.findOne({ phone });
+    const account = customer || worker;
+
+    if (!account) {
+      res.status(404).json({ message: 'Account not found' });
+      return;
+    }
+
+    const role: PasswordResetRole = customer ? 'customer' : 'worker';
+    const { rawToken } = await createResetToken(account._id.toString(), role, OTP_RESET_TOKEN_TTL_MS);
+
+    res.json({ message: 'OTP verified', resetToken: rawToken });
+  } catch (error) {
+    console.error('Verify OTP error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─── Reset Password ───
+export const resetPassword = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { token, password } = req.body;
+
+    const tokenData = await consumeResetToken(token);
+    if (!tokenData) {
+      res.status(400).json({ message: 'Invalid or expired reset token' });
+      return;
+    }
+
+    // Validate strong password
+    const pwdError = validateStrongPassword(password);
+    if (pwdError) {
+      res.status(400).json({ message: pwdError });
+      return;
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    if (tokenData.role === 'customer') {
+      await User.findByIdAndUpdate(tokenData.id, { password: hashedPassword });
+    } else {
+      await Worker.findByIdAndUpdate(tokenData.id, { password: hashedPassword });
+    }
+
+    res.json({ message: 'Password reset successful' });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─── Get Current User ───
+export const getMe = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ message: 'Not authorized' });
+      return;
+    }
+
+    switch (req.user.role) {
+      case 'customer': {
+        const user = await User.findById(req.user.id);
+        res.json({ role: 'customer', user });
+        break;
+      }
+      case 'worker': {
+        const worker = await Worker.findById(req.user.id).populate('categories');
+        res.json({ role: 'worker', worker });
+        break;
+      }
+      case 'admin': {
+        const admin = await Admin.findById(req.user.id);
+        res.json({ role: 'admin', admin });
+        break;
+      }
+    }
+  } catch (error) {
+    console.error('Get me error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─── Refresh Token ───
+export const refresh = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const token = req.cookies?.refreshToken;
+    if (!token) {
+      res.status(401).json({ message: 'No refresh token' });
+      return;
+    }
+
+    const stored = await RefreshToken.findOne({ token });
+    if (!stored || stored.expiresAt < new Date()) {
+      if (stored) await stored.deleteOne();
+      res.clearCookie('refreshToken', { path: '/' });
+      res.status(401).json({ message: 'Invalid or expired refresh token' });
+      return;
+    }
+
+    const accessToken = generateAccessToken({ id: stored.userId.toString(), role: stored.role });
+
+    res.json({ accessToken, role: stored.role });
+  } catch (error) {
+    console.error('Refresh token error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─── Logout ───
+export const logout = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const token = req.cookies?.refreshToken;
+    if (token) {
+      await RefreshToken.deleteOne({ token });
+    }
+    res.clearCookie('refreshToken', { path: '/' });
+    res.json({ message: 'Logged out' });
+  } catch (error) {
+    console.error('Logout error:', error);
+    res.clearCookie('refreshToken', { path: '/' });
+    res.json({ message: 'Logged out' });
+  }
+};

@@ -1,0 +1,15 @@
+import { Request, Response } from 'express';
+export declare const registerCustomer: (req: Request, res: Response) => Promise<void>;
+export declare const googleAuthCustomer: (req: Request, res: Response) => Promise<void>;
+export declare const completeGoogleRegistration: (req: Request, res: Response) => Promise<void>;
+export declare const loginCustomer: (req: Request, res: Response) => Promise<void>;
+export declare const registerWorker: (req: Request, res: Response) => Promise<void>;
+export declare const loginWorker: (req: Request, res: Response) => Promise<void>;
+export declare const loginAdmin: (req: Request, res: Response) => Promise<void>;
+export declare const forgotPassword: (req: Request, res: Response) => Promise<void>;
+export declare const verifyOTPHandler: (req: Request, res: Response) => Promise<void>;
+export declare const resetPassword: (req: Request, res: Response) => Promise<void>;
+export declare const getMe: (req: Request, res: Response) => Promise<void>;
+export declare const refresh: (req: Request, res: Response) => Promise<void>;
+export declare const logout: (req: Request, res: Response) => Promise<void>;
+//# sourceMappingURL=auth.controller.d.ts.map

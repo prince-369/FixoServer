@@ -1,0 +1,16 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - ./alerts.yml
+
+scrape_configs:
+  - job_name: fixo-backend
+    metrics_path: /api/metrics
+    scheme: http
+    static_configs:
+      - targets:
+          - localhost:5000
+    authorization:
+      credentials: replace-with-metrics-auth-token

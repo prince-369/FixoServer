@@ -1,0 +1,1 @@
+{"version":3,"file":"OtpCode.d.ts","sourceRoot":"","sources":["../../src/models/OtpCode.ts"],"names":[],"mappings":"AAAA,OAAO,QAAQ,EAAE,EAAE,QAAQ,EAAU,MAAM,UAAU,CAAC;AAEtD,MAAM,WAAW,QAAS,SAAQ,QAAQ;IACxC,KAAK,EAAE,MAAM,CAAC;IACd,OAAO,EAAE,gBAAgB,CAAC;IAC1B,OAAO,EAAE,MAAM,CAAC;IAChB,SAAS,EAAE,IAAI,CAAC;IAChB,SAAS,EAAE,IAAI,CAAC;CACjB;;;;;;;;AAeD,wBAAkE"}

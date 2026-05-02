@@ -1,0 +1,87 @@
+groups:
+  - name: fixo-backend-alerts
+    rules:
+      - alert: FixoInstanceDown
+        expr: up{job="fixo-backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Backend instance is down
+          description: Fixo backend target has not been scraped for more than 2 minutes.
+
+      - alert: FixoApi5xxRatioHigh
+        expr: |
+          (
+            sum(rate(fixo_http_requests_total{status_code=~"5.."}[5m]))
+            /
+            clamp_min(sum(rate(fixo_http_requests_total[5m])), 1)
+          ) > 0.02
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: API 5xx ratio is high
+          description: API server error ratio is above 2% for at least 10 minutes.
+
+      - alert: FixoApiLatencyP95High
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(fixo_http_request_duration_seconds_bucket[5m])) by (le)
+          ) > 1.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: API latency p95 is high
+          description: API p95 latency is above 1.2 seconds for 10 minutes.
+
+      - alert: FixoInFlightRequestsHigh
+        expr: max(fixo_http_requests_in_flight) > 500
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: In-flight requests are high
+          description: Concurrent in-flight requests are above 500 for 5 minutes.
+
+      - alert: FixoSocketConnectionsHigh
+        expr: max(fixo_socket_connected_clients) > 5000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Socket connected clients are high
+          description: Connected socket clients are above 5000 for 10 minutes.
+
+      - alert: FixoSocketDisconnectRateHigh
+        expr: sum(rate(fixo_socket_disconnects_total[5m])) * 60 > 200
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Socket disconnect rate is high
+          description: Socket disconnect rate is above 200 per minute for 10 minutes.
+
+      - alert: FixoMemoryRssHigh
+        expr: max(fixo_process_resident_memory_bytes) > 1.5e+09
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Process memory usage is high
+          description: Process RSS memory is above 1.5GB for 10 minutes.
+
+      - alert: FixoEventLoopLagP99High
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum(rate(fixo_nodejs_eventloop_lag_seconds_bucket[5m])) by (le)
+          ) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Event loop lag p99 is high
+          description: Node.js event-loop lag p99 is above 200ms for 10 minutes.

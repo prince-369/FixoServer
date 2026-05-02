@@ -1,0 +1,23 @@
+import { Request, Response } from 'express';
+export declare const getProfile: (req: Request, res: Response) => Promise<void>;
+export declare const updateProfile: (req: Request, res: Response) => Promise<void>;
+export declare const getCategories: (_req: Request, res: Response) => Promise<void>;
+export declare const getCategoryDetail: (req: Request, res: Response) => Promise<void>;
+export declare const getBanners: (_req: Request, res: Response) => Promise<void>;
+export declare const getBookings: (req: Request, res: Response) => Promise<void>;
+export declare const getBookingDetail: (req: Request, res: Response) => Promise<void>;
+export declare const getTransactions: (req: Request, res: Response) => Promise<void>;
+export declare const cancelBooking: (req: Request, res: Response) => Promise<void>;
+export declare const submitRefundDetails: (req: Request, res: Response) => Promise<void>;
+export declare const submitReview: (req: Request, res: Response) => Promise<void>;
+export declare const getNotifications: (req: Request, res: Response) => Promise<void>;
+export declare const markNotificationRead: (req: Request, res: Response) => Promise<void>;
+export declare const markAllNotificationsRead: (req: Request, res: Response) => Promise<void>;
+export declare const deleteNotification: (req: Request, res: Response) => Promise<void>;
+export declare const getChatbotQA: (req: Request, res: Response) => Promise<void>;
+export declare const createHelpTicket: (req: Request, res: Response) => Promise<void>;
+export declare const getHelpTickets: (req: Request, res: Response) => Promise<void>;
+export declare const getHelpTicketDetail: (req: Request, res: Response) => Promise<void>;
+export declare const appendHelpTicketMessage: (req: Request, res: Response) => Promise<void>;
+export declare const escalateHelpTicket: (req: Request, res: Response) => Promise<void>;
+//# sourceMappingURL=customer.controller.d.ts.map
