@@ -43,22 +43,39 @@ const rate_limit_redis_1 = require("rate-limit-redis");
 const env_1 = __importDefault(require("../config/env"));
 const RATE_LIMIT_MESSAGE = { message: 'Too many requests. Please try again shortly.' };
 let redisClient = null;
+const shouldUseRedisTls = (redisUrl) => {
+    try {
+        const parsed = new URL(redisUrl);
+        if (parsed.protocol === 'rediss:')
+            return true;
+        return /redislabs\.com|redis\.com|upstash\.io/i.test(parsed.hostname);
+    }
+    catch {
+        return false;
+    }
+};
 const getOrCreateRedisClient = () => {
     if (!env_1.default.REDIS_URL)
         return null;
     if (redisClient)
         return redisClient;
-    redisClient = new ioredis_1.default(env_1.default.REDIS_URL, {
+    const redisOptions = {
         lazyConnect: true,
         connectTimeout: 10000,
         maxRetriesPerRequest: 1,
         enableOfflineQueue: false,
-    });
+    };
+    if (shouldUseRedisTls(env_1.default.REDIS_URL)) {
+        redisOptions.tls = {};
+    }
+    redisClient = new ioredis_1.default(env_1.default.REDIS_URL, redisOptions);
     redisClient.on('error', (error) => {
         console.error('Rate limit Redis error:', error);
     });
     void redisClient.connect().catch((error) => {
         console.error('Rate limit Redis connect failed. Falling back to local memory store.', error);
+        redisClient?.disconnect();
+        redisClient = null;
     });
     return redisClient;
 };
@@ -69,6 +86,8 @@ const getRateLimitStore = (prefix) => {
     return new rate_limit_redis_1.RedisStore({
         prefix,
         sendCommand: async (...args) => {
+            if (client.status !== 'ready')
+                return 0;
             try {
                 const result = await client.call(args[0], ...args.slice(1));
                 return Number(result);

@@ -17,6 +17,17 @@ let io;
 let isSocketInitialized = false;
 let redisPubClient = null;
 let redisSubClient = null;
+const shouldUseRedisTls = (redisUrl) => {
+    try {
+        const parsed = new URL(redisUrl);
+        if (parsed.protocol === 'rediss:')
+            return true;
+        return /redislabs\.com|redis\.com|upstash\.io/i.test(parsed.hostname);
+    }
+    catch {
+        return false;
+    }
+};
 // Track connected users: { socketId: { userId, role } }
 const connectedUsers = new Map();
 // Reverse map: userId -> socketId (for quick lookup)
@@ -42,12 +53,16 @@ const setupSocketRedisAdapter = async () => {
     if (!env_1.default.REDIS_URL || !isSocketInitialized)
         return;
     try {
-        redisPubClient = new ioredis_1.default(env_1.default.REDIS_URL, {
+        const redisOptions = {
             lazyConnect: true,
             connectTimeout: 10000,
             maxRetriesPerRequest: 1,
             enableOfflineQueue: false,
-        });
+        };
+        if (shouldUseRedisTls(env_1.default.REDIS_URL)) {
+            redisOptions.tls = {};
+        }
+        redisPubClient = new ioredis_1.default(env_1.default.REDIS_URL, redisOptions);
         redisSubClient = redisPubClient.duplicate();
         redisPubClient.on('error', (error) => {
             console.error('Socket Redis pub client error:', error);

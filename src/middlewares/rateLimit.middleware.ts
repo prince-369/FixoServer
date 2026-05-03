@@ -13,11 +13,12 @@ const getOrCreateRedisClient = (): Redis | null => {
   if (redisClient) return redisClient;
 
   redisClient = new Redis(env.REDIS_URL, {
-    lazyConnect: true,
-    connectTimeout: 10_000,
-    maxRetriesPerRequest: 1,
-    enableOfflineQueue: false,
-  });
+  lazyConnect: true,
+  connectTimeout: 10_000,
+  maxRetriesPerRequest: 1,
+  enableOfflineQueue: false,
+  tls: env.REDIS_URL.startsWith('rediss://') ? {} : undefined,
+});
 
   redisClient.on('error', (error) => {
     console.error('Rate limit Redis error:', error);
