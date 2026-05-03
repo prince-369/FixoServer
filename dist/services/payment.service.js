@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createDuesPaymentOrder = exports.verifyPayment = exports.createOrder = void 0;
+exports.createDuesPaymentOrder = exports.verifyWebhookSignature = exports.verifyPayment = exports.createOrder = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const razorpay_1 = __importDefault(require("../config/razorpay"));
 const env_1 = __importDefault(require("../config/env"));
@@ -26,6 +26,14 @@ const verifyPayment = (orderId, paymentId, signature) => {
     return expectedSignature === signature;
 };
 exports.verifyPayment = verifyPayment;
+const verifyWebhookSignature = (rawBody, signature) => {
+    const expectedSignature = crypto_1.default
+        .createHmac('sha256', env_1.default.RAZORPAY_WEBHOOK_SECRET)
+        .update(rawBody)
+        .digest('hex');
+    return expectedSignature === signature;
+};
+exports.verifyWebhookSignature = verifyWebhookSignature;
 const createDuesPaymentOrder = async (amount, workerId) => {
     const options = {
         amount: amount * 100,

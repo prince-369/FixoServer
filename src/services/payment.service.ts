@@ -27,6 +27,15 @@ export const verifyPayment = (
   return expectedSignature === signature;
 };
 
+export const verifyWebhookSignature = (rawBody: string, signature: string): boolean => {
+  const expectedSignature = crypto
+    .createHmac('sha256', env.RAZORPAY_WEBHOOK_SECRET)
+    .update(rawBody)
+    .digest('hex');
+
+  return expectedSignature === signature;
+};
+
 export const createDuesPaymentOrder = async (amount: number, workerId: string) => {
   const options = {
     amount: amount * 100,

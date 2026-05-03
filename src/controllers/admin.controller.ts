@@ -1249,6 +1249,7 @@ export const getRefunds = async (_req: Request, res: Response): Promise<void> =>
   try {
     const refunds = await Booking.find({
       status: 'cancelled',
+      paymentMethod: 'online',
       paymentStatus: { $in: ['refund_pending', 'refunded'] },
     })
       .populate('customer', 'fullName phone email')
@@ -1291,6 +1292,11 @@ export const processRefund = async (req: Request, res: Response): Promise<void> 
 
     if (!booking || booking.paymentStatus !== 'refund_pending') {
       res.status(404).json({ message: 'No pending refund found for this booking' });
+      return;
+    }
+
+    if (booking.paymentMethod !== 'online') {
+      res.status(400).json({ message: 'Refunds are supported only for online payments' });
       return;
     }
 
@@ -1342,6 +1348,11 @@ export const rejectRefund = async (req: Request, res: Response): Promise<void> =
 
     if (!booking || booking.paymentStatus !== 'refund_pending') {
       res.status(404).json({ message: 'No pending refund found for this booking' });
+      return;
+    }
+
+    if (booking.paymentMethod !== 'online') {
+      res.status(400).json({ message: 'Refunds are supported only for online payments' });
       return;
     }
 

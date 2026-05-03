@@ -1174,6 +1174,7 @@ const getRefunds = async (_req, res) => {
     try {
         const refunds = await Booking_1.default.find({
             status: 'cancelled',
+            paymentMethod: 'online',
             paymentStatus: { $in: ['refund_pending', 'refunded'] },
         })
             .populate('customer', 'fullName phone email')
@@ -1213,6 +1214,10 @@ const processRefund = async (req, res) => {
         const booking = await Booking_1.default.findById(req.params.bookingId);
         if (!booking || booking.paymentStatus !== 'refund_pending') {
             res.status(404).json({ message: 'No pending refund found for this booking' });
+            return;
+        }
+        if (booking.paymentMethod !== 'online') {
+            res.status(400).json({ message: 'Refunds are supported only for online payments' });
             return;
         }
         booking.paymentStatus = 'refunded';
@@ -1259,6 +1264,10 @@ const rejectRefund = async (req, res) => {
         const booking = await Booking_1.default.findById(req.params.bookingId);
         if (!booking || booking.paymentStatus !== 'refund_pending') {
             res.status(404).json({ message: 'No pending refund found for this booking' });
+            return;
+        }
+        if (booking.paymentMethod !== 'online') {
+            res.status(400).json({ message: 'Refunds are supported only for online payments' });
             return;
         }
         // Mark as refund rejected — payment stays as 'paid' (no refund given)

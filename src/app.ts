@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { type Request } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
@@ -38,7 +38,15 @@ app.use(cors({
 }));
 
 app.use(compression());
-app.use(express.json({ limit: `${env.BODY_LIMIT_MB}mb` }));
+app.use(express.json({
+  limit: `${env.BODY_LIMIT_MB}mb`,
+  verify: (req, _res, buf) => {
+    const expressReq = req as Request & { rawBody?: string };
+    if (expressReq.originalUrl?.startsWith('/api/booking/webhook/razorpay')) {
+      expressReq.rawBody = buf.toString('utf8');
+    }
+  },
+}));
 app.use(express.urlencoded({ extended: true, limit: `${env.URL_ENCODED_LIMIT_MB}mb` }));
 app.use(cookieParser());
 

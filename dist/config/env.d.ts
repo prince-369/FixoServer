@@ -39,6 +39,7 @@ interface EnvConfig {
     CLOUDINARY_API_SECRET: string;
     RAZORPAY_KEY_ID: string;
     RAZORPAY_KEY_SECRET: string;
+    RAZORPAY_WEBHOOK_SECRET: string;
     TWILIO_ACCOUNT_SID: string;
     TWILIO_AUTH_TOKEN: string;
     TWILIO_PHONE_NUMBER: string;

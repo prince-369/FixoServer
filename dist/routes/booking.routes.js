@@ -8,6 +8,8 @@ const validators_1 = require("../utils/validators");
 const booking_controller_1 = require("../controllers/booking.controller");
 const router = (0, express_1.Router)();
 const mutationGuard = (0, idempotency_middleware_1.idempotencyGuard)(20000);
+// Public webhook endpoint (no auth) for server-side payment reconciliation.
+router.post('/webhook/razorpay', booking_controller_1.handleRazorpayWebhook);
 router.use(auth_middleware_1.protect, (0, auth_middleware_1.authorize)('customer'));
 router.post('/', validators_1.createBookingValidation, error_middleware_1.handleValidationErrors, mutationGuard, booking_controller_1.createBooking);
 router.get('/:id/bids', booking_controller_1.getBookingBids);

@@ -208,7 +208,16 @@ const getTransactions = async (req, res) => {
             .populate({ path: 'booking', select: 'workDescription status amount cashSurcharge paymentMethod category', populate: { path: 'category', select: 'name' } })
             .populate('worker', 'fullName')
             .sort({ createdAt: -1 });
-        res.json({ transactions });
+        // Hide invalid legacy records where cancelled cash bookings were marked as paid.
+        const sanitizedTransactions = transactions.filter((txn) => {
+            if (txn.type !== 'booking_payment' || txn.status !== 'completed') {
+                return true;
+            }
+            const bookingDoc = txn.booking;
+            const isInvalidCancelledCashPayment = bookingDoc?.status === 'cancelled' && bookingDoc?.paymentMethod === 'cash';
+            return !isInvalidCancelledCashPayment;
+        });
+        res.json({ transactions: sanitizedTransactions });
     }
     catch (error) {
         console.error('Get transactions error:', error);
@@ -235,11 +244,26 @@ const cancelBooking = async (req, res) => {
             reason: reason || 'Customer cancelled',
             cancelledAt: new Date(),
         };
-        // If online payment was made, set refund pending
-        if (booking.paymentStatus === 'paid' && booking.paymentMethod === 'online') {
+        const isOnlinePaid = booking.paymentStatus === 'paid' && booking.paymentMethod === 'online';
+        // Only successful online payments enter refund flow.
+        if (isOnlinePaid) {
             booking.paymentStatus = 'refund_pending';
         }
+        else if (booking.paymentStatus === 'paid') {
+            // Legacy safety: cancelled non-online bookings should not stay marked as paid.
+            booking.paymentStatus = 'pending';
+            booking.refundDetails = undefined;
+        }
         await booking.save();
+        if (!isOnlinePaid) {
+            // Legacy safety: invalidate wrong booking payment entries for cancelled unpaid bookings.
+            await Transaction_1.default.updateMany({
+                booking: booking._id,
+                user: booking.customer,
+                type: 'booking_payment',
+                status: 'completed',
+            }, { $set: { status: 'failed' } });
+        }
         // Notify assigned worker if any
         if (booking.assignedWorker) {
             (0, socket_1.notifyUser)(booking.assignedWorker.toString(), 'booking_status_updated', {

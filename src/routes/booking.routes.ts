@@ -9,10 +9,14 @@ import {
   acceptBid,
   initiatePayment,
   verifyBookingPayment,
+  handleRazorpayWebhook,
 } from '../controllers/booking.controller';
 
 const router = Router();
 const mutationGuard = idempotencyGuard(20_000);
+
+// Public webhook endpoint (no auth) for server-side payment reconciliation.
+router.post('/webhook/razorpay', handleRazorpayWebhook);
 
 router.use(protect, authorize('customer'));
 

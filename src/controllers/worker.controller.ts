@@ -482,6 +482,41 @@ export const submitBid = async (req: Request, res: Response): Promise<void> => {
 
     const existingBid = await WorkBid.findOne({ booking: bookingId, worker: req.user!.id });
     if (existingBid) {
+      if (existingBid.status === 'rejected') {
+        existingBid.priceOffered = priceOffered;
+        existingBid.status = 'pending';
+        await existingBid.save();
+
+        if (booking.status === 'finding_workers') {
+          booking.status = 'bids_received';
+          await booking.save();
+
+          notifyUser(booking.customer.toString(), 'booking_status_updated', {
+            bookingId,
+            status: 'bids_received',
+          });
+        }
+
+        const worker = await Worker.findById(req.user!.id).select('fullName rating profileImage');
+        const customerId = booking.customer.toString();
+        notifyBookingRoom(bookingId, 'booking:new-bid', {
+          bookingId,
+          bid: { ...existingBid.toObject(), worker },
+        });
+
+        await sendNotification({
+          recipientId: customerId,
+          recipientModel: 'User',
+          type: 'new_bid',
+          title: 'New Bid Received',
+          message: `${worker?.fullName} offered ₹${priceOffered} for your service request.`,
+          data: { bookingId },
+        });
+
+        res.status(200).json({ message: 'Bid re-submitted', bid: existingBid });
+        return;
+      }
+
       res.status(400).json({ message: 'You already bid on this booking' });
       return;
     }
@@ -584,22 +619,42 @@ export const rejectBooking = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    // Reset booking to find new worker
-    booking.status = 'bids_received';
-    booking.assignedWorker = undefined;
-    booking.acceptedBid = undefined;
-    await booking.save();
-
-    // Reject the bid
+    // Reject the accepted worker's bid first.
     await WorkBid.findOneAndUpdate(
       { booking: booking._id, worker: req.user!.id },
       { status: 'rejected' }
     );
 
+    // Re-open previously rejected alternatives so customer is not stuck with no pending bids.
+    await WorkBid.updateMany(
+      {
+        booking: booking._id,
+        worker: { $ne: req.user!.id },
+        status: 'rejected',
+      },
+      { status: 'pending' }
+    );
+
+    const hasPendingBids = await WorkBid.exists({ booking: booking._id, status: 'pending' });
+
+    // Keep booking open in bids_received so workers can continue bidding even on older requests.
+    booking.status = 'bids_received';
+    booking.assignedWorker = undefined;
+    booking.acceptedBid = undefined;
+    booking.amount = 0;
+    booking.paymentMethod = undefined;
+    booking.paymentStatus = 'pending';
+    booking.completionPin = undefined;
+    await booking.save();
+
+    const customerMessage = hasPendingBids
+      ? 'Assigned worker rejected. Previous bids are available again.'
+      : 'Assigned worker rejected. Booking reopened for fresh bids.';
+
     notifyUser(booking.customer.toString(), 'booking_status_updated', {
       bookingId: booking._id,
       status: booking.status,
-      message: 'Assigned worker rejected. Looking for another worker.',
+      message: customerMessage,
     });
     notifyUser(req.user!.id, 'booking_status_updated', {
       bookingId: booking._id,
@@ -607,7 +662,7 @@ export const rejectBooking = async (req: Request, res: Response): Promise<void> 
       message: 'You rejected this booking.',
     });
 
-    res.json({ message: 'Booking rejected' });
+    res.json({ message: 'Booking rejected', booking });
   } catch (error) {
     console.error('Reject booking error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -737,7 +792,12 @@ export const completeWork = async (req: Request, res: Response): Promise<void> =
       return;
     }
 
+    const isCashBooking = booking.paymentMethod === 'cash';
+
     booking.status = 'completed';
+    if (isCashBooking) {
+      booking.paymentStatus = 'paid';
+    }
     await booking.save();
 
     const worker = await Worker.findById(req.user!.id);
@@ -771,6 +831,34 @@ export const completeWork = async (req: Request, res: Response): Promise<void> =
     worker.totalCommissionPaid += commission;
     await worker.save();
 
+    if (isCashBooking) {
+      const cashPaymentAmount = booking.amount + (booking.cashSurcharge || 100);
+      const existingCashPayment = await Transaction.findOne({
+        booking: booking._id,
+        type: 'booking_payment',
+        method: 'cash',
+      });
+
+      if (existingCashPayment) {
+        existingCashPayment.amount = cashPaymentAmount;
+        existingCashPayment.status = 'completed';
+        existingCashPayment.user = booking.customer;
+        existingCashPayment.worker = worker._id;
+        await existingCashPayment.save();
+      } else {
+        await Transaction.create({
+          tid: generateTID(),
+          booking: booking._id,
+          user: booking.customer,
+          worker: worker._id,
+          type: 'booking_payment',
+          amount: cashPaymentAmount,
+          method: 'cash',
+          status: 'completed',
+        });
+      }
+    }
+
     // Create earning transaction
     await Transaction.create({
       tid: generateTID(),
@@ -799,14 +887,13 @@ export const completeWork = async (req: Request, res: Response): Promise<void> =
 
     // Real-time: Notify customer that work is completed
     const customerId = booking.customer.toString();
-    notifyUser(customerId, 'booking_status_updated', {
+    const completionPayload = {
       bookingId: booking._id,
       status: 'completed',
-    });
-    notifyUser(req.user!.id, 'booking_status_updated', {
-      bookingId: booking._id,
-      status: 'completed',
-    });
+      paymentStatus: booking.paymentStatus,
+    };
+    notifyUser(customerId, 'booking_status_updated', completionPayload);
+    notifyUser(req.user!.id, 'booking_status_updated', completionPayload);
 
     await sendNotification({
       recipientId: customerId,

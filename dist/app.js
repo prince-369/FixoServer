@@ -38,7 +38,15 @@ app.use((0, cors_1.default)({
     credentials: true,
 }));
 app.use((0, compression_1.default)());
-app.use(express_1.default.json({ limit: `${env_1.default.BODY_LIMIT_MB}mb` }));
+app.use(express_1.default.json({
+    limit: `${env_1.default.BODY_LIMIT_MB}mb`,
+    verify: (req, _res, buf) => {
+        const expressReq = req;
+        if (expressReq.originalUrl?.startsWith('/api/booking/webhook/razorpay')) {
+            expressReq.rawBody = buf.toString('utf8');
+        }
+    },
+}));
 app.use(express_1.default.urlencoded({ extended: true, limit: `${env_1.default.URL_ENCODED_LIMIT_MB}mb` }));
 app.use((0, cookie_parser_1.default)());
 // Request tracing + slow/error request logs

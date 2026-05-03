@@ -44,6 +44,7 @@ Guidelines:
 | WEB_PUSH_PRIVATE_KEY | staging VAPID private key | production VAPID private key | Keep in secret manager |
 | WEB_PUSH_SUBJECT | mailto:staging-alerts@fixo.app | mailto:alerts@fixo.app | VAPID subject identity |
 | WEB_PUSH_TTL_SECONDS | 3600 | 3600 | Push delivery retention window |
+| RAZORPAY_WEBHOOK_SECRET | staging webhook secret | production webhook secret | Verify Razorpay webhook signatures |
 | METRICS_ENABLED | true | true | Prometheus metrics |
 | METRICS_ROUTE | /api/metrics | /api/metrics | Scrape route |
 | METRICS_AUTH_TOKEN | strong staging token | strong prod token | Required in internet-exposed setups |
@@ -60,6 +61,7 @@ Rotate immediately if any secret was ever committed or shared in plaintext:
 - JWT_SECRET
 - Cloudinary API secret
 - Razorpay secret
+- Razorpay webhook secret
 - Twilio auth token
 - SMTP app password
 - Google OAuth secret

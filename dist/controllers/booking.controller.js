@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.verifyBookingPayment = exports.initiatePayment = exports.acceptBid = exports.getBookingBids = exports.createBooking = void 0;
+exports.handleRazorpayWebhook = exports.verifyBookingPayment = exports.initiatePayment = exports.acceptBid = exports.getBookingBids = exports.createBooking = void 0;
 const Booking_1 = __importDefault(require("../models/Booking"));
 const WorkBid_1 = __importDefault(require("../models/WorkBid"));
 const Worker_1 = __importDefault(require("../models/Worker"));
@@ -12,6 +12,66 @@ const generatePin_1 = require("../utils/generatePin");
 const generateTID_1 = require("../utils/generateTID");
 const Transaction_1 = __importDefault(require("../models/Transaction"));
 const socket_1 = require("../socket");
+const RAZORPAY_SUCCESS_EVENTS = new Set(['payment.captured', 'order.paid']);
+const finalizeOnlineBookingPayment = async (booking, orderId, paymentId) => {
+    const alreadyFinalized = booking.paymentStatus === 'paid' && booking.status === 'payment_done';
+    booking.razorpayOrderId = orderId;
+    booking.razorpayPaymentId = paymentId;
+    booking.paymentStatus = 'paid';
+    booking.status = 'payment_done';
+    if (!booking.completionPin) {
+        booking.completionPin = (0, generatePin_1.generatePin)();
+    }
+    await booking.save();
+    const existingPayment = await Transaction_1.default.findOne({
+        booking: booking._id,
+        type: 'booking_payment',
+        method: 'online',
+    });
+    if (existingPayment) {
+        existingPayment.user = booking.customer;
+        existingPayment.worker = booking.assignedWorker;
+        existingPayment.amount = booking.amount;
+        existingPayment.razorpayPaymentId = paymentId;
+        existingPayment.razorpayOrderId = orderId;
+        existingPayment.status = 'completed';
+        await existingPayment.save();
+    }
+    else {
+        await Transaction_1.default.create({
+            tid: (0, generateTID_1.generateTID)(),
+            booking: booking._id,
+            user: booking.customer,
+            worker: booking.assignedWorker,
+            type: 'booking_payment',
+            amount: booking.amount,
+            method: 'online',
+            razorpayPaymentId: paymentId,
+            razorpayOrderId: orderId,
+            status: 'completed',
+        });
+    }
+    if (!alreadyFinalized && booking.assignedWorker) {
+        const customerId = booking.customer.toString();
+        const bookingStatusPayload = {
+            bookingId: booking._id,
+            status: 'payment_done',
+            paymentStatus: booking.paymentStatus,
+            paymentMethod: 'online',
+        };
+        (0, socket_1.notifyUser)(booking.assignedWorker.toString(), 'booking_status_updated', bookingStatusPayload);
+        (0, socket_1.notifyUser)(customerId, 'booking_status_updated', bookingStatusPayload);
+        await (0, socket_1.sendNotification)({
+            recipientId: booking.assignedWorker.toString(),
+            recipientModel: 'Worker',
+            type: 'payment_success',
+            title: 'Payment Received (Online)',
+            message: 'Online payment completed. You can proceed to the location.',
+            data: { bookingId: booking._id },
+        });
+    }
+    return { alreadyFinalized };
+};
 // ─── Create Booking ───
 const createBooking = async (req, res) => {
     try {
@@ -181,22 +241,12 @@ const initiatePayment = async (req, res) => {
         booking.paymentMethod = method;
         if (method === 'cash') {
             booking.cashSurcharge = 100;
-            booking.paymentStatus = 'paid';
+            // Cash is collected at completion, so keep it pending for now.
+            booking.paymentStatus = 'pending';
             booking.status = 'payment_done';
             booking.completionPin = (0, generatePin_1.generatePin)();
             await booking.save();
-            // Create cash payment transaction
-            await Transaction_1.default.create({
-                tid: (0, generateTID_1.generateTID)(),
-                booking: booking._id,
-                user: booking.customer,
-                worker: booking.assignedWorker,
-                type: 'booking_payment',
-                amount: booking.amount + 100,
-                method: 'cash',
-                status: 'completed',
-            });
-            // Real-time: Notify worker that payment is done
+            // Real-time: Notify worker that cash payment mode is selected
             if (booking.assignedWorker) {
                 const customerId = booking.customer.toString();
                 const bookingStatusPayload = {
@@ -211,13 +261,13 @@ const initiatePayment = async (req, res) => {
                     recipientId: booking.assignedWorker.toString(),
                     recipientModel: 'Worker',
                     type: 'payment_success',
-                    title: 'Payment Received (Cash)',
-                    message: 'Customer chose cash payment. You can proceed to the location.',
+                    title: 'Cash Payment Selected',
+                    message: 'Customer chose cash payment. Collect payment after completing the service.',
                     data: { bookingId: booking._id },
                 });
             }
             res.json({
-                message: `Cash payment selected. Total: ₹${booking.amount + 100} (includes ₹100 service fee). Your PIN: ${booking.completionPin}`,
+                message: `Cash payment selected. Total: ₹${booking.amount + 100} (includes ₹100 service fee). Payment will be marked paid after service completion. Your PIN: ${booking.completionPin}`,
                 booking,
                 pin: booking.completionPin,
                 totalAmount: booking.amount + 100,
@@ -260,46 +310,9 @@ const verifyBookingPayment = async (req, res) => {
             res.status(404).json({ message: 'Booking not found' });
             return;
         }
-        booking.razorpayPaymentId = razorpay_payment_id;
-        booking.paymentStatus = 'paid';
-        booking.status = 'payment_done';
-        booking.completionPin = (0, generatePin_1.generatePin)();
-        await booking.save();
-        // Create payment transaction
-        await Transaction_1.default.create({
-            tid: (0, generateTID_1.generateTID)(),
-            booking: booking._id,
-            user: booking.customer,
-            worker: booking.assignedWorker,
-            type: 'booking_payment',
-            amount: booking.amount,
-            method: 'online',
-            razorpayPaymentId: razorpay_payment_id,
-            razorpayOrderId: razorpay_order_id,
-            status: 'completed',
-        });
-        // Real-time: Notify worker that online payment is done
-        if (booking.assignedWorker) {
-            const customerId = booking.customer.toString();
-            const bookingStatusPayload = {
-                bookingId: booking._id,
-                status: 'payment_done',
-                paymentStatus: booking.paymentStatus,
-                paymentMethod: 'online',
-            };
-            (0, socket_1.notifyUser)(booking.assignedWorker.toString(), 'booking_status_updated', bookingStatusPayload);
-            (0, socket_1.notifyUser)(customerId, 'booking_status_updated', bookingStatusPayload);
-            await (0, socket_1.sendNotification)({
-                recipientId: booking.assignedWorker.toString(),
-                recipientModel: 'Worker',
-                type: 'payment_success',
-                title: 'Payment Received (Online)',
-                message: 'Online payment completed. You can proceed to the location.',
-                data: { bookingId: booking._id },
-            });
-        }
+        const { alreadyFinalized } = await finalizeOnlineBookingPayment(booking, razorpay_order_id, razorpay_payment_id);
         res.json({
-            message: 'Payment successful!',
+            message: alreadyFinalized ? 'Payment already verified.' : 'Payment successful!',
             pin: booking.completionPin,
             booking,
         });
@@ -310,4 +323,49 @@ const verifyBookingPayment = async (req, res) => {
     }
 };
 exports.verifyBookingPayment = verifyBookingPayment;
+// ─── Razorpay Webhook (server-side reconciliation) ───
+const handleRazorpayWebhook = async (req, res) => {
+    try {
+        const signature = req.header('x-razorpay-signature');
+        const rawBody = req.rawBody;
+        if (!signature || !rawBody) {
+            res.status(400).json({ message: 'Missing webhook signature or body' });
+            return;
+        }
+        const isValid = (0, payment_service_1.verifyWebhookSignature)(rawBody, signature);
+        if (!isValid) {
+            res.status(400).json({ message: 'Invalid webhook signature' });
+            return;
+        }
+        const body = req.body;
+        if (!RAZORPAY_SUCCESS_EVENTS.has(body.event || '')) {
+            res.status(200).json({ received: true, ignored: true });
+            return;
+        }
+        const paymentEntity = body.payload?.payment?.entity;
+        const orderEntity = body.payload?.order?.entity;
+        const orderId = paymentEntity?.order_id || orderEntity?.id;
+        const paymentId = paymentEntity?.id;
+        if (!orderId || !paymentId) {
+            res.status(200).json({ received: true, ignored: true });
+            return;
+        }
+        if (paymentEntity?.status && !['captured', 'authorized'].includes(paymentEntity.status)) {
+            res.status(200).json({ received: true, ignored: true });
+            return;
+        }
+        const booking = await Booking_1.default.findOne({ razorpayOrderId: orderId });
+        if (!booking) {
+            res.status(200).json({ received: true, ignored: true });
+            return;
+        }
+        const { alreadyFinalized } = await finalizeOnlineBookingPayment(booking, orderId, paymentId);
+        res.status(200).json({ received: true, reconciled: true, alreadyFinalized });
+    }
+    catch (error) {
+        console.error('Razorpay webhook error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.handleRazorpayWebhook = handleRazorpayWebhook;
 //# sourceMappingURL=booking.controller.js.map
