@@ -13,6 +13,7 @@ export type BookingStatus =
 export type PaymentMethod = 'online' | 'cash';
 export type PaymentStatus = 'pending' | 'paid' | 'refund_pending' | 'refunded';
 export type RefundStatus = 'pending' | 'completed';
+export type BookingTimeSlot = 'anytime' | 'morning' | 'afternoon' | 'evening';
 
 export interface IBooking extends Document {
   customer: mongoose.Types.ObjectId;
@@ -23,6 +24,7 @@ export interface IBooking extends Document {
     coordinates: number[];
     address: string;
   };
+  timeSlot?: BookingTimeSlot;
   status: BookingStatus;
   acceptedBid?: mongoose.Types.ObjectId;
   assignedWorker?: mongoose.Types.ObjectId;
@@ -66,6 +68,11 @@ const bookingSchema = new Schema<IBooking>(
       type: { type: String, enum: ['Point'], default: 'Point' },
       coordinates: { type: [Number], required: true },
       address: { type: String, required: true },
+    },
+    timeSlot: {
+      type: String,
+      enum: ['anytime', 'morning', 'afternoon', 'evening'],
+      default: 'anytime',
     },
     status: {
       type: String,

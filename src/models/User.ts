@@ -8,6 +8,8 @@ export interface IUser extends Document {
   googleId?: string;
   profileImage?: string;
   bio?: string;
+  isActive: boolean;
+  deletedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -21,11 +23,14 @@ const userSchema = new Schema<IUser>(
     googleId: { type: String, sparse: true },
     profileImage: { type: String, default: '' },
     bio: { type: String, default: '', maxlength: 500 },
+    isActive: { type: Boolean, default: true },
+    deletedAt: { type: Date },
   },
   { timestamps: true }
 );
 
 userSchema.index({ email: 1 });
 userSchema.index({ phone: 1 });
+userSchema.index({ isActive: 1 });
 
 export default mongoose.model<IUser>('User', userSchema);

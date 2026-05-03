@@ -75,7 +75,7 @@ const finalizeOnlineBookingPayment = async (booking, orderId, paymentId) => {
 // ─── Create Booking ───
 const createBooking = async (req, res) => {
     try {
-        const { category, workDescription, latitude, longitude, address } = req.body;
+        const { category, workDescription, latitude, longitude, address, timeSlot } = req.body;
         const coordinates = [longitude, latitude]; // MongoDB expects [lng, lat]
         const booking = await Booking_1.default.create({
             customer: req.user.id,
@@ -86,6 +86,7 @@ const createBooking = async (req, res) => {
                 coordinates,
                 address,
             },
+            timeSlot: timeSlot || 'anytime',
             status: 'finding_workers',
         });
         // Find matching active workers within 10km

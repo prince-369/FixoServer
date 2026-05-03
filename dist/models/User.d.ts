@@ -7,6 +7,8 @@ export interface IUser extends Document {
     googleId?: string;
     profileImage?: string;
     bio?: string;
+    isActive: boolean;
+    deletedAt?: Date;
     createdAt: Date;
     updatedAt: Date;
 }

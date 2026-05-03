@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { protect, authorize } from '../middlewares/auth.middleware';
+import { protect, authorize, verifyUser } from '../middlewares/auth.middleware';
 import { uploadSingle } from '../middlewares/upload.middleware';
 import { handleValidationErrors } from '../middlewares/error.middleware';
 import { idempotencyGuard } from '../middlewares/idempotency.middleware';
@@ -25,6 +25,7 @@ import {
   getHelpTicketDetail,
   appendHelpTicketMessage,
   escalateHelpTicket,
+  deleteAccount,
 } from '../controllers/customer.controller';
 
 const router = Router();
@@ -36,10 +37,11 @@ router.get('/categories/:id', getCategoryDetail);
 router.get('/banners', getBanners);
 
 // Protected customer routes
-router.use(protect, authorize('customer'));
+router.use(protect, authorize('customer'), verifyUser);
 
 router.get('/profile', getProfile);
 router.put('/profile', uploadSingle, updateProfile);
+router.delete('/account', mutationGuard, deleteAccount);
 router.get('/bookings', getBookings);
 router.get('/bookings/:id', getBookingDetail);
 router.get('/transactions', getTransactions);

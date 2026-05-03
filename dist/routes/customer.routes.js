@@ -12,9 +12,10 @@ router.get('/categories', customer_controller_1.getCategories);
 router.get('/categories/:id', customer_controller_1.getCategoryDetail);
 router.get('/banners', customer_controller_1.getBanners);
 // Protected customer routes
-router.use(auth_middleware_1.protect, (0, auth_middleware_1.authorize)('customer'));
+router.use(auth_middleware_1.protect, (0, auth_middleware_1.authorize)('customer'), auth_middleware_1.verifyUser);
 router.get('/profile', customer_controller_1.getProfile);
 router.put('/profile', upload_middleware_1.uploadSingle, customer_controller_1.updateProfile);
+router.delete('/account', mutationGuard, customer_controller_1.deleteAccount);
 router.get('/bookings', customer_controller_1.getBookings);
 router.get('/bookings/:id', customer_controller_1.getBookingDetail);
 router.get('/transactions', customer_controller_1.getTransactions);

@@ -7,6 +7,10 @@ import Banner from '../models/Banner';
 import Notification from '../models/Notification';
 import HelpTicket from '../models/HelpTicket';
 import ChatbotQA from '../models/ChatbotQA';
+import RefreshToken from '../models/RefreshToken';
+import PasswordResetToken from '../models/PasswordResetToken';
+import OtpCode from '../models/OtpCode';
+import PushSubscription from '../models/PushSubscription';
 import { generateTicketNumber } from '../services/ticketNumber.service';
 import { uploadBufferToCloudinary } from '../services/cloudinary.service';
 import { notifyRole, notifyUser, sendNotification, sendAdminNotification } from '../socket';
@@ -46,6 +50,58 @@ export const updateProfile = async (req: Request, res: Response): Promise<void> 
     res.json({ message: 'Profile updated', user });
   } catch (error) {
     console.error('Update profile error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─── Delete Customer Account (Self-Serve) ───
+export const deleteAccount = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const user = await User.findById(req.user!.id).select('phone isActive');
+    if (!user || user.isActive === false) {
+      res.status(404).json({ message: 'User not found' });
+      return;
+    }
+
+    const activeBookingsCount = await Booking.countDocuments({
+      customer: req.user!.id,
+      status: { $nin: ['completed', 'cancelled'] },
+    });
+
+    if (activeBookingsCount > 0) {
+      res.status(400).json({
+        message: 'You have active bookings. Complete or cancel them before deleting your account.',
+      });
+      return;
+    }
+
+    const oldPhone = user.phone;
+    const stamp = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    const anonymizedPhone = `9${stamp.slice(-9)}`;
+
+    user.fullName = 'Deleted User';
+    user.email = `deleted_${user._id}_${stamp}@deleted.fixo.local`;
+    user.phone = anonymizedPhone;
+    user.googleId = undefined;
+    user.profileImage = '';
+    user.bio = 'Account deleted by user';
+    user.isActive = false;
+    user.deletedAt = new Date();
+    await user.save();
+
+    await Promise.all([
+      RefreshToken.deleteMany({ userId: user._id, role: 'customer' }),
+      PasswordResetToken.deleteMany({ userId: user._id, role: 'customer' }),
+      OtpCode.deleteMany({ phone: oldPhone, purpose: 'password-reset' }),
+      PushSubscription.updateMany(
+        { recipient: user._id, recipientModel: 'User' },
+        { $set: { isActive: false } }
+      ),
+    ]);
+
+    res.json({ message: 'Account deleted successfully' });
+  } catch (error) {
+    console.error('Delete account error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -297,7 +353,7 @@ export const submitRefundDetails = async (req: Request, res: Response): Promise<
 
     await booking.save();
 
-    res.json({ message: 'Refund details submitted. Refund will be processed within 24 hours.' });
+    res.json({ message: 'Refund details submitted. Refund will be processed within 3-10 business days.' });
   } catch (error) {
     console.error('Submit refund details error:', error);
     res.status(500).json({ message: 'Server error' });

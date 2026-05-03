@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { protect, authorize } from '../middlewares/auth.middleware';
+import { protect, authorize, verifyUser } from '../middlewares/auth.middleware';
 import { handleValidationErrors } from '../middlewares/error.middleware';
 import { idempotencyGuard } from '../middlewares/idempotency.middleware';
 import { createBookingValidation } from '../utils/validators';
@@ -18,7 +18,7 @@ const mutationGuard = idempotencyGuard(20_000);
 // Public webhook endpoint (no auth) for server-side payment reconciliation.
 router.post('/webhook/razorpay', handleRazorpayWebhook);
 
-router.use(protect, authorize('customer'));
+router.use(protect, authorize('customer'), verifyUser);
 
 router.post('/', createBookingValidation, handleValidationErrors, mutationGuard, createBooking);
 router.get('/:id/bids', getBookingBids);

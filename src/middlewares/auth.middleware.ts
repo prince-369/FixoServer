@@ -55,9 +55,11 @@ export const verifyUser = async (req: Request, res: Response, next: NextFunction
 
     let userExists = false;
     switch (req.user.role) {
-      case 'customer':
-        userExists = !!(await User.findById(req.user.id));
+      case 'customer': {
+        const customer = await User.findById(req.user.id).select('isActive');
+        userExists = !!customer && customer.isActive !== false;
         break;
+      }
       case 'worker':
         userExists = !!(await Worker.findById(req.user.id));
         break;

@@ -118,13 +118,28 @@ const parseRouteEnv = (name: keyof NodeJS.ProcessEnv, fallback: string): string 
   return raw.startsWith('/') ? raw : `/${raw}`;
 };
 
+const getEnvOrDefault = (
+  name: keyof NodeJS.ProcessEnv,
+  fallback: string,
+  options?: { requiredInProduction?: boolean }
+): string => {
+  const raw = process.env[name]?.trim();
+  if (raw) return raw;
+
+  if (options?.requiredInProduction && nodeEnv === 'production') {
+    throw new Error(`Missing required environment variable in production: ${name}`);
+  }
+
+  return fallback;
+};
+
 const nodeEnv = (process.env.NODE_ENV as NodeEnv) || 'development';
-const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
+const clientUrl = getEnvOrDefault('CLIENT_URL', 'http://localhost:3000', { requiredInProduction: true });
 
 const env: EnvConfig = {
   NODE_ENV: nodeEnv,
   PORT: parseInt(process.env.PORT || '5000', 10),
-  MONGODB_URI: process.env.MONGODB_URI || 'mongodb://localhost:27017/fixo',
+  MONGODB_URI: getEnvOrDefault('MONGODB_URI', 'mongodb://localhost:27017/fixo', { requiredInProduction: true }),
   MONGODB_MAX_POOL_SIZE: parseNumberEnv('MONGODB_MAX_POOL_SIZE', 120, { min: 10, max: 1000 }),
   MONGODB_MIN_POOL_SIZE: parseNumberEnv('MONGODB_MIN_POOL_SIZE', 10, { min: 0, max: 200 }),
   MONGODB_SERVER_SELECTION_TIMEOUT_MS: parseNumberEnv('MONGODB_SERVER_SELECTION_TIMEOUT_MS', 10_000, { min: 1_000 }),
@@ -179,7 +194,7 @@ const env: EnvConfig = {
   MAPCN_GEOCODE_URL: process.env.MAPCN_GEOCODE_URL || 'https://nominatim.openstreetmap.org/search',
   MAPCN_REVERSE_GEOCODE_URL: process.env.MAPCN_REVERSE_GEOCODE_URL || 'https://nominatim.openstreetmap.org/reverse',
   MAPCN_ROUTING_URL: process.env.MAPCN_ROUTING_URL || 'https://router.project-osrm.org/route/v1/driving',
-  JOB_STALE_BOOKING_MINUTES: parseNumberEnv('JOB_STALE_BOOKING_MINUTES', 3, { min: 1, max: 60 }),
+  JOB_STALE_BOOKING_MINUTES: parseNumberEnv('JOB_STALE_BOOKING_MINUTES', 30, { min: 1, max: 120 }),
   JOB_CLEANUP_INTERVAL_MS: parseNumberEnv('JOB_CLEANUP_INTERVAL_MS', 60_000, { min: 5_000 }),
 };
 

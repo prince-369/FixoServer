@@ -11,6 +11,7 @@ import { uploadBufferToCloudinary } from '../services/cloudinary.service';
 import { generateTID } from '../utils/generateTID';
 import { generateTicketNumber } from '../services/ticketNumber.service';
 import { createDuesPaymentOrder, verifyPayment } from '../services/payment.service';
+import env from '../config/env';
 import { notifyUser, notifyBookingRoom, notifyRole, sendNotification, sendAdminNotification } from '../socket';
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -353,11 +354,11 @@ export const getWorkRequests = async (req: Request, res: Response): Promise<void
     }
 
     // 1) Available bookings — in worker's categories + 10km radius
-    // Auto-expire: only show 'finding_workers' bookings created within last 3 minutes
-    const threeMinutesAgo = new Date(Date.now() - 3 * 60 * 1000);
+    // Show finding_workers jobs within the same stale-window used by cleanup.
+    const findingWorkersSince = new Date(Date.now() - env.JOB_STALE_BOOKING_MINUTES * 60 * 1000);
     const availableBookings = await Booking.find({
       $or: [
-        { status: 'finding_workers', createdAt: { $gte: threeMinutesAgo } },
+        { status: 'finding_workers', createdAt: { $gte: findingWorkersSince } },
         { status: 'bids_received' },
       ],
       category: { $in: worker.categories },
@@ -1058,8 +1059,13 @@ export const requestWithdrawal = async (req: Request, res: Response): Promise<vo
       return;
     }
 
-    if (!worker.bankDetails?.accountNumber) {
-      res.status(400).json({ message: 'Please add bank details first' });
+    if (
+      !worker.bankDetails?.holderName ||
+      !worker.bankDetails?.bankName ||
+      !worker.bankDetails?.accountNumber ||
+      !worker.bankDetails?.ifscCode
+    ) {
+      res.status(400).json({ message: 'Please complete bank details first' });
       return;
     }
 

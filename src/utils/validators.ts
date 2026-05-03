@@ -53,6 +53,7 @@ export const resetPasswordValidation = [
 export const createBookingValidation = [
   body('category').isMongoId().withMessage('Valid category ID is required'),
   body('workDescription').trim().notEmpty().withMessage('Work description is required'),
+  body('timeSlot').optional().isIn(['anytime', 'morning', 'afternoon', 'evening']).withMessage('Invalid time slot'),
   body('latitude').isFloat({ min: -90, max: 90 }).withMessage('Valid latitude is required'),
   body('longitude').isFloat({ min: -180, max: 180 }).withMessage('Valid longitude is required'),
   body('address').trim().notEmpty().withMessage('Address is required'),

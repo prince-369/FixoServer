@@ -15,6 +15,23 @@ import { uploadBufferToCloudinary } from '../services/cloudinary.service';
 const REFRESH_TOKEN_DAYS = 7;
 const EMAIL_RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
 const OTP_RESET_TOKEN_TTL_MS = 10 * 60 * 1000;
+const REFRESH_COOKIE_MAX_AGE_MS = REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000;
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+
+const refreshCookieOptions = {
+  httpOnly: true,
+  secure: IS_PRODUCTION,
+  sameSite: IS_PRODUCTION ? 'none' as const : 'lax' as const,
+  maxAge: REFRESH_COOKIE_MAX_AGE_MS,
+  path: '/',
+};
+
+const refreshCookieClearOptions = {
+  httpOnly: true,
+  secure: IS_PRODUCTION,
+  sameSite: IS_PRODUCTION ? 'none' as const : 'lax' as const,
+  path: '/',
+};
 
 type PasswordResetRole = 'customer' | 'worker';
 
@@ -96,14 +113,8 @@ const issueTokens = async (res: Response, userId: string, role: 'customer' | 'wo
     expiresAt: new Date(Date.now() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000),
   });
 
-  // Set refresh token as httpOnly cookie
-  res.cookie('refreshToken', refreshToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000,
-    path: '/',
-  });
+  // For Vercel client + Render server cross-site auth, production cookie must be SameSite=None; Secure.
+  res.cookie('refreshToken', refreshToken, refreshCookieOptions);
 
   return accessToken;
 };
@@ -169,6 +180,11 @@ export const googleAuthCustomer = async (req: Request, res: Response): Promise<v
     let user = await User.findOne({ $or: [{ googleId }, { email }] });
 
     if (user) {
+      if (user.isActive === false) {
+        res.status(403).json({ message: 'This account has been deleted. Please register again.' });
+        return;
+      }
+
       if (!user.googleId) {
         user.googleId = googleId;
         await user.save();
@@ -250,6 +266,11 @@ export const loginCustomer = async (req: Request, res: Response): Promise<void> 
     const user = await User.findOne(query).select('+password');
     if (!user) {
       res.status(401).json({ message: 'Invalid credentials' });
+      return;
+    }
+
+    if (user.isActive === false) {
+      res.status(403).json({ message: 'This account has been deleted. Please register again.' });
       return;
     }
 
@@ -563,6 +584,10 @@ export const getMe = async (req: Request, res: Response): Promise<void> => {
     switch (req.user.role) {
       case 'customer': {
         const user = await User.findById(req.user.id);
+        if (!user || user.isActive === false) {
+          res.status(401).json({ message: 'User no longer exists' });
+          return;
+        }
         res.json({ role: 'customer', user });
         break;
       }
@@ -595,9 +620,19 @@ export const refresh = async (req: Request, res: Response): Promise<void> => {
     const stored = await RefreshToken.findOne({ token });
     if (!stored || stored.expiresAt < new Date()) {
       if (stored) await stored.deleteOne();
-      res.clearCookie('refreshToken', { path: '/' });
+      res.clearCookie('refreshToken', refreshCookieClearOptions);
       res.status(401).json({ message: 'Invalid or expired refresh token' });
       return;
+    }
+
+    if (stored.role === 'customer') {
+      const customer = await User.findById(stored.userId).select('isActive');
+      if (!customer || customer.isActive === false) {
+        await stored.deleteOne();
+        res.clearCookie('refreshToken', refreshCookieClearOptions);
+        res.status(401).json({ message: 'User no longer exists' });
+        return;
+      }
     }
 
     const accessToken = generateAccessToken({ id: stored.userId.toString(), role: stored.role });
@@ -616,11 +651,11 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
     if (token) {
       await RefreshToken.deleteOne({ token });
     }
-    res.clearCookie('refreshToken', { path: '/' });
+    res.clearCookie('refreshToken', refreshCookieClearOptions);
     res.json({ message: 'Logged out' });
   } catch (error) {
     console.error('Logout error:', error);
-    res.clearCookie('refreshToken', { path: '/' });
+    res.clearCookie('refreshToken', refreshCookieClearOptions);
     res.json({ message: 'Logged out' });
   }
 };

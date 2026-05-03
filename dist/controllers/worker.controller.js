@@ -16,6 +16,7 @@ const cloudinary_service_1 = require("../services/cloudinary.service");
 const generateTID_1 = require("../utils/generateTID");
 const ticketNumber_service_1 = require("../services/ticketNumber.service");
 const payment_service_1 = require("../services/payment.service");
+const env_1 = __importDefault(require("../config/env"));
 const socket_1 = require("../socket");
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // ─── Get Worker Profile ───
@@ -335,11 +336,11 @@ const getWorkRequests = async (req, res) => {
             return;
         }
         // 1) Available bookings — in worker's categories + 10km radius
-        // Auto-expire: only show 'finding_workers' bookings created within last 3 minutes
-        const threeMinutesAgo = new Date(Date.now() - 3 * 60 * 1000);
+        // Show finding_workers jobs within the same stale-window used by cleanup.
+        const findingWorkersSince = new Date(Date.now() - env_1.default.JOB_STALE_BOOKING_MINUTES * 60 * 1000);
         const availableBookings = await Booking_1.default.find({
             $or: [
-                { status: 'finding_workers', createdAt: { $gte: threeMinutesAgo } },
+                { status: 'finding_workers', createdAt: { $gte: findingWorkersSince } },
                 { status: 'bids_received' },
             ],
             category: { $in: worker.categories },
@@ -963,8 +964,11 @@ const requestWithdrawal = async (req, res) => {
             res.status(404).json({ message: 'Worker not found' });
             return;
         }
-        if (!worker.bankDetails?.accountNumber) {
-            res.status(400).json({ message: 'Please add bank details first' });
+        if (!worker.bankDetails?.holderName ||
+            !worker.bankDetails?.bankName ||
+            !worker.bankDetails?.accountNumber ||
+            !worker.bankDetails?.ifscCode) {
+            res.status(400).json({ message: 'Please complete bank details first' });
             return;
         }
         if (worker.dues > 0) {

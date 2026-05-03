@@ -4,8 +4,8 @@ import env from '../config/env';
 
 /**
  * Auto-cancel stale bookings that are still in 'finding_workers' status
- * after 3 minutes. This cleans up abandoned requests where the customer
- * left or went offline without any worker bidding.
+ * after the configured stale window. This cleans up abandoned requests
+ * where the customer left or went offline without any worker bidding.
  *
  * Runs every 60 seconds via setInterval in server.ts
  */

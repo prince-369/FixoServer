@@ -49,7 +49,7 @@ Guidelines:
 | METRICS_ROUTE | /api/metrics | /api/metrics | Scrape route |
 | METRICS_AUTH_TOKEN | strong staging token | strong prod token | Required in internet-exposed setups |
 | METRICS_SERVICE_NAME | fixo-server-staging | fixo-server | Metric labels |
-| JOB_STALE_BOOKING_MINUTES | 3 | 3 | Auto cleanup rule |
+| JOB_STALE_BOOKING_MINUTES | 30 | 30 | Auto cleanup rule |
 | JOB_CLEANUP_INTERVAL_MS | 60000 | 30000 | Sweep frequency |
 | MAPCN_GEOCODE_URL | https://nominatim.openstreetmap.org/search | https://nominatim.openstreetmap.org/search | Prefer paid provider at high scale |
 | MAPCN_REVERSE_GEOCODE_URL | https://nominatim.openstreetmap.org/reverse | https://nominatim.openstreetmap.org/reverse | Prefer paid provider at high scale |

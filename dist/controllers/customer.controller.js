@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.escalateHelpTicket = exports.appendHelpTicketMessage = exports.getHelpTicketDetail = exports.getHelpTickets = exports.createHelpTicket = exports.getChatbotQA = exports.deleteNotification = exports.markAllNotificationsRead = exports.markNotificationRead = exports.getNotifications = exports.submitReview = exports.submitRefundDetails = exports.cancelBooking = exports.getTransactions = exports.getBookingDetail = exports.getBookings = exports.getBanners = exports.getCategoryDetail = exports.getCategories = exports.updateProfile = exports.getProfile = void 0;
+exports.escalateHelpTicket = exports.appendHelpTicketMessage = exports.getHelpTicketDetail = exports.getHelpTickets = exports.createHelpTicket = exports.getChatbotQA = exports.deleteNotification = exports.markAllNotificationsRead = exports.markNotificationRead = exports.getNotifications = exports.submitReview = exports.submitRefundDetails = exports.cancelBooking = exports.getTransactions = exports.getBookingDetail = exports.getBookings = exports.getBanners = exports.getCategoryDetail = exports.getCategories = exports.deleteAccount = exports.updateProfile = exports.getProfile = void 0;
 const User_1 = __importDefault(require("../models/User"));
 const Booking_1 = __importDefault(require("../models/Booking"));
 const Transaction_1 = __importDefault(require("../models/Transaction"));
@@ -45,6 +45,10 @@ const Banner_1 = __importDefault(require("../models/Banner"));
 const Notification_1 = __importDefault(require("../models/Notification"));
 const HelpTicket_1 = __importDefault(require("../models/HelpTicket"));
 const ChatbotQA_1 = __importDefault(require("../models/ChatbotQA"));
+const RefreshToken_1 = __importDefault(require("../models/RefreshToken"));
+const PasswordResetToken_1 = __importDefault(require("../models/PasswordResetToken"));
+const OtpCode_1 = __importDefault(require("../models/OtpCode"));
+const PushSubscription_1 = __importDefault(require("../models/PushSubscription"));
 const ticketNumber_service_1 = require("../services/ticketNumber.service");
 const cloudinary_service_1 = require("../services/cloudinary.service");
 const socket_1 = require("../socket");
@@ -87,6 +91,50 @@ const updateProfile = async (req, res) => {
     }
 };
 exports.updateProfile = updateProfile;
+// ─── Delete Customer Account (Self-Serve) ───
+const deleteAccount = async (req, res) => {
+    try {
+        const user = await User_1.default.findById(req.user.id).select('phone isActive');
+        if (!user || user.isActive === false) {
+            res.status(404).json({ message: 'User not found' });
+            return;
+        }
+        const activeBookingsCount = await Booking_1.default.countDocuments({
+            customer: req.user.id,
+            status: { $nin: ['completed', 'cancelled'] },
+        });
+        if (activeBookingsCount > 0) {
+            res.status(400).json({
+                message: 'You have active bookings. Complete or cancel them before deleting your account.',
+            });
+            return;
+        }
+        const oldPhone = user.phone;
+        const stamp = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+        const anonymizedPhone = `9${stamp.slice(-9)}`;
+        user.fullName = 'Deleted User';
+        user.email = `deleted_${user._id}_${stamp}@deleted.fixo.local`;
+        user.phone = anonymizedPhone;
+        user.googleId = undefined;
+        user.profileImage = '';
+        user.bio = 'Account deleted by user';
+        user.isActive = false;
+        user.deletedAt = new Date();
+        await user.save();
+        await Promise.all([
+            RefreshToken_1.default.deleteMany({ userId: user._id, role: 'customer' }),
+            PasswordResetToken_1.default.deleteMany({ userId: user._id, role: 'customer' }),
+            OtpCode_1.default.deleteMany({ phone: oldPhone, purpose: 'password-reset' }),
+            PushSubscription_1.default.updateMany({ recipient: user._id, recipientModel: 'User' }, { $set: { isActive: false } }),
+        ]);
+        res.json({ message: 'Account deleted successfully' });
+    }
+    catch (error) {
+        console.error('Delete account error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.deleteAccount = deleteAccount;
 // ─── Get Categories (Public) ───
 const getCategories = async (_req, res) => {
     try {
@@ -319,7 +367,7 @@ const submitRefundDetails = async (req, res) => {
             status: 'pending',
         };
         await booking.save();
-        res.json({ message: 'Refund details submitted. Refund will be processed within 24 hours.' });
+        res.json({ message: 'Refund details submitted. Refund will be processed within 3-10 business days.' });
     }
     catch (error) {
         console.error('Submit refund details error:', error);

@@ -43,6 +43,11 @@ const bookingSchema = new mongoose_1.Schema({
         coordinates: { type: [Number], required: true },
         address: { type: String, required: true },
     },
+    timeSlot: {
+        type: String,
+        enum: ['anytime', 'morning', 'afternoon', 'evening'],
+        default: 'anytime',
+    },
     status: {
         type: String,
         enum: ['finding_workers', 'bids_received', 'worker_accepted', 'worker_approved', 'payment_done', 'in_progress', 'completed', 'cancelled'],

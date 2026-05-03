@@ -19,6 +19,21 @@ const cloudinary_service_1 = require("../services/cloudinary.service");
 const REFRESH_TOKEN_DAYS = 7;
 const EMAIL_RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
 const OTP_RESET_TOKEN_TTL_MS = 10 * 60 * 1000;
+const REFRESH_COOKIE_MAX_AGE_MS = REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000;
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const refreshCookieOptions = {
+    httpOnly: true,
+    secure: IS_PRODUCTION,
+    sameSite: IS_PRODUCTION ? 'none' : 'lax',
+    maxAge: REFRESH_COOKIE_MAX_AGE_MS,
+    path: '/',
+};
+const refreshCookieClearOptions = {
+    httpOnly: true,
+    secure: IS_PRODUCTION,
+    sameSite: IS_PRODUCTION ? 'none' : 'lax',
+    path: '/',
+};
 // Strong password regex: min 8 chars, 1 uppercase, 1 lowercase, 1 digit, 1 special char
 const STRONG_PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]).{8,}$/;
 const validateStrongPassword = (password) => {
@@ -79,14 +94,8 @@ const issueTokens = async (res, userId, role) => {
         token: refreshToken,
         expiresAt: new Date(Date.now() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000),
     });
-    // Set refresh token as httpOnly cookie
-    res.cookie('refreshToken', refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000,
-        path: '/',
-    });
+    // For Vercel client + Render server cross-site auth, production cookie must be SameSite=None; Secure.
+    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
     return accessToken;
 };
 // ─── Customer Registration ───
@@ -139,6 +148,10 @@ const googleAuthCustomer = async (req, res) => {
         const { email, name, sub: googleId, picture } = googleRes.data;
         let user = await User_1.default.findOne({ $or: [{ googleId }, { email }] });
         if (user) {
+            if (user.isActive === false) {
+                res.status(403).json({ message: 'This account has been deleted. Please register again.' });
+                return;
+            }
             if (!user.googleId) {
                 user.googleId = googleId;
                 await user.save();
@@ -215,6 +228,10 @@ const loginCustomer = async (req, res) => {
         const user = await User_1.default.findOne(query).select('+password');
         if (!user) {
             res.status(401).json({ message: 'Invalid credentials' });
+            return;
+        }
+        if (user.isActive === false) {
+            res.status(403).json({ message: 'This account has been deleted. Please register again.' });
             return;
         }
         if (!user.password) {
@@ -505,6 +522,10 @@ const getMe = async (req, res) => {
         switch (req.user.role) {
             case 'customer': {
                 const user = await User_1.default.findById(req.user.id);
+                if (!user || user.isActive === false) {
+                    res.status(401).json({ message: 'User no longer exists' });
+                    return;
+                }
                 res.json({ role: 'customer', user });
                 break;
             }
@@ -538,9 +559,18 @@ const refresh = async (req, res) => {
         if (!stored || stored.expiresAt < new Date()) {
             if (stored)
                 await stored.deleteOne();
-            res.clearCookie('refreshToken', { path: '/' });
+            res.clearCookie('refreshToken', refreshCookieClearOptions);
             res.status(401).json({ message: 'Invalid or expired refresh token' });
             return;
+        }
+        if (stored.role === 'customer') {
+            const customer = await User_1.default.findById(stored.userId).select('isActive');
+            if (!customer || customer.isActive === false) {
+                await stored.deleteOne();
+                res.clearCookie('refreshToken', refreshCookieClearOptions);
+                res.status(401).json({ message: 'User no longer exists' });
+                return;
+            }
         }
         const accessToken = (0, generateToken_1.generateAccessToken)({ id: stored.userId.toString(), role: stored.role });
         res.json({ accessToken, role: stored.role });
@@ -558,12 +588,12 @@ const logout = async (req, res) => {
         if (token) {
             await RefreshToken_1.default.deleteOne({ token });
         }
-        res.clearCookie('refreshToken', { path: '/' });
+        res.clearCookie('refreshToken', refreshCookieClearOptions);
         res.json({ message: 'Logged out' });
     }
     catch (error) {
         console.error('Logout error:', error);
-        res.clearCookie('refreshToken', { path: '/' });
+        res.clearCookie('refreshToken', refreshCookieClearOptions);
         res.json({ message: 'Logged out' });
     }
 };

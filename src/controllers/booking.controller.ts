@@ -101,7 +101,7 @@ const finalizeOnlineBookingPayment = async (
 // ─── Create Booking ───
 export const createBooking = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { category, workDescription, latitude, longitude, address } = req.body;
+    const { category, workDescription, latitude, longitude, address, timeSlot } = req.body;
     const coordinates = [longitude, latitude]; // MongoDB expects [lng, lat]
 
     const booking = await Booking.create({
@@ -113,6 +113,7 @@ export const createBooking = async (req: Request, res: Response): Promise<void> 
         coordinates,
         address,
       },
+      timeSlot: timeSlot || 'anytime',
       status: 'finding_workers',
     });
 

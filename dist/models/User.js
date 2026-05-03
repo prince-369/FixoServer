@@ -42,8 +42,11 @@ const userSchema = new mongoose_1.Schema({
     googleId: { type: String, sparse: true },
     profileImage: { type: String, default: '' },
     bio: { type: String, default: '', maxlength: 500 },
+    isActive: { type: Boolean, default: true },
+    deletedAt: { type: Date },
 }, { timestamps: true });
 userSchema.index({ email: 1 });
 userSchema.index({ phone: 1 });
+userSchema.index({ isActive: 1 });
 exports.default = mongoose_1.default.model('User', userSchema);
 //# sourceMappingURL=User.js.map

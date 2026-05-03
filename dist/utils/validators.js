@@ -49,6 +49,7 @@ exports.resetPasswordValidation = [
 exports.createBookingValidation = [
     (0, express_validator_1.body)('category').isMongoId().withMessage('Valid category ID is required'),
     (0, express_validator_1.body)('workDescription').trim().notEmpty().withMessage('Work description is required'),
+    (0, express_validator_1.body)('timeSlot').optional().isIn(['anytime', 'morning', 'afternoon', 'evening']).withMessage('Invalid time slot'),
     (0, express_validator_1.body)('latitude').isFloat({ min: -90, max: 90 }).withMessage('Valid latitude is required'),
     (0, express_validator_1.body)('longitude').isFloat({ min: -180, max: 180 }).withMessage('Valid longitude is required'),
     (0, express_validator_1.body)('address').trim().notEmpty().withMessage('Address is required'),
