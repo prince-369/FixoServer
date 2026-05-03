@@ -811,8 +811,12 @@ export const completeWork = async (req: Request, res: Response): Promise<void> =
 
     if (booking.paymentMethod === 'online') {
       // Online: 20% commission, worker gets 80%
-      commission = Math.round(booking.amount * 0.20);
-      workerEarning = booking.amount - commission;
+      const amountInPaise = Math.round(booking.amount * 100);
+      const commissionInPaise = Math.round(amountInPaise * 0.20);
+      const workerEarningInPaise = amountInPaise - commissionInPaise;
+
+      commission = commissionInPaise / 100;
+      workerEarning = workerEarningInPaise / 100;
       worker.balance += workerEarning;
     } else {
       // Cash: NO commission — worker keeps 100% of bid amount in hand
