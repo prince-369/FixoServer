@@ -1,6 +1,7 @@
 import { Server as SocketIOServer } from 'socket.io';
 import { Server as HTTPServer } from 'http';
 import Redis from 'ioredis';
+import type { RedisOptions } from 'ioredis';
 import { createAdapter } from '@socket.io/redis-adapter';
 import env from '../config/env';
 import Notification from '../models/Notification';
@@ -18,6 +19,39 @@ let io!: SocketIOServer;
 let isSocketInitialized = false;
 let redisPubClient: Redis | null = null;
 let redisSubClient: Redis | null = null;
+
+const buildRedisOptions = (redisUrl: string): RedisOptions => {
+  const options: RedisOptions = {
+    lazyConnect: true,
+    connectTimeout: 10_000,
+    maxRetriesPerRequest: 1,
+    enableOfflineQueue: false,
+  };
+
+  if (redisUrl.startsWith('rediss://')) {
+    options.tls = {};
+  }
+
+  return options;
+};
+
+const toAlternateRedisScheme = (redisUrl: string): string | null => {
+  if (redisUrl.startsWith('rediss://')) {
+    return `redis://${redisUrl.slice('rediss://'.length)}`;
+  }
+  if (redisUrl.startsWith('redis://')) {
+    return `rediss://${redisUrl.slice('redis://'.length)}`;
+  }
+  return null;
+};
+
+const isTlsPacketLengthError = (error: unknown): boolean => {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.message.includes('ERR_SSL_PACKET_LENGTH_TOO_LONG') ||
+    error.message.toLowerCase().includes('packet length too long')
+  );
+};
 
 // Track connected users: { socketId: { userId, role } }
 const connectedUsers = new Map<string, { userId: string; role: string }>();
@@ -59,13 +93,8 @@ const deleteEkycNotifications = async (workerId: string) => {
 const setupSocketRedisAdapter = async (): Promise<void> => {
   if (!env.REDIS_URL || !isSocketInitialized) return;
 
-  try {
-    redisPubClient = new Redis(env.REDIS_URL, {
-      lazyConnect: true,
-      connectTimeout: 10_000,
-      maxRetriesPerRequest: 1,
-      enableOfflineQueue: false,
-    });
+  const connectAdapterWithUrl = async (redisUrl: string): Promise<void> => {
+    redisPubClient = new Redis(redisUrl, buildRedisOptions(redisUrl));
     redisSubClient = redisPubClient.duplicate();
 
     redisPubClient.on('error', (error) => {
@@ -77,11 +106,9 @@ const setupSocketRedisAdapter = async (): Promise<void> => {
 
     await redisPubClient.connect();
     await redisSubClient.connect();
+  };
 
-    io.adapter(createAdapter(redisPubClient, redisSubClient));
-    console.log('Socket Redis adapter enabled');
-  } catch (error) {
-    console.error('Failed to initialize Socket Redis adapter. Continuing without adapter.', error);
+  const resetAdapterClients = (): void => {
     if (redisPubClient) {
       redisPubClient.disconnect();
       redisPubClient = null;
@@ -90,7 +117,32 @@ const setupSocketRedisAdapter = async (): Promise<void> => {
       redisSubClient.disconnect();
       redisSubClient = null;
     }
+  };
+
+  try {
+    await connectAdapterWithUrl(env.REDIS_URL);
+  } catch (error) {
+    const alternateRedisUrl = toAlternateRedisScheme(env.REDIS_URL);
+    if (!alternateRedisUrl || !isTlsPacketLengthError(error)) {
+      console.error('Failed to initialize Socket Redis adapter. Continuing without adapter.', error);
+      resetAdapterClients();
+      return;
+    }
+
+    console.warn(`Socket Redis TLS mismatch for ${env.REDIS_URL}. Retrying with ${alternateRedisUrl}.`);
+    resetAdapterClients();
+
+    try {
+      await connectAdapterWithUrl(alternateRedisUrl);
+    } catch (retryError) {
+      console.error('Failed to initialize Socket Redis adapter. Continuing without adapter.', retryError);
+      resetAdapterClients();
+      return;
+    }
   }
+
+  io.adapter(createAdapter(redisPubClient, redisSubClient));
+  console.log('Socket Redis adapter enabled');
 };
 
 export const initializeSocket = (server: HTTPServer): SocketIOServer => {

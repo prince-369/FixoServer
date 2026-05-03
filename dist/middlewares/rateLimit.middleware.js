@@ -43,39 +43,67 @@ const rate_limit_redis_1 = require("rate-limit-redis");
 const env_1 = __importDefault(require("../config/env"));
 const RATE_LIMIT_MESSAGE = { message: 'Too many requests. Please try again shortly.' };
 let redisClient = null;
-const shouldUseRedisTls = (redisUrl) => {
-    try {
-        const parsed = new URL(redisUrl);
-        if (parsed.protocol === 'rediss:')
-            return true;
-        return /redislabs\.com|redis\.com|upstash\.io/i.test(parsed.hostname);
+const buildRedisOptions = (redisUrl) => {
+    const options = {
+        lazyConnect: true,
+        connectTimeout: 10000,
+        maxRetriesPerRequest: 1,
+        enableOfflineQueue: false,
+    };
+    if (redisUrl.startsWith('rediss://')) {
+        options.tls = {};
     }
-    catch {
+    return options;
+};
+const toAlternateRedisScheme = (redisUrl) => {
+    if (redisUrl.startsWith('rediss://')) {
+        return `redis://${redisUrl.slice('rediss://'.length)}`;
+    }
+    if (redisUrl.startsWith('redis://')) {
+        return `rediss://${redisUrl.slice('redis://'.length)}`;
+    }
+    return null;
+};
+const isTlsPacketLengthError = (error) => {
+    if (!(error instanceof Error))
         return false;
-    }
+    return (error.message.includes('ERR_SSL_PACKET_LENGTH_TOO_LONG') ||
+        error.message.toLowerCase().includes('packet length too long'));
+};
+const attachRedisLogging = (client) => {
+    client.on('error', (error) => {
+        console.error('Rate limit Redis error:', error);
+    });
 };
 const getOrCreateRedisClient = () => {
     if (!env_1.default.REDIS_URL)
         return null;
     if (redisClient)
         return redisClient;
-    const redisOptions = {
-        lazyConnect: true,
-        connectTimeout: 10000,
-        maxRetriesPerRequest: 1,
-        enableOfflineQueue: false,
-    };
-    if (shouldUseRedisTls(env_1.default.REDIS_URL)) {
-        redisOptions.tls = {};
-    }
-    redisClient = new ioredis_1.default(env_1.default.REDIS_URL, redisOptions);
-    redisClient.on('error', (error) => {
-        console.error('Rate limit Redis error:', error);
-    });
-    void redisClient.connect().catch((error) => {
-        console.error('Rate limit Redis connect failed. Falling back to local memory store.', error);
+    let activeRedisUrl = env_1.default.REDIS_URL;
+    redisClient = new ioredis_1.default(activeRedisUrl, buildRedisOptions(activeRedisUrl));
+    attachRedisLogging(redisClient);
+    void redisClient.connect().catch(async (error) => {
+        const alternateRedisUrl = toAlternateRedisScheme(activeRedisUrl);
+        if (!alternateRedisUrl || !isTlsPacketLengthError(error)) {
+            console.error('Rate limit Redis connect failed. Falling back to local memory store.', error);
+            redisClient?.disconnect();
+            redisClient = null;
+            return;
+        }
+        console.warn(`Rate limit Redis TLS mismatch for ${activeRedisUrl}. Retrying with ${alternateRedisUrl}.`);
         redisClient?.disconnect();
-        redisClient = null;
+        activeRedisUrl = alternateRedisUrl;
+        redisClient = new ioredis_1.default(activeRedisUrl, buildRedisOptions(activeRedisUrl));
+        attachRedisLogging(redisClient);
+        try {
+            await redisClient.connect();
+        }
+        catch (retryError) {
+            console.error('Rate limit Redis connect retry failed. Falling back to local memory store.', retryError);
+            redisClient?.disconnect();
+            redisClient = null;
+        }
     });
     return redisClient;
 };
@@ -86,16 +114,11 @@ const getRateLimitStore = (prefix) => {
     return new rate_limit_redis_1.RedisStore({
         prefix,
         sendCommand: async (...args) => {
-            if (client.status !== 'ready')
-                return 0;
-            try {
-                const result = await client.call(args[0], ...args.slice(1));
-                return Number(result);
+            const liveClient = redisClient ?? getOrCreateRedisClient();
+            if (!liveClient || liveClient.status !== 'ready') {
+                throw new Error('Rate limit Redis client unavailable');
             }
-            catch {
-                // Fail-open behavior to avoid request meltdown if Redis is temporarily unavailable.
-                return 0;
-            }
+            return liveClient.call(args[0], ...args.slice(1));
         },
     });
 };
@@ -116,6 +139,7 @@ const skipHealthEndpoints = (req) => {
 exports.apiLimiter = (0, express_rate_limit_1.default)({
     windowMs: env_1.default.RATE_LIMIT_WINDOW_MS,
     max: env_1.default.RATE_LIMIT_MAX,
+    passOnStoreError: true,
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: keyByUserOrIp,
@@ -126,6 +150,7 @@ exports.apiLimiter = (0, express_rate_limit_1.default)({
 exports.authLimiter = (0, express_rate_limit_1.default)({
     windowMs: env_1.default.RATE_LIMIT_WINDOW_MS,
     max: env_1.default.AUTH_RATE_LIMIT_MAX,
+    passOnStoreError: true,
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: (req) => {
@@ -142,6 +167,7 @@ exports.authLimiter = (0, express_rate_limit_1.default)({
 exports.mutationLimiter = (0, express_rate_limit_1.default)({
     windowMs: 5 * 60 * 1000,
     max: env_1.default.MUTATION_RATE_LIMIT_MAX,
+    passOnStoreError: true,
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: keyByUserOrIp,

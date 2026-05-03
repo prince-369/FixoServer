@@ -17,16 +17,32 @@ let io;
 let isSocketInitialized = false;
 let redisPubClient = null;
 let redisSubClient = null;
-const shouldUseRedisTls = (redisUrl) => {
-    try {
-        const parsed = new URL(redisUrl);
-        if (parsed.protocol === 'rediss:')
-            return true;
-        return /redislabs\.com|redis\.com|upstash\.io/i.test(parsed.hostname);
+const buildRedisOptions = (redisUrl) => {
+    const options = {
+        lazyConnect: true,
+        connectTimeout: 10000,
+        maxRetriesPerRequest: 1,
+        enableOfflineQueue: false,
+    };
+    if (redisUrl.startsWith('rediss://')) {
+        options.tls = {};
     }
-    catch {
+    return options;
+};
+const toAlternateRedisScheme = (redisUrl) => {
+    if (redisUrl.startsWith('rediss://')) {
+        return `redis://${redisUrl.slice('rediss://'.length)}`;
+    }
+    if (redisUrl.startsWith('redis://')) {
+        return `rediss://${redisUrl.slice('redis://'.length)}`;
+    }
+    return null;
+};
+const isTlsPacketLengthError = (error) => {
+    if (!(error instanceof Error))
         return false;
-    }
+    return (error.message.includes('ERR_SSL_PACKET_LENGTH_TOO_LONG') ||
+        error.message.toLowerCase().includes('packet length too long'));
 };
 // Track connected users: { socketId: { userId, role } }
 const connectedUsers = new Map();
@@ -52,17 +68,8 @@ const deleteEkycNotifications = async (workerId) => {
 const setupSocketRedisAdapter = async () => {
     if (!env_1.default.REDIS_URL || !isSocketInitialized)
         return;
-    try {
-        const redisOptions = {
-            lazyConnect: true,
-            connectTimeout: 10000,
-            maxRetriesPerRequest: 1,
-            enableOfflineQueue: false,
-        };
-        if (shouldUseRedisTls(env_1.default.REDIS_URL)) {
-            redisOptions.tls = {};
-        }
-        redisPubClient = new ioredis_1.default(env_1.default.REDIS_URL, redisOptions);
+    const connectAdapterWithUrl = async (redisUrl) => {
+        redisPubClient = new ioredis_1.default(redisUrl, buildRedisOptions(redisUrl));
         redisSubClient = redisPubClient.duplicate();
         redisPubClient.on('error', (error) => {
             console.error('Socket Redis pub client error:', error);
@@ -72,11 +79,8 @@ const setupSocketRedisAdapter = async () => {
         });
         await redisPubClient.connect();
         await redisSubClient.connect();
-        io.adapter((0, redis_adapter_1.createAdapter)(redisPubClient, redisSubClient));
-        console.log('Socket Redis adapter enabled');
-    }
-    catch (error) {
-        console.error('Failed to initialize Socket Redis adapter. Continuing without adapter.', error);
+    };
+    const resetAdapterClients = () => {
         if (redisPubClient) {
             redisPubClient.disconnect();
             redisPubClient = null;
@@ -85,7 +89,30 @@ const setupSocketRedisAdapter = async () => {
             redisSubClient.disconnect();
             redisSubClient = null;
         }
+    };
+    try {
+        await connectAdapterWithUrl(env_1.default.REDIS_URL);
     }
+    catch (error) {
+        const alternateRedisUrl = toAlternateRedisScheme(env_1.default.REDIS_URL);
+        if (!alternateRedisUrl || !isTlsPacketLengthError(error)) {
+            console.error('Failed to initialize Socket Redis adapter. Continuing without adapter.', error);
+            resetAdapterClients();
+            return;
+        }
+        console.warn(`Socket Redis TLS mismatch for ${env_1.default.REDIS_URL}. Retrying with ${alternateRedisUrl}.`);
+        resetAdapterClients();
+        try {
+            await connectAdapterWithUrl(alternateRedisUrl);
+        }
+        catch (retryError) {
+            console.error('Failed to initialize Socket Redis adapter. Continuing without adapter.', retryError);
+            resetAdapterClients();
+            return;
+        }
+    }
+    io.adapter((0, redis_adapter_1.createAdapter)(redisPubClient, redisSubClient));
+    console.log('Socket Redis adapter enabled');
 };
 const initializeSocket = (server) => {
     io = new socket_io_1.Server(server, {
