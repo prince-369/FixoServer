@@ -7,11 +7,10 @@ import env from '../config/env';
 const RATE_LIMIT_MESSAGE = { message: 'Too many requests. Please try again shortly.' };
 
 let redisClient: Redis | null = null;
-let redisStore: RedisStore | undefined;
 
-const getRateLimitStore = (): RedisStore | undefined => {
-  if (!env.REDIS_URL) return undefined;
-  if (redisStore) return redisStore;
+const getOrCreateRedisClient = (): Redis | null => {
+  if (!env.REDIS_URL) return null;
+  if (redisClient) return redisClient;
 
   redisClient = new Redis(env.REDIS_URL, {
     lazyConnect: true,
@@ -28,12 +27,18 @@ const getRateLimitStore = (): RedisStore | undefined => {
     console.error('Rate limit Redis connect failed. Falling back to local memory store.', error);
   });
 
-  redisStore = new RedisStore({
-    prefix: 'fixo:ratelimit:',
+  return redisClient;
+};
+
+const getRateLimitStore = (prefix: string): RedisStore | undefined => {
+  const client = getOrCreateRedisClient();
+  if (!client) return undefined;
+
+  return new RedisStore({
+    prefix,
     sendCommand: async (...args: string[]): Promise<number> => {
-      if (!redisClient) return 0;
       try {
-        const result = await redisClient.call(args[0], ...args.slice(1));
+        const result = await client.call(args[0], ...args.slice(1));
         return Number(result);
       } catch {
         // Fail-open behavior to avoid request meltdown if Redis is temporarily unavailable.
@@ -41,8 +46,6 @@ const getRateLimitStore = (): RedisStore | undefined => {
       }
     },
   });
-
-  return redisStore;
 };
 
 const keyByUserOrIp = (req: Request): string => {
@@ -68,7 +71,7 @@ export const apiLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: keyByUserOrIp,
   skip: skipHealthEndpoints,
-  store: getRateLimitStore(),
+  store: getRateLimitStore('fixo:ratelimit:api:'),
   message: RATE_LIMIT_MESSAGE,
 });
 
@@ -86,7 +89,7 @@ export const authLimiter = rateLimit({
     return `${keyByUserOrIp(req)}:${identifier}`;
   },
   skipSuccessfulRequests: true,
-  store: getRateLimitStore(),
+  store: getRateLimitStore('fixo:ratelimit:auth:'),
   message: { message: 'Too many authentication attempts. Please try again later.' },
 });
 
@@ -97,7 +100,7 @@ export const mutationLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: keyByUserOrIp,
   skip: (req) => ['GET', 'HEAD', 'OPTIONS'].includes(req.method),
-  store: getRateLimitStore(),
+  store: getRateLimitStore('fixo:ratelimit:mutation:'),
   message: { message: 'Too many write requests. Please slow down and retry.' },
 });
 
@@ -109,5 +112,4 @@ export const closeRateLimiterStore = async (): Promise<void> => {
     redisClient.disconnect();
   }
   redisClient = null;
-  redisStore = undefined;
 };
