@@ -8,6 +8,8 @@ const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const db_1 = __importDefault(require("../config/db"));
 const Admin_1 = __importDefault(require("../models/Admin"));
 const Category_1 = __importDefault(require("../models/Category"));
+const ADMIN_SEED_EMAIL = process.env.ADMIN_SEED_EMAIL?.trim().toLowerCase();
+const ADMIN_SEED_PASSWORD = process.env.ADMIN_SEED_PASSWORD?.trim();
 const categories = [
     { name: 'Electricity', slug: 'electricity', description: 'Electrical repairs, wiring, fan installation, switchboard fixes', order: 1 },
     { name: 'Plumbing', slug: 'plumbing', description: 'Pipe fitting, leakage repair, tap installation, drainage', order: 2 },
@@ -25,18 +27,13 @@ const seed = async () => {
     await (0, db_1.default)();
     console.log('Seeding database...');
     // Seed Admin
-    const existingAdmin = await Admin_1.default.findOne({ email: 'fixo@princehub.in' });
-    if (!existingAdmin) {
-        const hashedPassword = await bcryptjs_1.default.hash('Admin123', 12);
-        await Admin_1.default.create({
-            email: 'fixo@princehub.in',
-            password: hashedPassword,
-            role: 'superadmin',
-        });
-        console.log('✅ Admin created (fixo@princehub.in / Admin123)');
+    if (!ADMIN_SEED_EMAIL || !ADMIN_SEED_PASSWORD) {
+        console.log('ℹ️  Admin seed skipped. Set ADMIN_SEED_EMAIL and ADMIN_SEED_PASSWORD in env.');
     }
     else {
-        console.log('ℹ️  Admin already exists');
+        const hashedPassword = await bcryptjs_1.default.hash(ADMIN_SEED_PASSWORD, 12);
+        const admin = await Admin_1.default.findOneAndUpdate({ $or: [{ email: ADMIN_SEED_EMAIL }, { role: 'superadmin' }] }, { $set: { email: ADMIN_SEED_EMAIL, password: hashedPassword, role: 'superadmin' } }, { upsert: true, returnDocument: 'after', sort: { createdAt: 1 }, setDefaultsOnInsert: true });
+        console.log(`✅ Admin credentials synced from env for ${admin?.email || ADMIN_SEED_EMAIL}`);
     }
     // Seed Categories
     for (const cat of categories) {

@@ -29,6 +29,57 @@ interface RazorpayWebhookBody {
   };
 }
 
+const WORKER_SEARCH_RADIUS_METERS = 10_000;
+
+const isGeoIndexMissingError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+  return (
+    message.includes('$geonear') ||
+    message.includes('unable to find index') ||
+    message.includes('2dsphere index')
+  );
+};
+
+const findNearbyWorkers = async (categoryId: string, coordinates: [number, number]) => {
+  return Worker.find({
+    accountStatus: 'live',
+    isActive: true,
+    categories: categoryId,
+    location: {
+      $nearSphere: {
+        $geometry: {
+          type: 'Point',
+          coordinates,
+        },
+        $maxDistance: WORKER_SEARCH_RADIUS_METERS,
+      },
+    },
+  }).select('_id fullName');
+};
+
+const resolveMatchingWorkers = async (categoryId: string, coordinates: [number, number]) => {
+  try {
+    return await findNearbyWorkers(categoryId, coordinates);
+  } catch (error) {
+    if (!isGeoIndexMissingError(error)) {
+      throw error;
+    }
+
+    console.error('Geo index missing for worker location. Attempting self-heal.', error);
+
+    try {
+      await Worker.collection.createIndex(
+        { location: '2dsphere' },
+        { name: 'location_2dsphere' }
+      );
+      return await findNearbyWorkers(categoryId, coordinates);
+    } catch (retryError) {
+      console.error('Geo index self-heal failed. Proceeding without worker notifications.', retryError);
+      return [];
+    }
+  }
+};
+
 const finalizeOnlineBookingPayment = async (
   booking: any,
   orderId: string,
@@ -102,7 +153,15 @@ const finalizeOnlineBookingPayment = async (
 export const createBooking = async (req: Request, res: Response): Promise<void> => {
   try {
     const { category, workDescription, latitude, longitude, address, timeSlot } = req.body;
-    const coordinates = [longitude, latitude]; // MongoDB expects [lng, lat]
+
+    const normalizedLatitude = Number(latitude);
+    const normalizedLongitude = Number(longitude);
+    if (!Number.isFinite(normalizedLatitude) || !Number.isFinite(normalizedLongitude)) {
+      res.status(400).json({ message: 'Valid latitude and longitude are required' });
+      return;
+    }
+
+    const coordinates: [number, number] = [normalizedLongitude, normalizedLatitude]; // MongoDB expects [lng, lat]
 
     const booking = await Booking.create({
       customer: req.user!.id,
@@ -117,21 +176,14 @@ export const createBooking = async (req: Request, res: Response): Promise<void> 
       status: 'finding_workers',
     });
 
-    // Find matching active workers within 10km
-    const matchingWorkers = await Worker.find({
-      accountStatus: 'live',
-      isActive: true,
-      categories: category,
-      location: {
-        $nearSphere: {
-          $geometry: {
-            type: 'Point',
-            coordinates,
-          },
-          $maxDistance: 10000,
-        },
-      },
-    }).select('_id fullName');
+    // Find matching active workers within 10km.
+    // If lookup fails, keep booking successful and retry worker discovery later via ops.
+    let matchingWorkers: Array<{ _id: { toString(): string }; fullName: string }> = [];
+    try {
+      matchingWorkers = await resolveMatchingWorkers(String(category), coordinates);
+    } catch (workerLookupError) {
+      console.error('Worker lookup failed after booking creation. Returning success without notifications.', workerLookupError);
+    }
 
     const populated = await Booking.findById(booking._id)
       .populate('category', 'name slug image');

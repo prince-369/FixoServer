@@ -5,6 +5,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importDefault(require("mongoose"));
 const env_1 = __importDefault(require("./env"));
+const Worker_1 = __importDefault(require("../models/Worker"));
+const ensureOperationalIndexes = async () => {
+    try {
+        await Worker_1.default.collection.createIndex({ location: '2dsphere' }, { name: 'location_2dsphere' });
+    }
+    catch (error) {
+        console.error('Failed to ensure worker location geo index:', error);
+    }
+};
 const connectDB = async () => {
     try {
         const conn = await mongoose_1.default.connect(env_1.default.MONGODB_URI, {
@@ -23,6 +32,7 @@ const connectDB = async () => {
         mongoose_1.default.connection.on('disconnected', () => {
             console.warn('MongoDB disconnected');
         });
+        await ensureOperationalIndexes();
         console.log(`MongoDB Connected: ${conn.connection.host}`);
     }
     catch (error) {

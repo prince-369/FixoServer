@@ -1,5 +1,17 @@
 import mongoose from 'mongoose';
 import env from './env';
+import Worker from '../models/Worker';
+
+const ensureOperationalIndexes = async (): Promise<void> => {
+  try {
+    await Worker.collection.createIndex(
+      { location: '2dsphere' },
+      { name: 'location_2dsphere' }
+    );
+  } catch (error) {
+    console.error('Failed to ensure worker location geo index:', error);
+  }
+};
 
 const connectDB = async (): Promise<void> => {
   try {
@@ -21,6 +33,8 @@ const connectDB = async (): Promise<void> => {
     mongoose.connection.on('disconnected', () => {
       console.warn('MongoDB disconnected');
     });
+
+    await ensureOperationalIndexes();
 
     console.log(`MongoDB Connected: ${conn.connection.host}`);
   } catch (error) {
