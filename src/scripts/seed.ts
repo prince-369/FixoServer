@@ -4,6 +4,9 @@ import connectDB from '../config/db';
 import Admin from '../models/Admin';
 import Category from '../models/Category';
 
+const ADMIN_SEED_EMAIL = process.env.ADMIN_SEED_EMAIL?.trim().toLowerCase();
+const ADMIN_SEED_PASSWORD = process.env.ADMIN_SEED_PASSWORD?.trim();
+
 const categories = [
   { name: 'Electricity', slug: 'electricity', description: 'Electrical repairs, wiring, fan installation, switchboard fixes', order: 1 },
   { name: 'Plumbing', slug: 'plumbing', description: 'Pipe fitting, leakage repair, tap installation, drainage', order: 2 },
@@ -23,17 +26,18 @@ const seed = async () => {
   console.log('Seeding database...');
 
   // Seed Admin
-  const existingAdmin = await Admin.findOne({ email: 'fixo@princehub.in' });
-  if (!existingAdmin) {
-    const hashedPassword = await bcrypt.hash('Admin123', 12);
-    await Admin.create({
-      email: 'fixo@princehub.in',
-      password: hashedPassword,
-      role: 'superadmin',
-    });
-    console.log('✅ Admin created (fixo@princehub.in / Admin123)');
+  if (!ADMIN_SEED_EMAIL || !ADMIN_SEED_PASSWORD) {
+    console.log('ℹ️  Admin seed skipped. Set ADMIN_SEED_EMAIL and ADMIN_SEED_PASSWORD in env.');
   } else {
-    console.log('ℹ️  Admin already exists');
+    const hashedPassword = await bcrypt.hash(ADMIN_SEED_PASSWORD, 12);
+
+    const admin = await Admin.findOneAndUpdate(
+      { $or: [{ email: ADMIN_SEED_EMAIL }, { role: 'superadmin' }] },
+      { $set: { email: ADMIN_SEED_EMAIL, password: hashedPassword, role: 'superadmin' } },
+      { upsert: true, returnDocument: 'after', sort: { createdAt: 1 }, setDefaultsOnInsert: true }
+    );
+
+    console.log(`✅ Admin credentials synced from env for ${admin?.email || ADMIN_SEED_EMAIL}`);
   }
 
   // Seed Categories
