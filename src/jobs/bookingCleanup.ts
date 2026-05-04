@@ -31,7 +31,7 @@ export const cancelStaleBookings = async (): Promise<number> => {
           },
         },
         {
-          new: true,
+          returnDocument: 'after',
           sort: { createdAt: 1 },
           projection: { _id: 1, customer: 1 },
         }

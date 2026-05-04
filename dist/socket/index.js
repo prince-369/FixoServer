@@ -38,11 +38,15 @@ const toAlternateRedisScheme = (redisUrl) => {
     }
     return null;
 };
-const isTlsPacketLengthError = (error) => {
+const isLikelyProtocolMismatch = (error) => {
     if (!(error instanceof Error))
         return false;
-    return (error.message.includes('ERR_SSL_PACKET_LENGTH_TOO_LONG') ||
-        error.message.toLowerCase().includes('packet length too long'));
+    const message = error.message.toLowerCase();
+    return (message.includes('err_ssl_packet_length_too_long') ||
+        message.includes('packet length too long') ||
+        message.includes("stream isn't writeable") ||
+        message.includes('connection is closed') ||
+        message.includes('ssl routines'));
 };
 // Track connected users: { socketId: { userId, role } }
 const connectedUsers = new Map();
@@ -95,7 +99,7 @@ const setupSocketRedisAdapter = async () => {
     }
     catch (error) {
         const alternateRedisUrl = toAlternateRedisScheme(env_1.default.REDIS_URL);
-        if (!alternateRedisUrl || !isTlsPacketLengthError(error)) {
+        if (!alternateRedisUrl || !isLikelyProtocolMismatch(error)) {
             console.error('Failed to initialize Socket Redis adapter. Continuing without adapter.', error);
             resetAdapterClients();
             return;

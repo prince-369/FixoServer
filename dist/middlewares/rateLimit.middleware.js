@@ -64,11 +64,59 @@ const toAlternateRedisScheme = (redisUrl) => {
     }
     return null;
 };
-const isTlsPacketLengthError = (error) => {
+const isLikelyProtocolMismatch = (error) => {
     if (!(error instanceof Error))
         return false;
-    return (error.message.includes('ERR_SSL_PACKET_LENGTH_TOO_LONG') ||
-        error.message.toLowerCase().includes('packet length too long'));
+    const message = error.message.toLowerCase();
+    return (message.includes('err_ssl_packet_length_too_long') ||
+        message.includes('packet length too long') ||
+        message.includes("stream isn't writeable") ||
+        message.includes('connection is closed') ||
+        message.includes('ssl routines'));
+};
+const buildLocalRateLimitReply = (command, args) => {
+    const upperCommand = command.toUpperCase();
+    if (upperCommand === 'SCRIPT' && args[1]?.toUpperCase() === 'LOAD') {
+        // Satisfy rate-limit-redis script bootstrapping when Redis is unavailable.
+        return 'local-fallback-script-sha';
+    }
+    if (upperCommand === 'EVALSHA') {
+        return [1, env_1.default.RATE_LIMIT_WINDOW_MS];
+    }
+    return 0;
+};
+const isClientReady = (client) => client.status === 'ready';
+const waitForClientReady = async (client, timeoutMs = 2000) => {
+    if (isClientReady(client))
+        return true;
+    if (client.status === 'end')
+        return false;
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = (value) => {
+            if (settled)
+                return;
+            settled = true;
+            cleanup();
+            resolve(value);
+        };
+        const onReady = () => finish(true);
+        const onError = () => finish(false);
+        const onClose = () => finish(false);
+        const timer = setTimeout(() => finish(isClientReady(client)), timeoutMs);
+        timer.unref?.();
+        const cleanup = () => {
+            clearTimeout(timer);
+            client.off('ready', onReady);
+            client.off('error', onError);
+            client.off('close', onClose);
+            client.off('end', onClose);
+        };
+        client.on('ready', onReady);
+        client.on('error', onError);
+        client.on('close', onClose);
+        client.on('end', onClose);
+    });
 };
 const attachRedisLogging = (client) => {
     client.on('error', (error) => {
@@ -85,7 +133,7 @@ const getOrCreateRedisClient = () => {
     attachRedisLogging(redisClient);
     void redisClient.connect().catch(async (error) => {
         const alternateRedisUrl = toAlternateRedisScheme(activeRedisUrl);
-        if (!alternateRedisUrl || !isTlsPacketLengthError(error)) {
+        if (!alternateRedisUrl || !isLikelyProtocolMismatch(error)) {
             console.error('Rate limit Redis connect failed. Falling back to local memory store.', error);
             redisClient?.disconnect();
             redisClient = null;
@@ -114,11 +162,29 @@ const getRateLimitStore = (prefix) => {
     return new rate_limit_redis_1.RedisStore({
         prefix,
         sendCommand: async (...args) => {
+            const command = args[0] ?? '';
+            const upperCommand = command.toUpperCase();
             const liveClient = redisClient ?? getOrCreateRedisClient();
-            if (!liveClient || liveClient.status !== 'ready') {
-                throw new Error('Rate limit Redis client unavailable');
+            if (!liveClient) {
+                return buildLocalRateLimitReply(command, args);
             }
-            return liveClient.call(args[0], ...args.slice(1));
+            if (!isClientReady(liveClient)) {
+                const becameReady = await waitForClientReady(liveClient);
+                if (!becameReady || !isClientReady(liveClient)) {
+                    return buildLocalRateLimitReply(command, args);
+                }
+            }
+            try {
+                return await liveClient.call(command, ...args.slice(1));
+            }
+            catch (error) {
+                if (upperCommand === 'EVALSHA') {
+                    // Let rate-limit-redis reload scripts on NOSCRIPT and retry internally.
+                    throw error;
+                }
+                console.error('Rate limit Redis command failed. Using local limiter reply fallback.', error);
+                return buildLocalRateLimitReply(command, args);
+            }
         },
     });
 };

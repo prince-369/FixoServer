@@ -45,11 +45,15 @@ const toAlternateRedisScheme = (redisUrl: string): string | null => {
   return null;
 };
 
-const isTlsPacketLengthError = (error: unknown): boolean => {
+const isLikelyProtocolMismatch = (error: unknown): boolean => {
   if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
   return (
-    error.message.includes('ERR_SSL_PACKET_LENGTH_TOO_LONG') ||
-    error.message.toLowerCase().includes('packet length too long')
+    message.includes('err_ssl_packet_length_too_long') ||
+    message.includes('packet length too long') ||
+    message.includes("stream isn't writeable") ||
+    message.includes('connection is closed') ||
+    message.includes('ssl routines')
   );
 };
 
@@ -123,7 +127,7 @@ const setupSocketRedisAdapter = async (): Promise<void> => {
     await connectAdapterWithUrl(env.REDIS_URL);
   } catch (error) {
     const alternateRedisUrl = toAlternateRedisScheme(env.REDIS_URL);
-    if (!alternateRedisUrl || !isTlsPacketLengthError(error)) {
+    if (!alternateRedisUrl || !isLikelyProtocolMismatch(error)) {
       console.error('Failed to initialize Socket Redis adapter. Continuing without adapter.', error);
       resetAdapterClients();
       return;
