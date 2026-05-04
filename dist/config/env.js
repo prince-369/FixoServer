@@ -50,6 +50,17 @@ const parseRouteEnv = (name, fallback) => {
         return fallback;
     return raw.startsWith('/') ? raw : `/${raw}`;
 };
+const parseGoogleClientIds = () => {
+    const clientIds = (process.env.GOOGLE_CLIENT_IDS || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
+    const singleClientId = process.env.GOOGLE_CLIENT_ID?.trim();
+    if (singleClientId) {
+        clientIds.unshift(singleClientId);
+    }
+    return Array.from(new Set(clientIds));
+};
 const getEnvOrDefault = (name, fallback, options) => {
     const raw = process.env[name]?.trim();
     if (raw)
@@ -61,6 +72,7 @@ const getEnvOrDefault = (name, fallback, options) => {
 };
 const nodeEnv = process.env.NODE_ENV || 'development';
 const clientUrl = getEnvOrDefault('CLIENT_URL', 'http://localhost:3000', { requiredInProduction: true });
+const googleClientIds = parseGoogleClientIds();
 const env = {
     NODE_ENV: nodeEnv,
     PORT: parseInt(process.env.PORT || '5000', 10),
@@ -109,7 +121,8 @@ const env = {
     SMTP_PORT: parseInt(process.env.SMTP_PORT || '587', 10),
     SMTP_USER: process.env.SMTP_USER || '',
     SMTP_PASS: process.env.SMTP_PASS || '',
-    GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || '',
+    GOOGLE_CLIENT_IDS: googleClientIds,
+    GOOGLE_CLIENT_ID: googleClientIds[0] || '',
     GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET || '',
     WEB_PUSH_ENABLED: parseBooleanEnv('WEB_PUSH_ENABLED', true),
     WEB_PUSH_PUBLIC_KEY: process.env.WEB_PUSH_PUBLIC_KEY || '',

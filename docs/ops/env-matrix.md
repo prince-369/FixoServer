@@ -40,6 +40,8 @@ Guidelines:
 | SOCKET_PING_TIMEOUT_MS | 25000 | 25000 | Reconnect behavior |
 | SOCKET_MAX_HTTP_BUFFER_SIZE | 1000000 | 1000000 | Event payload cap |
 | WEB_PUSH_ENABLED | true | true | Master switch for browser push delivery |
+| GOOGLE_CLIENT_ID | staging web client id | production web client id | Primary Google OAuth client id |
+| GOOGLE_CLIENT_IDS | comma-separated client ids | comma-separated client ids | Optional allowlist for multiple Google OAuth client ids (web/staging/prod) |
 | WEB_PUSH_PUBLIC_KEY | staging VAPID public key | production VAPID public key | Exposed to client for subscription |
 | WEB_PUSH_PRIVATE_KEY | staging VAPID private key | production VAPID private key | Keep in secret manager |
 | WEB_PUSH_SUBJECT | mailto:staging-alerts@fixo.app | mailto:alerts@fixo.app | VAPID subject identity |

@@ -50,12 +50,87 @@ const validateStrongPassword = (password: string): string | null => {
 
 interface GoogleTokenInfoResponse {
   aud?: string;
+  azp?: string;
   email?: string;
   email_verified?: boolean | string;
   name?: string;
   picture?: string;
   sub?: string;
 }
+
+class GoogleAudienceMismatchError extends Error {
+  public readonly audience?: string;
+  public readonly authorizedParty?: string;
+  public readonly allowedClientIds: string[];
+
+  constructor(audience: string | undefined, authorizedParty: string | undefined, allowedClientIds: string[]) {
+    super('Google token audience mismatch');
+    this.name = 'GoogleAudienceMismatchError';
+    this.audience = audience;
+    this.authorizedParty = authorizedParty;
+    this.allowedClientIds = allowedClientIds;
+  }
+}
+
+const normalizeGoogleClientId = (value: string): string => value.trim();
+
+const getGoogleProjectNumber = (clientId: string): string => {
+  const [projectNumber] = clientId.split('-');
+  return projectNumber || '';
+};
+
+const isAllowedGoogleAudience = (
+  audience: string | undefined,
+  authorizedParty: string | undefined,
+  allowedClientIds: string[]
+): boolean => {
+  if (!allowedClientIds.length) return true;
+
+  const candidates = [audience, authorizedParty]
+    .filter((value): value is string => Boolean(value && value.trim()))
+    .map(normalizeGoogleClientId);
+
+  if (!candidates.length) return false;
+
+  const allowedSet = new Set(allowedClientIds.map(normalizeGoogleClientId));
+  if (candidates.some((candidate) => allowedSet.has(candidate))) {
+    return true;
+  }
+
+  // Fallback for multi-client setups inside the same Google project.
+  const allowedProjectNumbers = new Set(
+    allowedClientIds
+      .map(normalizeGoogleClientId)
+      .map(getGoogleProjectNumber)
+      .filter(Boolean)
+  );
+
+  return candidates.some((candidate) => allowedProjectNumbers.has(getGoogleProjectNumber(candidate)));
+};
+
+const handleGoogleErrorResponse = (
+  res: Response,
+  error: unknown,
+  fallback500Message: string
+): void => {
+  if (error instanceof GoogleAudienceMismatchError) {
+    console.error('Google audience mismatch', {
+      audience: error.audience,
+      authorizedParty: error.authorizedParty,
+      allowedClientIds: error.allowedClientIds,
+    });
+    res.status(401).json({ message: 'Google authentication failed. OAuth client ID mismatch.' });
+    return;
+  }
+
+  const message = error instanceof Error ? error.message : '';
+  if (message.includes('Google token') || message.includes('Invalid Google')) {
+    res.status(401).json({ message: 'Google authentication failed' });
+    return;
+  }
+
+  res.status(500).json({ message: fallback500Message });
+};
 
 const resolveGoogleIdentity = async (credential: string): Promise<{
   email: string;
@@ -67,11 +142,13 @@ const resolveGoogleIdentity = async (credential: string): Promise<{
     `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`
   );
 
-  const { aud, email, email_verified, name, picture, sub } = googleRes.data;
+  const { aud, azp, email, email_verified, name, picture, sub } = googleRes.data;
   const isEmailVerified = email_verified === true || email_verified === 'true';
 
-  if (env.GOOGLE_CLIENT_ID && aud && aud !== env.GOOGLE_CLIENT_ID) {
-    throw new Error('Google token audience mismatch');
+  const allowedClientIds = env.GOOGLE_CLIENT_IDS;
+
+  if (!isAllowedGoogleAudience(aud, azp, allowedClientIds)) {
+    throw new GoogleAudienceMismatchError(aud, azp, allowedClientIds);
   }
 
   if (!isEmailVerified || !email || !name || !sub) {
@@ -282,12 +359,7 @@ export const googleAuthCustomer = async (req: Request, res: Response): Promise<v
     });
   } catch (error) {
     console.error('Google auth error:', error);
-    const message = error instanceof Error ? error.message : '';
-    if (message.includes('Google token') || message.includes('Invalid Google')) {
-      res.status(401).json({ message: 'Google authentication failed' });
-      return;
-    }
-    res.status(500).json({ message: 'Google authentication failed' });
+    handleGoogleErrorResponse(res, error, 'Google authentication failed');
   }
 };
 
@@ -380,12 +452,7 @@ export const completeGoogleRegistration = async (req: Request, res: Response): P
     });
   } catch (error) {
     console.error('Complete Google registration error:', error);
-    const message = error instanceof Error ? error.message : '';
-    if (message.includes('Google token') || message.includes('Invalid Google')) {
-      res.status(401).json({ message: 'Google authentication failed' });
-      return;
-    }
-    res.status(500).json({ message: 'Server error' });
+    handleGoogleErrorResponse(res, error, 'Server error');
   }
 };
 
@@ -480,12 +547,7 @@ export const googleAuthWorker = async (req: Request, res: Response): Promise<voi
     });
   } catch (error) {
     console.error('Worker Google auth error:', error);
-    const message = error instanceof Error ? error.message : '';
-    if (message.includes('Google token') || message.includes('Invalid Google')) {
-      res.status(401).json({ message: 'Google authentication failed' });
-      return;
-    }
-    res.status(500).json({ message: 'Google authentication failed' });
+    handleGoogleErrorResponse(res, error, 'Google authentication failed');
   }
 };
 
@@ -594,12 +656,7 @@ export const registerWorkerWithGoogle = async (req: Request, res: Response): Pro
     });
   } catch (error) {
     console.error('Register worker with Google error:', error);
-    const message = error instanceof Error ? error.message : '';
-    if (message.includes('Google token') || message.includes('Invalid Google')) {
-      res.status(401).json({ message: 'Google authentication failed' });
-      return;
-    }
-    res.status(500).json({ message: 'Server error' });
+    handleGoogleErrorResponse(res, error, 'Server error');
   }
 };
 
