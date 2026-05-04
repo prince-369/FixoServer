@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.handleRazorpayWebhook = exports.verifyBookingPayment = exports.initiatePayment = exports.acceptBid = exports.getBookingBids = exports.createBooking = void 0;
+exports.handleRazorpayWebhook = exports.reconcileBookingPayment = exports.verifyBookingPayment = exports.initiatePayment = exports.acceptBid = exports.getBookingBids = exports.createBooking = void 0;
 const Booking_1 = __importDefault(require("../models/Booking"));
 const WorkBid_1 = __importDefault(require("../models/WorkBid"));
 const Worker_1 = __importDefault(require("../models/Worker"));
@@ -113,6 +113,29 @@ const finalizeOnlineBookingPayment = async (booking, orderId, paymentId) => {
         });
     }
     return { alreadyFinalized };
+};
+const reconcileBookingPaymentByOrder = async (booking, requestedOrderId) => {
+    const orderId = String(requestedOrderId || booking.razorpayOrderId || '');
+    if (!orderId) {
+        return { reconciled: false, alreadyFinalized: false };
+    }
+    if (booking.paymentStatus === 'paid' && booking.status === 'payment_done') {
+        return {
+            reconciled: true,
+            alreadyFinalized: true,
+            paymentId: booking.razorpayPaymentId || undefined,
+        };
+    }
+    const successfulPayment = await (0, payment_service_1.fetchSuccessfulPaymentForOrder)(orderId);
+    if (!successfulPayment?.id) {
+        return { reconciled: false, alreadyFinalized: false };
+    }
+    const { alreadyFinalized } = await finalizeOnlineBookingPayment(booking, orderId, successfulPayment.id);
+    return {
+        reconciled: true,
+        alreadyFinalized,
+        paymentId: successfulPayment.id,
+    };
 };
 // ─── Create Booking ───
 const createBooking = async (req, res) => {
@@ -366,6 +389,44 @@ const verifyBookingPayment = async (req, res) => {
     }
 };
 exports.verifyBookingPayment = verifyBookingPayment;
+// ─── Reconcile Online Payment (client fallback for missed callback/webhook lag) ───
+const reconcileBookingPayment = async (req, res) => {
+    try {
+        const requestedOrderId = typeof req.body?.razorpay_order_id === 'string'
+            ? req.body.razorpay_order_id
+            : '';
+        const booking = await Booking_1.default.findOne({
+            _id: req.params.id,
+            customer: req.user.id,
+        });
+        if (!booking) {
+            res.status(404).json({ message: 'Booking not found' });
+            return;
+        }
+        const { reconciled, alreadyFinalized, paymentId } = await reconcileBookingPaymentByOrder(booking, requestedOrderId);
+        if (!reconciled) {
+            res.status(202).json({
+                message: 'Payment is not confirmed yet. Please retry shortly.',
+                reconciled: false,
+                booking,
+            });
+            return;
+        }
+        res.json({
+            message: alreadyFinalized ? 'Payment already confirmed.' : 'Payment confirmed successfully.',
+            reconciled: true,
+            alreadyFinalized,
+            paymentId,
+            pin: booking.completionPin,
+            booking,
+        });
+    }
+    catch (error) {
+        console.error('Reconcile payment error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.reconcileBookingPayment = reconcileBookingPayment;
 // ─── Razorpay Webhook (server-side reconciliation) ───
 const handleRazorpayWebhook = async (req, res) => {
     try {

@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createDuesPaymentOrder = exports.verifyWebhookSignature = exports.verifyPayment = exports.createOrder = void 0;
+exports.fetchSuccessfulPaymentForOrder = exports.createDuesPaymentOrder = exports.verifyWebhookSignature = exports.verifyPayment = exports.createOrder = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const razorpay_1 = __importDefault(require("../config/razorpay"));
 const env_1 = __importDefault(require("../config/env"));
@@ -44,4 +44,15 @@ const createDuesPaymentOrder = async (amount, workerId) => {
     return order;
 };
 exports.createDuesPaymentOrder = createDuesPaymentOrder;
+const fetchSuccessfulPaymentForOrder = async (orderId) => {
+    const paymentsResponse = await razorpay_1.default.orders.fetchPayments(orderId);
+    const items = Array.isArray(paymentsResponse?.items)
+        ? paymentsResponse.items
+        : [];
+    const successful = items
+        .filter((payment) => ['captured', 'authorized'].includes(String(payment.status || '').toLowerCase()))
+        .sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
+    return successful[0] || null;
+};
+exports.fetchSuccessfulPaymentForOrder = fetchSuccessfulPaymentForOrder;
 //# sourceMappingURL=payment.service.js.map

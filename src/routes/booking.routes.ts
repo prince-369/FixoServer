@@ -9,6 +9,7 @@ import {
   acceptBid,
   initiatePayment,
   verifyBookingPayment,
+  reconcileBookingPayment,
   handleRazorpayWebhook,
 } from '../controllers/booking.controller';
 
@@ -25,5 +26,6 @@ router.get('/:id/bids', getBookingBids);
 router.post('/:id/bids/:bidId/accept', mutationGuard, acceptBid);
 router.post('/:id/payment', mutationGuard, initiatePayment);
 router.post('/:id/payment/verify', mutationGuard, verifyBookingPayment);
+router.post('/:id/payment/reconcile', reconcileBookingPayment);
 
 export default router;

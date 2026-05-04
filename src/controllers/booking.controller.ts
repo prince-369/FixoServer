@@ -3,7 +3,7 @@ import Booking from '../models/Booking';
 import WorkBid from '../models/WorkBid';
 import Worker from '../models/Worker';
 import Notification from '../models/Notification';
-import { createOrder, verifyPayment, verifyWebhookSignature } from '../services/payment.service';
+import { createOrder, fetchSuccessfulPaymentForOrder, verifyPayment, verifyWebhookSignature } from '../services/payment.service';
 import { generatePin } from '../utils/generatePin';
 import { generateTID } from '../utils/generateTID';
 import Transaction from '../models/Transaction';
@@ -147,6 +147,36 @@ const finalizeOnlineBookingPayment = async (
   }
 
   return { alreadyFinalized };
+};
+
+const reconcileBookingPaymentByOrder = async (
+  booking: any,
+  requestedOrderId?: string
+): Promise<{ reconciled: boolean; alreadyFinalized: boolean; paymentId?: string }> => {
+  const orderId = String(requestedOrderId || booking.razorpayOrderId || '');
+  if (!orderId) {
+    return { reconciled: false, alreadyFinalized: false };
+  }
+
+  if (booking.paymentStatus === 'paid' && booking.status === 'payment_done') {
+    return {
+      reconciled: true,
+      alreadyFinalized: true,
+      paymentId: booking.razorpayPaymentId || undefined,
+    };
+  }
+
+  const successfulPayment = await fetchSuccessfulPaymentForOrder(orderId);
+  if (!successfulPayment?.id) {
+    return { reconciled: false, alreadyFinalized: false };
+  }
+
+  const { alreadyFinalized } = await finalizeOnlineBookingPayment(booking, orderId, successfulPayment.id);
+  return {
+    reconciled: true,
+    alreadyFinalized,
+    paymentId: successfulPayment.id,
+  };
 };
 
 // ─── Create Booking ───
@@ -438,6 +468,51 @@ export const verifyBookingPayment = async (req: Request, res: Response): Promise
     });
   } catch (error) {
     console.error('Verify payment error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─── Reconcile Online Payment (client fallback for missed callback/webhook lag) ───
+export const reconcileBookingPayment = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const requestedOrderId = typeof req.body?.razorpay_order_id === 'string'
+      ? req.body.razorpay_order_id
+      : '';
+
+    const booking = await Booking.findOne({
+      _id: req.params.id,
+      customer: req.user!.id,
+    });
+
+    if (!booking) {
+      res.status(404).json({ message: 'Booking not found' });
+      return;
+    }
+
+    const { reconciled, alreadyFinalized, paymentId } = await reconcileBookingPaymentByOrder(
+      booking,
+      requestedOrderId
+    );
+
+    if (!reconciled) {
+      res.status(202).json({
+        message: 'Payment is not confirmed yet. Please retry shortly.',
+        reconciled: false,
+        booking,
+      });
+      return;
+    }
+
+    res.json({
+      message: alreadyFinalized ? 'Payment already confirmed.' : 'Payment confirmed successfully.',
+      reconciled: true,
+      alreadyFinalized,
+      paymentId,
+      pin: booking.completionPin,
+      booking,
+    });
+  } catch (error) {
+    console.error('Reconcile payment error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };

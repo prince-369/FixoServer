@@ -16,5 +16,6 @@ router.get('/:id/bids', booking_controller_1.getBookingBids);
 router.post('/:id/bids/:bidId/accept', mutationGuard, booking_controller_1.acceptBid);
 router.post('/:id/payment', mutationGuard, booking_controller_1.initiatePayment);
 router.post('/:id/payment/verify', mutationGuard, booking_controller_1.verifyBookingPayment);
+router.post('/:id/payment/reconcile', booking_controller_1.reconcileBookingPayment);
 exports.default = router;
 //# sourceMappingURL=booking.routes.js.map
