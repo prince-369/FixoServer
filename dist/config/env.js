@@ -50,12 +50,14 @@ const parseRouteEnv = (name, fallback) => {
         return fallback;
     return raw.startsWith('/') ? raw : `/${raw}`;
 };
+const sanitizeEnvValue = (value) => value.trim().replace(/^['"]+|['"]+$/g, '').trim();
 const parseGoogleClientIds = () => {
     const clientIds = (process.env.GOOGLE_CLIENT_IDS || '')
         .split(',')
-        .map((value) => value.trim())
+        .map((value) => sanitizeEnvValue(value))
         .filter(Boolean);
-    const singleClientId = process.env.GOOGLE_CLIENT_ID?.trim();
+    const singleClientIdRaw = process.env.GOOGLE_CLIENT_ID;
+    const singleClientId = singleClientIdRaw ? sanitizeEnvValue(singleClientIdRaw) : '';
     if (singleClientId) {
         clientIds.unshift(singleClientId);
     }

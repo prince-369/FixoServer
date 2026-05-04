@@ -119,13 +119,16 @@ const parseRouteEnv = (name: keyof NodeJS.ProcessEnv, fallback: string): string 
   return raw.startsWith('/') ? raw : `/${raw}`;
 };
 
+const sanitizeEnvValue = (value: string): string => value.trim().replace(/^['"]+|['"]+$/g, '').trim();
+
 const parseGoogleClientIds = (): string[] => {
   const clientIds = (process.env.GOOGLE_CLIENT_IDS || '')
     .split(',')
-    .map((value) => value.trim())
+    .map((value) => sanitizeEnvValue(value))
     .filter(Boolean);
 
-  const singleClientId = process.env.GOOGLE_CLIENT_ID?.trim();
+  const singleClientIdRaw = process.env.GOOGLE_CLIENT_ID;
+  const singleClientId = singleClientIdRaw ? sanitizeEnvValue(singleClientIdRaw) : '';
   if (singleClientId) {
     clientIds.unshift(singleClientId);
   }

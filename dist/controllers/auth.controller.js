@@ -90,7 +90,14 @@ const handleGoogleErrorResponse = (res, error, fallback500Message) => {
             authorizedParty: error.authorizedParty,
             allowedClientIds: error.allowedClientIds,
         });
-        res.status(401).json({ message: 'Google authentication failed. OAuth client ID mismatch.' });
+        res.status(401).json({
+            message: 'Google authentication failed. OAuth client ID mismatch.',
+            details: {
+                tokenAud: error.audience || null,
+                tokenAzp: error.authorizedParty || null,
+                allowedClientIds: error.allowedClientIds,
+            },
+        });
         return;
     }
     const message = error instanceof Error ? error.message : '';

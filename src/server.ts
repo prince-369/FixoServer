@@ -33,6 +33,7 @@ const start = async () => {
     console.log(`Fixo server running on port ${env.PORT}`);
     console.log(`Environment: ${env.NODE_ENV}`);
     console.log(`Trusted origins: ${env.CLIENT_URLS.join(', ')}`);
+    console.log(`Google OAuth client IDs loaded: ${env.GOOGLE_CLIENT_IDS.length ? env.GOOGLE_CLIENT_IDS.join(', ') : '(none)'}`);
   });
 };
 

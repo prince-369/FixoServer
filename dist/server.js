@@ -32,6 +32,7 @@ const start = async () => {
         console.log(`Fixo server running on port ${env_1.default.PORT}`);
         console.log(`Environment: ${env_1.default.NODE_ENV}`);
         console.log(`Trusted origins: ${env_1.default.CLIENT_URLS.join(', ')}`);
+        console.log(`Google OAuth client IDs loaded: ${env_1.default.GOOGLE_CLIENT_IDS.length ? env_1.default.GOOGLE_CLIENT_IDS.join(', ') : '(none)'}`);
     });
 };
 const gracefulShutdown = async (reason) => {
