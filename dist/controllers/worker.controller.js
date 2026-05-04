@@ -19,6 +19,78 @@ const payment_service_1 = require("../services/payment.service");
 const env_1 = __importDefault(require("../config/env"));
 const socket_1 = require("../socket");
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const WORKER_SEARCH_RADIUS_METERS = 10000;
+const hasValidCoordinates = (coordinates) => {
+    if (!Array.isArray(coordinates) || coordinates.length !== 2)
+        return false;
+    return Number.isFinite(Number(coordinates[0])) && Number.isFinite(Number(coordinates[1]));
+};
+const toCoordinateTuple = (coordinates) => {
+    if (!hasValidCoordinates(coordinates))
+        return null;
+    return [Number(coordinates[0]), Number(coordinates[1])];
+};
+const isGeoIndexMissingError = (error) => {
+    const message = error instanceof Error ? error.message.toLowerCase() : '';
+    return (message.includes('$geonear') ||
+        message.includes('unable to find index') ||
+        message.includes('2dsphere index'));
+};
+const toRadians = (value) => (value * Math.PI) / 180;
+const distanceMetersBetween = (a, b) => {
+    // Coordinates are [longitude, latitude]
+    const [lng1, lat1] = a;
+    const [lng2, lat2] = b;
+    const earthRadiusMeters = 6371000;
+    const dLat = toRadians(lat2 - lat1);
+    const dLng = toRadians(lng2 - lng1);
+    const lat1Rad = toRadians(lat1);
+    const lat2Rad = toRadians(lat2);
+    const haversine = Math.sin(dLat / 2) ** 2 +
+        Math.cos(lat1Rad) * Math.cos(lat2Rad) * Math.sin(dLng / 2) ** 2;
+    const arc = 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+    return earthRadiusMeters * arc;
+};
+const findAvailableBookingsForWorker = async (worker, findingWorkersSince) => {
+    return Booking_1.default.find({
+        $or: [
+            { status: 'finding_workers', createdAt: { $gte: findingWorkersSince } },
+            { status: 'bids_received' },
+        ],
+        category: { $in: worker.categories },
+        customerLocation: {
+            $nearSphere: {
+                $geometry: {
+                    type: 'Point',
+                    coordinates: worker.location.coordinates,
+                },
+                $maxDistance: WORKER_SEARCH_RADIUS_METERS,
+            },
+        },
+    })
+        .populate('category', 'name slug image')
+        .populate('customer', 'fullName')
+        .sort({ createdAt: -1 });
+};
+const resolveAvailableBookingsForWorker = async (worker, findingWorkersSince) => {
+    try {
+        return await findAvailableBookingsForWorker(worker, findingWorkersSince);
+    }
+    catch (error) {
+        if (!isGeoIndexMissingError(error)) {
+            throw error;
+        }
+        console.error('Booking geo index missing for work requests. Attempting self-heal.', error);
+        try {
+            await Booking_1.default.collection.createIndex({ customerLocation: '2dsphere' }, { name: 'customerLocation_2dsphere' });
+            return await findAvailableBookingsForWorker(worker, findingWorkersSince);
+        }
+        catch (retryError) {
+            console.error('Booking geo index self-heal failed. Returning without available bookings.', retryError);
+            return [];
+        }
+    }
+};
 // ─── Get Worker Profile ───
 const getProfile = async (req, res) => {
     try {
@@ -338,25 +410,23 @@ const getWorkRequests = async (req, res) => {
         // 1) Available bookings — in worker's categories + 10km radius
         // Show finding_workers jobs within the same stale-window used by cleanup.
         const findingWorkersSince = new Date(Date.now() - env_1.default.JOB_STALE_BOOKING_MINUTES * 60 * 1000);
-        const availableBookings = await Booking_1.default.find({
-            $or: [
-                { status: 'finding_workers', createdAt: { $gte: findingWorkersSince } },
-                { status: 'bids_received' },
-            ],
-            category: { $in: worker.categories },
-            customerLocation: {
-                $nearSphere: {
-                    $geometry: {
-                        type: 'Point',
-                        coordinates: worker.location.coordinates,
-                    },
-                    $maxDistance: 10000,
-                },
-            },
-        })
-            .populate('category', 'name slug image')
-            .populate('customer', 'fullName')
-            .sort({ createdAt: -1 });
+        const workerCoordinates = toCoordinateTuple(worker.location?.coordinates);
+        const hasCategories = Array.isArray(worker.categories) && worker.categories.length > 0;
+        let availableBookings = [];
+        if (!hasCategories || !workerCoordinates) {
+            availableBookings = [];
+        }
+        else {
+            // Force normalized tuple so geo query always receives numeric lng/lat.
+            worker.location.coordinates = workerCoordinates;
+            try {
+                availableBookings = await resolveAvailableBookingsForWorker(worker, findingWorkersSince);
+            }
+            catch (availableError) {
+                console.error('Available booking lookup failed. Returning active/completed requests only.', availableError);
+                availableBookings = [];
+            }
+        }
         // Check which ones this worker already bid on
         const existingBids = await WorkBid_1.default.find({
             worker: req.user.id,
@@ -408,9 +478,19 @@ const getWorkRequestDetail = async (req, res) => {
             res.status(404).json({ message: 'Booking not found' });
             return;
         }
-        // Only allow access if: worker is assigned, or booking is available (in worker's categories + radius)
+        // Only allow access if: worker is assigned, or booking is available (in worker's categories + 10km radius)
         const isAssigned = booking.assignedWorker?.toString() === req.user.id;
-        const isAvailable = ['finding_workers', 'bids_received'].includes(booking.status);
+        const isOpenStatus = ['finding_workers', 'bids_received'].includes(booking.status);
+        const workerCategorySet = new Set((worker.categories || []).map((id) => id.toString()));
+        const bookingCategoryId = booking.category && typeof booking.category === 'object' && '_id' in booking.category
+            ? String(booking.category._id)
+            : String(booking.category || '');
+        const isCategoryMatch = bookingCategoryId ? workerCategorySet.has(bookingCategoryId) : false;
+        const workerCoordinates = toCoordinateTuple(worker.location?.coordinates);
+        const bookingCoordinates = toCoordinateTuple(booking.customerLocation?.coordinates);
+        const isWithinRadius = Boolean(workerCoordinates && bookingCoordinates) &&
+            distanceMetersBetween(workerCoordinates, bookingCoordinates) <= WORKER_SEARCH_RADIUS_METERS;
+        const isAvailable = isOpenStatus && isCategoryMatch && isWithinRadius;
         if (!isAssigned && !isAvailable) {
             res.status(403).json({ message: 'Access denied' });
             return;

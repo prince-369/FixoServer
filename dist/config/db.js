@@ -6,12 +6,19 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importDefault(require("mongoose"));
 const env_1 = __importDefault(require("./env"));
 const Worker_1 = __importDefault(require("../models/Worker"));
+const Booking_1 = __importDefault(require("../models/Booking"));
 const ensureOperationalIndexes = async () => {
     try {
         await Worker_1.default.collection.createIndex({ location: '2dsphere' }, { name: 'location_2dsphere' });
     }
     catch (error) {
         console.error('Failed to ensure worker location geo index:', error);
+    }
+    try {
+        await Booking_1.default.collection.createIndex({ customerLocation: '2dsphere' }, { name: 'customerLocation_2dsphere' });
+    }
+    catch (error) {
+        console.error('Failed to ensure booking customer location geo index:', error);
     }
 };
 const connectDB = async () => {

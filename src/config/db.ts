@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import env from './env';
 import Worker from '../models/Worker';
+import Booking from '../models/Booking';
 
 const ensureOperationalIndexes = async (): Promise<void> => {
   try {
@@ -10,6 +11,15 @@ const ensureOperationalIndexes = async (): Promise<void> => {
     );
   } catch (error) {
     console.error('Failed to ensure worker location geo index:', error);
+  }
+
+  try {
+    await Booking.collection.createIndex(
+      { customerLocation: '2dsphere' },
+      { name: 'customerLocation_2dsphere' }
+    );
+  } catch (error) {
+    console.error('Failed to ensure booking customer location geo index:', error);
   }
 };
 
