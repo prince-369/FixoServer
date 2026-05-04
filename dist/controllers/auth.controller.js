@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.logout = exports.refresh = exports.getMe = exports.resetPassword = exports.verifyOTPHandler = exports.forgotPassword = exports.loginAdmin = exports.loginWorker = exports.registerWorker = exports.loginCustomer = exports.completeGoogleRegistration = exports.googleAuthCustomer = exports.registerCustomer = void 0;
+exports.logout = exports.refresh = exports.getMe = exports.resetPassword = exports.verifyOTPHandler = exports.forgotPassword = exports.loginAdmin = exports.loginWorker = exports.registerWorker = exports.registerWorkerWithGoogle = exports.googleAuthWorker = exports.loginCustomer = exports.completeGoogleRegistration = exports.googleAuthCustomer = exports.registerCustomer = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const crypto_1 = __importDefault(require("crypto"));
 const axios_1 = __importDefault(require("axios"));
@@ -115,6 +115,21 @@ const issueTokens = async (res, userId, role) => {
     // For Vercel client + Render server cross-site auth, production cookie must be SameSite=None; Secure.
     res.cookie('refreshToken', refreshToken, refreshCookieOptions);
     return accessToken;
+};
+const toWorkerAuthPayload = (worker) => ({
+    id: worker._id,
+    fullName: worker.fullName,
+    phone: worker.phone,
+    email: worker.email,
+    profileImage: worker.profileImage,
+    accountStatus: worker.accountStatus,
+    profileCompleted: worker.profileCompleted,
+    isActive: worker.isActive,
+    balance: worker.balance,
+});
+const generateGooglePlaceholderPassword = () => {
+    const randomChunk = crypto_1.default.randomBytes(18).toString('base64url');
+    return `Gg1!${randomChunk}`;
 };
 // ─── Customer Registration ───
 const registerCustomer = async (req, res) => {
@@ -344,6 +359,147 @@ const loginCustomer = async (req, res) => {
     }
 };
 exports.loginCustomer = loginCustomer;
+// ─── Worker Google OAuth ───
+const googleAuthWorker = async (req, res) => {
+    try {
+        const { credential } = req.body;
+        if (!credential || typeof credential !== 'string') {
+            res.status(400).json({ message: 'Google credential is required' });
+            return;
+        }
+        const { email, fullName, googleId, profileImage } = await resolveGoogleIdentity(credential);
+        const worker = await Worker_1.default.findOne({ $or: [{ googleId }, { email }] });
+        if (!worker) {
+            res.status(200).json({
+                needsPhone: true,
+                googleData: { email, fullName, googleId, profileImage },
+                email,
+                fullName,
+                googleId,
+                profileImage,
+            });
+            return;
+        }
+        if (!worker.googleId) {
+            worker.googleId = googleId;
+        }
+        if (!worker.profileImage && profileImage) {
+            worker.profileImage = profileImage;
+        }
+        await worker.save();
+        const accessToken = await issueTokens(res, worker._id.toString(), 'worker');
+        res.json({
+            message: 'Login successful',
+            accessToken,
+            worker: toWorkerAuthPayload(worker),
+        });
+    }
+    catch (error) {
+        console.error('Worker Google auth error:', error);
+        const message = error instanceof Error ? error.message : '';
+        if (message.includes('Google token') || message.includes('Invalid Google')) {
+            res.status(401).json({ message: 'Google authentication failed' });
+            return;
+        }
+        res.status(500).json({ message: 'Google authentication failed' });
+    }
+};
+exports.googleAuthWorker = googleAuthWorker;
+// ─── Worker Google Registration ───
+const registerWorkerWithGoogle = async (req, res) => {
+    try {
+        const files = req.files;
+        if (!files?.aadhaarFront?.[0] || !files?.aadhaarBack?.[0]) {
+            res.status(400).json({ message: 'Aadhaar card front and back photos are required' });
+            return;
+        }
+        const phone = typeof req.body?.phone === 'string' ? req.body.phone.trim() : '';
+        if (!/^[6-9]\d{9}$/.test(phone)) {
+            res.status(400).json({ message: 'Valid 10-digit Indian phone number required' });
+            return;
+        }
+        let email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+        let fullName = typeof req.body?.fullName === 'string' ? req.body.fullName.trim() : '';
+        let googleId = typeof req.body?.googleId === 'string' ? req.body.googleId.trim() : '';
+        let profileImage = typeof req.body?.profileImage === 'string' ? req.body.profileImage.trim() : '';
+        const credential = typeof req.body?.credential === 'string' ? req.body.credential.trim() : '';
+        if ((!email || !fullName || !googleId) && credential) {
+            const identity = await resolveGoogleIdentity(credential);
+            email = identity.email;
+            fullName = identity.fullName;
+            googleId = identity.googleId;
+            profileImage = identity.profileImage;
+        }
+        if (!email || !fullName || !googleId) {
+            res.status(400).json({ message: 'Google profile data is incomplete' });
+            return;
+        }
+        const workerByPhone = await Worker_1.default.findOne({ phone });
+        const workerByGoogleOrEmail = await Worker_1.default.findOne({ $or: [{ googleId }, { email }] });
+        if (workerByPhone &&
+            workerByGoogleOrEmail &&
+            workerByPhone._id.toString() !== workerByGoogleOrEmail._id.toString()) {
+            res.status(400).json({ message: 'Phone number is already linked to another account' });
+            return;
+        }
+        const existingWorker = workerByPhone || workerByGoogleOrEmail;
+        if (existingWorker?.phone && existingWorker.phone !== phone) {
+            res.status(400).json({ message: 'Google account is already linked to another phone number' });
+            return;
+        }
+        const [frontUpload, backUpload] = await Promise.all([
+            (0, cloudinary_service_1.uploadBufferToCloudinary)(files.aadhaarFront[0].buffer, 'aadhaar'),
+            (0, cloudinary_service_1.uploadBufferToCloudinary)(files.aadhaarBack[0].buffer, 'aadhaar'),
+        ]);
+        if (existingWorker) {
+            existingWorker.fullName = existingWorker.fullName || fullName;
+            existingWorker.email = existingWorker.email || email;
+            existingWorker.googleId = existingWorker.googleId || googleId;
+            existingWorker.profileImage = existingWorker.profileImage || profileImage;
+            existingWorker.aadhaarFront = existingWorker.aadhaarFront || frontUpload.url;
+            existingWorker.aadhaarBack = existingWorker.aadhaarBack || backUpload.url;
+            if (!existingWorker.password) {
+                existingWorker.password = await bcryptjs_1.default.hash(generateGooglePlaceholderPassword(), 12);
+            }
+            await existingWorker.save();
+            const accessToken = await issueTokens(res, existingWorker._id.toString(), 'worker');
+            res.json({
+                message: 'Login successful',
+                accessToken,
+                worker: toWorkerAuthPayload(existingWorker),
+            });
+            return;
+        }
+        const generatedPasswordHash = await bcryptjs_1.default.hash(generateGooglePlaceholderPassword(), 12);
+        const worker = await Worker_1.default.create({
+            fullName,
+            phone,
+            email,
+            googleId,
+            profileImage,
+            password: generatedPasswordHash,
+            aadhaarFront: frontUpload.url,
+            aadhaarBack: backUpload.url,
+            accountStatus: 'test',
+        });
+        const accessToken = await issueTokens(res, worker._id.toString(), 'worker');
+        res.status(201).json({
+            message: 'Registration successful. Complete your profile to start working.',
+            accessToken,
+            worker: toWorkerAuthPayload(worker),
+        });
+    }
+    catch (error) {
+        console.error('Register worker with Google error:', error);
+        const message = error instanceof Error ? error.message : '';
+        if (message.includes('Google token') || message.includes('Invalid Google')) {
+            res.status(401).json({ message: 'Google authentication failed' });
+            return;
+        }
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.registerWorkerWithGoogle = registerWorkerWithGoogle;
 // ─── Worker Registration ───
 const registerWorker = async (req, res) => {
     try {
@@ -383,13 +539,7 @@ const registerWorker = async (req, res) => {
         res.status(201).json({
             message: 'Registration successful. Complete your profile to start working.',
             accessToken,
-            worker: {
-                id: worker._id,
-                fullName: worker.fullName,
-                phone: worker.phone,
-                accountStatus: worker.accountStatus,
-                profileCompleted: worker.profileCompleted,
-            },
+            worker: toWorkerAuthPayload(worker),
         });
     }
     catch (error) {
@@ -407,6 +557,10 @@ const loginWorker = async (req, res) => {
             res.status(401).json({ message: 'Invalid credentials' });
             return;
         }
+        if (!worker.password) {
+            res.status(401).json({ message: 'Please login with Google' });
+            return;
+        }
         const isMatch = await bcryptjs_1.default.compare(password, worker.password);
         if (!isMatch) {
             res.status(401).json({ message: 'Invalid credentials' });
@@ -416,15 +570,7 @@ const loginWorker = async (req, res) => {
         res.json({
             message: 'Login successful',
             accessToken,
-            worker: {
-                id: worker._id,
-                fullName: worker.fullName,
-                phone: worker.phone,
-                accountStatus: worker.accountStatus,
-                profileCompleted: worker.profileCompleted,
-                isActive: worker.isActive,
-                balance: worker.balance,
-            },
+            worker: toWorkerAuthPayload(worker),
         });
     }
     catch (error) {

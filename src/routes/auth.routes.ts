@@ -4,6 +4,8 @@ import {
   googleAuthCustomer,
   completeGoogleRegistration,
   loginCustomer,
+  googleAuthWorker,
+  registerWorkerWithGoogle,
   registerWorker,
   loginWorker,
   loginAdmin,
@@ -36,6 +38,8 @@ router.post('/customer/login', loginValidation, handleValidationErrors, loginCus
 
 // Worker auth
 router.post('/worker/register', uploadAadhaar, registerWorkerValidation, handleValidationErrors, registerWorker);
+router.post('/worker/google', googleAuthWorker);
+router.post('/worker/google/register', uploadAadhaar, registerWorkerWithGoogle);
 router.post('/worker/login', workerLoginValidation, handleValidationErrors, loginWorker);
 
 // Admin auth

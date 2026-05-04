@@ -38,7 +38,8 @@ const workerSchema = new mongoose_1.Schema({
     fullName: { type: String, required: true, trim: true },
     phone: { type: String, required: true, unique: true, trim: true },
     email: { type: String, lowercase: true, trim: true, sparse: true },
-    password: { type: String, required: true, select: false },
+    password: { type: String, select: false },
+    googleId: { type: String, sparse: true },
     aadhaarFront: { type: String, required: true },
     aadhaarBack: { type: String, required: true },
     accountStatus: {
@@ -82,6 +83,7 @@ const workerSchema = new mongoose_1.Schema({
 }, { timestamps: true });
 workerSchema.index({ location: '2dsphere' });
 workerSchema.index({ phone: 1 });
+workerSchema.index({ googleId: 1 });
 workerSchema.index({ accountStatus: 1 });
 workerSchema.index({ isActive: 1 });
 exports.default = mongoose_1.default.model('Worker', workerSchema);

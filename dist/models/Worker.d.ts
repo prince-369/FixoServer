@@ -10,7 +10,8 @@ export interface IWorker extends Document {
     fullName: string;
     phone: string;
     email?: string;
-    password: string;
+    password?: string;
+    googleId?: string;
     aadhaarFront: string;
     aadhaarBack: string;
     accountStatus: WorkerAccountStatus;

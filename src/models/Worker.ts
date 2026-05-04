@@ -13,7 +13,8 @@ export interface IWorker extends Document {
   fullName: string;
   phone: string;
   email?: string;
-  password: string;
+  password?: string;
+  googleId?: string;
   aadhaarFront: string;
   aadhaarBack: string;
   accountStatus: WorkerAccountStatus;
@@ -51,7 +52,8 @@ const workerSchema = new Schema<IWorker>(
     fullName: { type: String, required: true, trim: true },
     phone: { type: String, required: true, unique: true, trim: true },
     email: { type: String, lowercase: true, trim: true, sparse: true },
-    password: { type: String, required: true, select: false },
+    password: { type: String, select: false },
+    googleId: { type: String, sparse: true },
     aadhaarFront: { type: String, required: true },
     aadhaarBack: { type: String, required: true },
     accountStatus: {
@@ -98,6 +100,7 @@ const workerSchema = new Schema<IWorker>(
 
 workerSchema.index({ location: '2dsphere' });
 workerSchema.index({ phone: 1 });
+workerSchema.index({ googleId: 1 });
 workerSchema.index({ accountStatus: 1 });
 workerSchema.index({ isActive: 1 });
 

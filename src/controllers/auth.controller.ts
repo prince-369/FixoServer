@@ -158,6 +158,33 @@ const issueTokens = async (res: Response, userId: string, role: 'customer' | 'wo
   return accessToken;
 };
 
+const toWorkerAuthPayload = (worker: {
+  _id: unknown;
+  fullName: string;
+  phone: string;
+  email?: string;
+  accountStatus: string;
+  profileCompleted: boolean;
+  isActive: boolean;
+  balance: number;
+  profileImage?: string;
+}) => ({
+  id: worker._id,
+  fullName: worker.fullName,
+  phone: worker.phone,
+  email: worker.email,
+  profileImage: worker.profileImage,
+  accountStatus: worker.accountStatus,
+  profileCompleted: worker.profileCompleted,
+  isActive: worker.isActive,
+  balance: worker.balance,
+});
+
+const generateGooglePlaceholderPassword = (): string => {
+  const randomChunk = crypto.randomBytes(18).toString('base64url');
+  return `Gg1!${randomChunk}`;
+};
+
 // ─── Customer Registration ───
 export const registerCustomer = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -411,6 +438,171 @@ export const loginCustomer = async (req: Request, res: Response): Promise<void> 
   }
 };
 
+// ─── Worker Google OAuth ───
+export const googleAuthWorker = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { credential } = req.body;
+    if (!credential || typeof credential !== 'string') {
+      res.status(400).json({ message: 'Google credential is required' });
+      return;
+    }
+
+    const { email, fullName, googleId, profileImage } = await resolveGoogleIdentity(credential);
+
+    const worker = await Worker.findOne({ $or: [{ googleId }, { email }] });
+
+    if (!worker) {
+      res.status(200).json({
+        needsPhone: true,
+        googleData: { email, fullName, googleId, profileImage },
+        email,
+        fullName,
+        googleId,
+        profileImage,
+      });
+      return;
+    }
+
+    if (!worker.googleId) {
+      worker.googleId = googleId;
+    }
+    if (!worker.profileImage && profileImage) {
+      worker.profileImage = profileImage;
+    }
+    await worker.save();
+
+    const accessToken = await issueTokens(res, worker._id.toString(), 'worker');
+
+    res.json({
+      message: 'Login successful',
+      accessToken,
+      worker: toWorkerAuthPayload(worker),
+    });
+  } catch (error) {
+    console.error('Worker Google auth error:', error);
+    const message = error instanceof Error ? error.message : '';
+    if (message.includes('Google token') || message.includes('Invalid Google')) {
+      res.status(401).json({ message: 'Google authentication failed' });
+      return;
+    }
+    res.status(500).json({ message: 'Google authentication failed' });
+  }
+};
+
+// ─── Worker Google Registration ───
+export const registerWorkerWithGoogle = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+
+    if (!files?.aadhaarFront?.[0] || !files?.aadhaarBack?.[0]) {
+      res.status(400).json({ message: 'Aadhaar card front and back photos are required' });
+      return;
+    }
+
+    const phone = typeof req.body?.phone === 'string' ? req.body.phone.trim() : '';
+    if (!/^[6-9]\d{9}$/.test(phone)) {
+      res.status(400).json({ message: 'Valid 10-digit Indian phone number required' });
+      return;
+    }
+
+    let email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    let fullName = typeof req.body?.fullName === 'string' ? req.body.fullName.trim() : '';
+    let googleId = typeof req.body?.googleId === 'string' ? req.body.googleId.trim() : '';
+    let profileImage = typeof req.body?.profileImage === 'string' ? req.body.profileImage.trim() : '';
+
+    const credential = typeof req.body?.credential === 'string' ? req.body.credential.trim() : '';
+    if ((!email || !fullName || !googleId) && credential) {
+      const identity = await resolveGoogleIdentity(credential);
+      email = identity.email;
+      fullName = identity.fullName;
+      googleId = identity.googleId;
+      profileImage = identity.profileImage;
+    }
+
+    if (!email || !fullName || !googleId) {
+      res.status(400).json({ message: 'Google profile data is incomplete' });
+      return;
+    }
+
+    const workerByPhone = await Worker.findOne({ phone });
+    const workerByGoogleOrEmail = await Worker.findOne({ $or: [{ googleId }, { email }] });
+
+    if (
+      workerByPhone &&
+      workerByGoogleOrEmail &&
+      workerByPhone._id.toString() !== workerByGoogleOrEmail._id.toString()
+    ) {
+      res.status(400).json({ message: 'Phone number is already linked to another account' });
+      return;
+    }
+
+    const existingWorker = workerByPhone || workerByGoogleOrEmail;
+
+    if (existingWorker?.phone && existingWorker.phone !== phone) {
+      res.status(400).json({ message: 'Google account is already linked to another phone number' });
+      return;
+    }
+
+    const [frontUpload, backUpload] = await Promise.all([
+      uploadBufferToCloudinary(files.aadhaarFront[0].buffer, 'aadhaar'),
+      uploadBufferToCloudinary(files.aadhaarBack[0].buffer, 'aadhaar'),
+    ]);
+
+    if (existingWorker) {
+      existingWorker.fullName = existingWorker.fullName || fullName;
+      existingWorker.email = existingWorker.email || email;
+      existingWorker.googleId = existingWorker.googleId || googleId;
+      existingWorker.profileImage = existingWorker.profileImage || profileImage;
+      existingWorker.aadhaarFront = existingWorker.aadhaarFront || frontUpload.url;
+      existingWorker.aadhaarBack = existingWorker.aadhaarBack || backUpload.url;
+
+      if (!existingWorker.password) {
+        existingWorker.password = await bcrypt.hash(generateGooglePlaceholderPassword(), 12);
+      }
+
+      await existingWorker.save();
+
+      const accessToken = await issueTokens(res, existingWorker._id.toString(), 'worker');
+      res.json({
+        message: 'Login successful',
+        accessToken,
+        worker: toWorkerAuthPayload(existingWorker),
+      });
+      return;
+    }
+
+    const generatedPasswordHash = await bcrypt.hash(generateGooglePlaceholderPassword(), 12);
+
+    const worker = await Worker.create({
+      fullName,
+      phone,
+      email,
+      googleId,
+      profileImage,
+      password: generatedPasswordHash,
+      aadhaarFront: frontUpload.url,
+      aadhaarBack: backUpload.url,
+      accountStatus: 'test',
+    });
+
+    const accessToken = await issueTokens(res, worker._id.toString(), 'worker');
+
+    res.status(201).json({
+      message: 'Registration successful. Complete your profile to start working.',
+      accessToken,
+      worker: toWorkerAuthPayload(worker),
+    });
+  } catch (error) {
+    console.error('Register worker with Google error:', error);
+    const message = error instanceof Error ? error.message : '';
+    if (message.includes('Google token') || message.includes('Invalid Google')) {
+      res.status(401).json({ message: 'Google authentication failed' });
+      return;
+    }
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 // ─── Worker Registration ───
 export const registerWorker = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -458,13 +650,7 @@ export const registerWorker = async (req: Request, res: Response): Promise<void>
     res.status(201).json({
       message: 'Registration successful. Complete your profile to start working.',
       accessToken,
-      worker: {
-        id: worker._id,
-        fullName: worker.fullName,
-        phone: worker.phone,
-        accountStatus: worker.accountStatus,
-        profileCompleted: worker.profileCompleted,
-      },
+      worker: toWorkerAuthPayload(worker),
     });
   } catch (error) {
     console.error('Register worker error:', error);
@@ -483,6 +669,11 @@ export const loginWorker = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
+    if (!worker.password) {
+      res.status(401).json({ message: 'Please login with Google' });
+      return;
+    }
+
     const isMatch = await bcrypt.compare(password, worker.password);
     if (!isMatch) {
       res.status(401).json({ message: 'Invalid credentials' });
@@ -494,15 +685,7 @@ export const loginWorker = async (req: Request, res: Response): Promise<void> =>
     res.json({
       message: 'Login successful',
       accessToken,
-      worker: {
-        id: worker._id,
-        fullName: worker.fullName,
-        phone: worker.phone,
-        accountStatus: worker.accountStatus,
-        profileCompleted: worker.profileCompleted,
-        isActive: worker.isActive,
-        balance: worker.balance,
-      },
+      worker: toWorkerAuthPayload(worker),
     });
   } catch (error) {
     console.error('Login worker error:', error);

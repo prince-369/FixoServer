@@ -14,6 +14,8 @@ router.post('/customer/google/complete', auth_controller_1.completeGoogleRegistr
 router.post('/customer/login', validators_1.loginValidation, error_middleware_1.handleValidationErrors, auth_controller_1.loginCustomer);
 // Worker auth
 router.post('/worker/register', upload_middleware_1.uploadAadhaar, validators_1.registerWorkerValidation, error_middleware_1.handleValidationErrors, auth_controller_1.registerWorker);
+router.post('/worker/google', auth_controller_1.googleAuthWorker);
+router.post('/worker/google/register', upload_middleware_1.uploadAadhaar, auth_controller_1.registerWorkerWithGoogle);
 router.post('/worker/login', validators_1.workerLoginValidation, error_middleware_1.handleValidationErrors, auth_controller_1.loginWorker);
 // Admin auth
 router.post('/admin/login', auth_controller_1.loginAdmin);
