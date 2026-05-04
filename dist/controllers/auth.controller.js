@@ -16,6 +16,7 @@ const generateToken_1 = require("../utils/generateToken");
 const sms_service_1 = require("../services/sms.service");
 const email_service_1 = require("../services/email.service");
 const cloudinary_service_1 = require("../services/cloudinary.service");
+const env_1 = __importDefault(require("../config/env"));
 const REFRESH_TOKEN_DAYS = 7;
 const EMAIL_RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
 const OTP_RESET_TOKEN_TTL_MS = 10 * 60 * 1000;
@@ -48,6 +49,23 @@ const validateStrongPassword = (password) => {
     if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password))
         return 'Password must include a special character';
     return null;
+};
+const resolveGoogleIdentity = async (credential) => {
+    const googleRes = await axios_1.default.get(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`);
+    const { aud, email, email_verified, name, picture, sub } = googleRes.data;
+    const isEmailVerified = email_verified === true || email_verified === 'true';
+    if (env_1.default.GOOGLE_CLIENT_ID && aud && aud !== env_1.default.GOOGLE_CLIENT_ID) {
+        throw new Error('Google token audience mismatch');
+    }
+    if (!isEmailVerified || !email || !name || !sub) {
+        throw new Error('Invalid Google token payload');
+    }
+    return {
+        email: email.trim().toLowerCase(),
+        fullName: name.trim(),
+        googleId: sub.trim(),
+        profileImage: (picture || '').trim(),
+    };
 };
 const hashResetToken = (token) => {
     return crypto_1.default.createHash('sha256').update(token).digest('hex');
@@ -143,9 +161,11 @@ exports.registerCustomer = registerCustomer;
 const googleAuthCustomer = async (req, res) => {
     try {
         const { credential } = req.body;
-        // Verify Google token
-        const googleRes = await axios_1.default.get(`https://oauth2.googleapis.com/tokeninfo?id_token=${credential}`);
-        const { email, name, sub: googleId, picture } = googleRes.data;
+        if (!credential || typeof credential !== 'string') {
+            res.status(400).json({ message: 'Google credential is required' });
+            return;
+        }
+        const { email, fullName, googleId, profileImage } = await resolveGoogleIdentity(credential);
         let user = await User_1.default.findOne({ $or: [{ googleId }, { email }] });
         if (user) {
             if (user.isActive === false) {
@@ -161,7 +181,11 @@ const googleAuthCustomer = async (req, res) => {
             // Need phone number — send back a flag
             res.status(200).json({
                 needsPhone: true,
-                googleData: { email, fullName: name, googleId, profileImage: picture },
+                googleData: { email, fullName, googleId, profileImage },
+                email,
+                fullName,
+                googleId,
+                profileImage,
             });
             return;
         }
@@ -180,6 +204,11 @@ const googleAuthCustomer = async (req, res) => {
     }
     catch (error) {
         console.error('Google auth error:', error);
+        const message = error instanceof Error ? error.message : '';
+        if (message.includes('Google token') || message.includes('Invalid Google')) {
+            res.status(401).json({ message: 'Google authentication failed' });
+            return;
+        }
         res.status(500).json({ message: 'Google authentication failed' });
     }
 };
@@ -187,10 +216,58 @@ exports.googleAuthCustomer = googleAuthCustomer;
 // Complete Google registration (after getting phone number)
 const completeGoogleRegistration = async (req, res) => {
     try {
-        const { email, fullName, googleId, profileImage, phone } = req.body;
+        const phone = typeof req.body?.phone === 'string' ? req.body.phone.trim() : '';
+        if (!phone) {
+            res.status(400).json({ message: 'Phone number is required' });
+            return;
+        }
+        let email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+        let fullName = typeof req.body?.fullName === 'string' ? req.body.fullName.trim() : '';
+        let googleId = typeof req.body?.googleId === 'string' ? req.body.googleId.trim() : '';
+        let profileImage = typeof req.body?.profileImage === 'string' ? req.body.profileImage.trim() : '';
+        const credential = typeof req.body?.credential === 'string' ? req.body.credential.trim() : '';
+        if ((!email || !fullName || !googleId) && credential) {
+            const identity = await resolveGoogleIdentity(credential);
+            email = identity.email;
+            fullName = identity.fullName;
+            googleId = identity.googleId;
+            profileImage = identity.profileImage;
+        }
+        if (!email || !fullName || !googleId) {
+            res.status(400).json({ message: 'Google profile data is incomplete' });
+            return;
+        }
         const existingPhone = await User_1.default.findOne({ phone });
         if (existingPhone) {
             res.status(400).json({ message: 'Phone number already registered' });
+            return;
+        }
+        const existingByGoogle = await User_1.default.findOne({ $or: [{ googleId }, { email }] });
+        if (existingByGoogle) {
+            if (existingByGoogle.isActive === false) {
+                res.status(403).json({ message: 'This account has been deleted. Please register again.' });
+                return;
+            }
+            if (existingByGoogle.phone && existingByGoogle.phone !== phone) {
+                res.status(400).json({ message: 'Google account is already linked to another phone number' });
+                return;
+            }
+            existingByGoogle.googleId = existingByGoogle.googleId || googleId;
+            existingByGoogle.phone = existingByGoogle.phone || phone;
+            existingByGoogle.profileImage = existingByGoogle.profileImage || profileImage;
+            await existingByGoogle.save();
+            const accessToken = await issueTokens(res, existingByGoogle._id.toString(), 'customer');
+            res.json({
+                message: 'Login successful',
+                accessToken,
+                user: {
+                    id: existingByGoogle._id,
+                    fullName: existingByGoogle.fullName,
+                    email: existingByGoogle.email,
+                    phone: existingByGoogle.phone,
+                    profileImage: existingByGoogle.profileImage,
+                },
+            });
             return;
         }
         const user = await User_1.default.create({
@@ -215,6 +292,11 @@ const completeGoogleRegistration = async (req, res) => {
     }
     catch (error) {
         console.error('Complete Google registration error:', error);
+        const message = error instanceof Error ? error.message : '';
+        if (message.includes('Google token') || message.includes('Invalid Google')) {
+            res.status(401).json({ message: 'Google authentication failed' });
+            return;
+        }
         res.status(500).json({ message: 'Server error' });
     }
 };

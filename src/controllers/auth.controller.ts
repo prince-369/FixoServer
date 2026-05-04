@@ -11,6 +11,7 @@ import { generateAccessToken, generateRefreshTokenString } from '../utils/genera
 import { generateOTP, storeOTP, verifyOTP, sendOTP } from '../services/sms.service';
 import { sendPasswordResetEmail } from '../services/email.service';
 import { uploadBufferToCloudinary } from '../services/cloudinary.service';
+import env from '../config/env';
 
 const REFRESH_TOKEN_DAYS = 7;
 const EMAIL_RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
@@ -45,6 +46,44 @@ const validateStrongPassword = (password: string): string | null => {
   if (!/\d/.test(password)) return 'Password must include a number';
   if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) return 'Password must include a special character';
   return null;
+};
+
+interface GoogleTokenInfoResponse {
+  aud?: string;
+  email?: string;
+  email_verified?: boolean | string;
+  name?: string;
+  picture?: string;
+  sub?: string;
+}
+
+const resolveGoogleIdentity = async (credential: string): Promise<{
+  email: string;
+  fullName: string;
+  googleId: string;
+  profileImage: string;
+}> => {
+  const googleRes = await axios.get<GoogleTokenInfoResponse>(
+    `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`
+  );
+
+  const { aud, email, email_verified, name, picture, sub } = googleRes.data;
+  const isEmailVerified = email_verified === true || email_verified === 'true';
+
+  if (env.GOOGLE_CLIENT_ID && aud && aud !== env.GOOGLE_CLIENT_ID) {
+    throw new Error('Google token audience mismatch');
+  }
+
+  if (!isEmailVerified || !email || !name || !sub) {
+    throw new Error('Invalid Google token payload');
+  }
+
+  return {
+    email: email.trim().toLowerCase(),
+    fullName: name.trim(),
+    googleId: sub.trim(),
+    profileImage: (picture || '').trim(),
+  };
 };
 
 const hashResetToken = (token: string): string => {
@@ -169,13 +208,12 @@ export const registerCustomer = async (req: Request, res: Response): Promise<voi
 export const googleAuthCustomer = async (req: Request, res: Response): Promise<void> => {
   try {
     const { credential } = req.body;
+    if (!credential || typeof credential !== 'string') {
+      res.status(400).json({ message: 'Google credential is required' });
+      return;
+    }
 
-    // Verify Google token
-    const googleRes = await axios.get(
-      `https://oauth2.googleapis.com/tokeninfo?id_token=${credential}`
-    );
-
-    const { email, name, sub: googleId, picture } = googleRes.data;
+    const { email, fullName, googleId, profileImage } = await resolveGoogleIdentity(credential);
 
     let user = await User.findOne({ $or: [{ googleId }, { email }] });
 
@@ -193,7 +231,11 @@ export const googleAuthCustomer = async (req: Request, res: Response): Promise<v
       // Need phone number — send back a flag
       res.status(200).json({
         needsPhone: true,
-        googleData: { email, fullName: name, googleId, profileImage: picture },
+        googleData: { email, fullName, googleId, profileImage },
+        email,
+        fullName,
+        googleId,
+        profileImage,
       });
       return;
     }
@@ -213,6 +255,11 @@ export const googleAuthCustomer = async (req: Request, res: Response): Promise<v
     });
   } catch (error) {
     console.error('Google auth error:', error);
+    const message = error instanceof Error ? error.message : '';
+    if (message.includes('Google token') || message.includes('Invalid Google')) {
+      res.status(401).json({ message: 'Google authentication failed' });
+      return;
+    }
     res.status(500).json({ message: 'Google authentication failed' });
   }
 };
@@ -220,11 +267,66 @@ export const googleAuthCustomer = async (req: Request, res: Response): Promise<v
 // Complete Google registration (after getting phone number)
 export const completeGoogleRegistration = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { email, fullName, googleId, profileImage, phone } = req.body;
+    const phone = typeof req.body?.phone === 'string' ? req.body.phone.trim() : '';
+    if (!phone) {
+      res.status(400).json({ message: 'Phone number is required' });
+      return;
+    }
+
+    let email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    let fullName = typeof req.body?.fullName === 'string' ? req.body.fullName.trim() : '';
+    let googleId = typeof req.body?.googleId === 'string' ? req.body.googleId.trim() : '';
+    let profileImage = typeof req.body?.profileImage === 'string' ? req.body.profileImage.trim() : '';
+
+    const credential = typeof req.body?.credential === 'string' ? req.body.credential.trim() : '';
+    if ((!email || !fullName || !googleId) && credential) {
+      const identity = await resolveGoogleIdentity(credential);
+      email = identity.email;
+      fullName = identity.fullName;
+      googleId = identity.googleId;
+      profileImage = identity.profileImage;
+    }
+
+    if (!email || !fullName || !googleId) {
+      res.status(400).json({ message: 'Google profile data is incomplete' });
+      return;
+    }
 
     const existingPhone = await User.findOne({ phone });
     if (existingPhone) {
       res.status(400).json({ message: 'Phone number already registered' });
+      return;
+    }
+
+    const existingByGoogle = await User.findOne({ $or: [{ googleId }, { email }] });
+    if (existingByGoogle) {
+      if (existingByGoogle.isActive === false) {
+        res.status(403).json({ message: 'This account has been deleted. Please register again.' });
+        return;
+      }
+
+      if (existingByGoogle.phone && existingByGoogle.phone !== phone) {
+        res.status(400).json({ message: 'Google account is already linked to another phone number' });
+        return;
+      }
+
+      existingByGoogle.googleId = existingByGoogle.googleId || googleId;
+      existingByGoogle.phone = existingByGoogle.phone || phone;
+      existingByGoogle.profileImage = existingByGoogle.profileImage || profileImage;
+      await existingByGoogle.save();
+
+      const accessToken = await issueTokens(res, existingByGoogle._id.toString(), 'customer');
+      res.json({
+        message: 'Login successful',
+        accessToken,
+        user: {
+          id: existingByGoogle._id,
+          fullName: existingByGoogle.fullName,
+          email: existingByGoogle.email,
+          phone: existingByGoogle.phone,
+          profileImage: existingByGoogle.profileImage,
+        },
+      });
       return;
     }
 
@@ -251,6 +353,11 @@ export const completeGoogleRegistration = async (req: Request, res: Response): P
     });
   } catch (error) {
     console.error('Complete Google registration error:', error);
+    const message = error instanceof Error ? error.message : '';
+    if (message.includes('Google token') || message.includes('Invalid Google')) {
+      res.status(401).json({ message: 'Google authentication failed' });
+      return;
+    }
     res.status(500).json({ message: 'Server error' });
   }
 };
