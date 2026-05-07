@@ -342,6 +342,15 @@ export const cancelBooking = async (req: Request, res: Response): Promise<void> 
 
     await booking.save();
 
+    if (isOnlinePaid) {
+      sendAdminNotification({
+        type: 'refund_pending',
+        title: 'New Refund Request',
+        message: `Refund review needed for booking #${booking._id.toString().slice(-6).toUpperCase()}.`,
+        data: { bookingId: booking._id },
+      });
+    }
+
     if (!isOnlinePaid) {
       // Legacy safety: invalidate wrong booking payment entries for cancelled unpaid bookings.
       await Transaction.updateMany(
@@ -413,6 +422,13 @@ export const submitRefundDetails = async (req: Request, res: Response): Promise<
     };
 
     await booking.save();
+
+    sendAdminNotification({
+      type: 'refund_details_submitted',
+      title: 'Refund Details Submitted',
+      message: `Customer submitted refund details for booking #${booking._id.toString().slice(-6).toUpperCase()}.`,
+      data: { bookingId: booking._id },
+    });
 
     res.json({ message: 'Refund details submitted. Refund will be processed within 3-10 business days.' });
   } catch (error) {

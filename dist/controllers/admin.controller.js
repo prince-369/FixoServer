@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getWorkerDetail = exports.getAllWorkers = exports.getCashPayments = exports.deleteChatbotQA = exports.updateChatbotQA = exports.createChatbotQA = exports.getChatbotQA = exports.deleteAdminNotification = exports.markAllAdminNotificationsRead = exports.markAdminNotificationRead = exports.getAdminNotifications = exports.rejectRefund = exports.processRefund = exports.getRefunds = exports.notifyWorkerDues = exports.replyHelpTicket = exports.resolveHelpTicket = exports.getHelpTickets = exports.getWorkerDues = exports.getCommissions = exports.getCustomers = exports.reorderBanners = exports.updateBanner = exports.deleteBanner = exports.createBanner = exports.getBanners = exports.deleteCategory = exports.updateCategoryDetails = exports.updateCategory = exports.createCategory = exports.getCategories = exports.declineWithdrawal = exports.completeWithdrawal = exports.getWithdrawals = exports.saveEkycCapture = exports.rejectWorker = exports.approveWorker = exports.getWorkerEKYCDetails = exports.getPendingEKYC = exports.getDashboard = void 0;
+exports.getWorkerDetail = exports.getAllWorkers = exports.getCashPayments = exports.deleteChatbotQA = exports.updateChatbotQA = exports.createChatbotQA = exports.getChatbotQA = exports.deleteAdminNotification = exports.markAllAdminNotificationsRead = exports.markAdminNotificationRead = exports.getAdminNotifications = exports.rejectRefund = exports.processRefund = exports.getRefunds = exports.notifyWorkerDues = exports.replyHelpTicket = exports.resolveHelpTicket = exports.getHelpTickets = exports.getWorkerDues = exports.getCommissions = exports.getCustomers = exports.reorderBanners = exports.updateBanner = exports.deleteBanner = exports.createBanner = exports.getBanners = exports.deleteCategory = exports.updateCategoryDetails = exports.updateCategory = exports.createCategory = exports.getCategories = exports.declineWithdrawal = exports.completeWithdrawal = exports.getWithdrawals = exports.saveEkycCapture = exports.rejectWorker = exports.approveWorker = exports.getWorkerEKYCDetails = exports.getPendingEKYC = exports.getPendingAdminBadges = exports.getDashboard = void 0;
 const Worker_1 = __importDefault(require("../models/Worker"));
 const User_1 = __importDefault(require("../models/User"));
 const Booking_1 = __importDefault(require("../models/Booking"));
@@ -250,6 +250,32 @@ const getDashboard = async (_req, res) => {
     }
 };
 exports.getDashboard = getDashboard;
+// ─── Lightweight Pending Badge Counts ───
+const getPendingAdminBadges = async (_req, res) => {
+    try {
+        const [pendingEKYC, pendingWithdrawals, pendingRefunds, pendingSupport] = await Promise.all([
+            Worker_1.default.countDocuments({ accountStatus: { $in: ['test', 'ekyc_pending', 'ekyc_done'] } }),
+            Withdrawal_1.default.countDocuments({ status: 'pending' }),
+            Booking_1.default.countDocuments({ paymentStatus: 'refund_pending' }),
+            HelpTicket_1.default.countDocuments({ status: { $in: ['open', 'escalated'] } }),
+        ]);
+        const pendingFinance = pendingWithdrawals + pendingRefunds;
+        const totalActionRequired = pendingEKYC + pendingFinance + pendingSupport;
+        res.json({
+            pendingEKYC,
+            pendingWithdrawals,
+            pendingRefunds,
+            pendingSupport,
+            pendingFinance,
+            totalActionRequired,
+        });
+    }
+    catch (error) {
+        console.error('Pending admin badges error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.getPendingAdminBadges = getPendingAdminBadges;
 // ─── EKYC: Get Pending Workers ───
 const getPendingEKYC = async (_req, res) => {
     try {

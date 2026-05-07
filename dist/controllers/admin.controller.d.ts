@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 export declare const getDashboard: (_req: Request, res: Response) => Promise<void>;
+export declare const getPendingAdminBadges: (_req: Request, res: Response) => Promise<void>;
 export declare const getPendingEKYC: (_req: Request, res: Response) => Promise<void>;
 export declare const getWorkerEKYCDetails: (req: Request, res: Response) => Promise<void>;
 export declare const approveWorker: (req: Request, res: Response) => Promise<void>;

@@ -10,6 +10,7 @@ const mutationGuard = (0, idempotency_middleware_1.idempotencyGuard)(20000);
 router.use(auth_middleware_1.protect, (0, auth_middleware_1.authorize)('admin'));
 // Dashboard
 router.get('/dashboard', admin_controller_1.getDashboard);
+router.get('/pending-badges', admin_controller_1.getPendingAdminBadges);
 // EKYC
 router.get('/ekyc/pending', admin_controller_1.getPendingEKYC);
 router.get('/ekyc/:workerId', admin_controller_1.getWorkerEKYCDetails);

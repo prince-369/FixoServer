@@ -524,9 +524,9 @@ const categories = [
 
 async function seed() {
   try {
-    console.log('⏳ Connecting to MongoDB...');
+    console.log('[INFO] Connecting to MongoDB...');
     await mongoose.connect(MONGODB_URI);
-    console.log('✅ Connected!\n');
+    console.log('[OK] Connected!\n');
 
     let inserted = 0;
     let updated = 0;
@@ -541,20 +541,20 @@ async function seed() {
       // If createdAt and updatedAt are very close, it's a new doc
       const isNew = Math.abs(result.createdAt.getTime() - result.updatedAt.getTime()) < 1000;
       if (isNew) {
-        console.log(`✅ Created: ${cat.name}`);
+        console.log(`[OK] Created: ${cat.name}`);
         inserted++;
       } else {
-        console.log(`🔄 Updated: ${cat.name}`);
+        console.log(`[UPDATED] ${cat.name}`);
         updated++;
       }
     }
 
-    console.log(`\n🎉 Done! ${inserted} created, ${updated} updated.`);
+    console.log(`\n[DONE] ${inserted} created, ${updated} updated.`);
   } catch (err) {
-    console.error('❌ Seed error:', err);
+    console.error('[ERROR] Seed error:', err);
   } finally {
     await mongoose.disconnect();
-    console.log('🔌 Disconnected from MongoDB.');
+    console.log('[INFO] Disconnected from MongoDB.');
     process.exit(0);
   }
 }

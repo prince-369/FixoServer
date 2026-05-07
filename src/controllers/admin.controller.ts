@@ -225,6 +225,33 @@ export const getDashboard = async (_req: Request, res: Response): Promise<void> 
   }
 };
 
+// ─── Lightweight Pending Badge Counts ───
+export const getPendingAdminBadges = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const [pendingEKYC, pendingWithdrawals, pendingRefunds, pendingSupport] = await Promise.all([
+      Worker.countDocuments({ accountStatus: { $in: ['test', 'ekyc_pending', 'ekyc_done'] } }),
+      Withdrawal.countDocuments({ status: 'pending' }),
+      Booking.countDocuments({ paymentStatus: 'refund_pending' }),
+      HelpTicket.countDocuments({ status: { $in: ['open', 'escalated'] } }),
+    ]);
+
+    const pendingFinance = pendingWithdrawals + pendingRefunds;
+    const totalActionRequired = pendingEKYC + pendingFinance + pendingSupport;
+
+    res.json({
+      pendingEKYC,
+      pendingWithdrawals,
+      pendingRefunds,
+      pendingSupport,
+      pendingFinance,
+      totalActionRequired,
+    });
+  } catch (error) {
+    console.error('Pending admin badges error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 // ─── EKYC: Get Pending Workers ───
 export const getPendingEKYC = async (_req: Request, res: Response): Promise<void> => {
   try {

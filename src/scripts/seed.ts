@@ -27,7 +27,7 @@ const seed = async () => {
 
   // Seed Admin
   if (!ADMIN_SEED_EMAIL || !ADMIN_SEED_PASSWORD) {
-    console.log('ℹ️  Admin seed skipped. Set ADMIN_SEED_EMAIL and ADMIN_SEED_PASSWORD in env.');
+    console.log('[INFO] Admin seed skipped. Set ADMIN_SEED_EMAIL and ADMIN_SEED_PASSWORD in env.');
   } else {
     const hashedPassword = await bcrypt.hash(ADMIN_SEED_PASSWORD, 12);
 
@@ -37,7 +37,7 @@ const seed = async () => {
       { upsert: true, returnDocument: 'after', sort: { createdAt: 1 }, setDefaultsOnInsert: true }
     );
 
-    console.log(`✅ Admin credentials synced from env for ${admin?.email || ADMIN_SEED_EMAIL}`);
+    console.log(`[OK] Admin credentials synced from env for ${admin?.email || ADMIN_SEED_EMAIL}`);
   }
 
   // Seed Categories
@@ -45,13 +45,13 @@ const seed = async () => {
     const exists = await Category.findOne({ slug: cat.slug });
     if (!exists) {
       await Category.create(cat);
-      console.log(`✅ Category created: ${cat.name}`);
+      console.log(`[OK] Category created: ${cat.name}`);
     } else {
-      console.log(`ℹ️  Category exists: ${cat.name}`);
+      console.log(`[INFO] Category exists: ${cat.name}`);
     }
   }
 
-  console.log('\n🎉 Seeding complete!');
+  console.log('\n[DONE] Seeding complete!');
   await mongoose.disconnect();
   process.exit(0);
 };
