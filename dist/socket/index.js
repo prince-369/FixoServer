@@ -12,6 +12,7 @@ const Notification_1 = __importDefault(require("../models/Notification"));
 const Admin_1 = __importDefault(require("../models/Admin"));
 const generateToken_1 = require("../utils/generateToken");
 const webPush_service_1 = require("../services/webPush.service");
+const mobilePush_service_1 = require("../services/mobilePush.service");
 const metrics_1 = require("../monitoring/metrics");
 let io;
 let isSocketInitialized = false;
@@ -640,19 +641,8 @@ const sendNotification = async (params) => {
                 expiresAt: notification.expiresAt,
             };
             io.to(`user:${params.recipientId}`).emit('notification_event', payload);
-            await (0, webPush_service_1.sendWebPushNotification)({
-                recipientId: params.recipientId,
-                recipientModel: params.recipientModel,
-                notificationId: String(notification._id),
-                type: params.type,
-                title: params.title,
-                message: params.message,
-                data: params.data,
-                createdAt: notification.createdAt,
-            });
-            return;
         }
-        await (0, webPush_service_1.sendWebPushNotification)({
+        const pushPayload = {
             recipientId: params.recipientId,
             recipientModel: params.recipientModel,
             notificationId: String(notification._id),
@@ -661,7 +651,11 @@ const sendNotification = async (params) => {
             message: params.message,
             data: params.data,
             createdAt: notification.createdAt,
-        });
+        };
+        await Promise.allSettled([
+            (0, webPush_service_1.sendWebPushNotification)(pushPayload),
+            (0, mobilePush_service_1.sendMobilePushNotification)(pushPayload),
+        ]);
     }
     catch (error) {
         console.error('sendNotification error:', error);

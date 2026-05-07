@@ -59,6 +59,11 @@ interface EnvConfig {
   WEB_PUSH_PRIVATE_KEY: string;
   WEB_PUSH_SUBJECT: string;
   WEB_PUSH_TTL_SECONDS: number;
+  MOBILE_PUSH_ENABLED: boolean;
+  FIREBASE_SERVICE_ACCOUNT_JSON: string;
+  FIREBASE_PROJECT_ID: string;
+  FIREBASE_CLIENT_EMAIL: string;
+  FIREBASE_PRIVATE_KEY: string;
   MAPCN_GEOCODE_URL: string;
   MAPCN_REVERSE_GEOCODE_URL: string;
   MAPCN_ROUTING_URL: string;
@@ -211,6 +216,11 @@ const env: EnvConfig = {
   WEB_PUSH_PRIVATE_KEY: process.env.WEB_PUSH_PRIVATE_KEY || '',
   WEB_PUSH_SUBJECT: process.env.WEB_PUSH_SUBJECT || '',
   WEB_PUSH_TTL_SECONDS: parseNumberEnv('WEB_PUSH_TTL_SECONDS', 3600, { min: 60, max: 86400 }),
+  MOBILE_PUSH_ENABLED: parseBooleanEnv('MOBILE_PUSH_ENABLED', true),
+  FIREBASE_SERVICE_ACCOUNT_JSON: process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '',
+  FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || '',
+  FIREBASE_CLIENT_EMAIL: process.env.FIREBASE_CLIENT_EMAIL || '',
+  FIREBASE_PRIVATE_KEY: process.env.FIREBASE_PRIVATE_KEY || '',
   MAPCN_GEOCODE_URL: process.env.MAPCN_GEOCODE_URL || 'https://nominatim.openstreetmap.org/search',
   MAPCN_REVERSE_GEOCODE_URL: process.env.MAPCN_REVERSE_GEOCODE_URL || 'https://nominatim.openstreetmap.org/reverse',
   MAPCN_ROUTING_URL: process.env.MAPCN_ROUTING_URL || 'https://router.project-osrm.org/route/v1/driving',

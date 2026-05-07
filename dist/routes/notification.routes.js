@@ -9,5 +9,8 @@ router.get('/push/config', notification_controller_1.getPushConfig);
 router.post('/push/subscribe', notification_controller_1.subscribePush);
 router.post('/push/unsubscribe', notification_controller_1.unsubscribePush);
 router.post('/push/unsubscribe-all', notification_controller_1.unsubscribeAllPush);
+router.post('/mobile/register', notification_controller_1.registerMobilePushToken);
+router.post('/mobile/unregister', notification_controller_1.unregisterMobilePushToken);
+router.post('/mobile/unregister-all', notification_controller_1.unregisterAllMobilePushTokens);
 exports.default = router;
 //# sourceMappingURL=notification.routes.js.map

@@ -8,6 +8,7 @@ import Notification from '../models/Notification';
 import Admin from '../models/Admin';
 import { verifyAccessToken } from '../utils/generateToken';
 import { sendWebPushNotification } from '../services/webPush.service';
+import { sendMobilePushNotification } from '../services/mobilePush.service';
 import {
   recordSocketConnected,
   recordSocketDisconnected,
@@ -710,21 +711,9 @@ export const sendNotification = async (params: {
       };
 
       io.to(`user:${params.recipientId}`).emit('notification_event', payload);
-
-      await sendWebPushNotification({
-        recipientId: params.recipientId,
-        recipientModel: params.recipientModel,
-        notificationId: String(notification._id),
-        type: params.type,
-        title: params.title,
-        message: params.message,
-        data: params.data,
-        createdAt: notification.createdAt,
-      });
-      return;
     }
 
-    await sendWebPushNotification({
+    const pushPayload = {
       recipientId: params.recipientId,
       recipientModel: params.recipientModel,
       notificationId: String(notification._id),
@@ -733,7 +722,12 @@ export const sendNotification = async (params: {
       message: params.message,
       data: params.data,
       createdAt: notification.createdAt,
-    });
+    };
+
+    await Promise.allSettled([
+      sendWebPushNotification(pushPayload),
+      sendMobilePushNotification(pushPayload),
+    ]);
   } catch (error) {
     console.error('sendNotification error:', error);
   }

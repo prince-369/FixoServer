@@ -55,6 +55,11 @@ interface EnvConfig {
     WEB_PUSH_PRIVATE_KEY: string;
     WEB_PUSH_SUBJECT: string;
     WEB_PUSH_TTL_SECONDS: number;
+    MOBILE_PUSH_ENABLED: boolean;
+    FIREBASE_SERVICE_ACCOUNT_JSON: string;
+    FIREBASE_PROJECT_ID: string;
+    FIREBASE_CLIENT_EMAIL: string;
+    FIREBASE_PRIVATE_KEY: string;
     MAPCN_GEOCODE_URL: string;
     MAPCN_REVERSE_GEOCODE_URL: string;
     MAPCN_ROUTING_URL: string;

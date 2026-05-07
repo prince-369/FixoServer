@@ -1,10 +1,11 @@
 # Push Notification Setup
 
-This project now supports 3 delivery layers:
+This project now supports 4 delivery layers:
 
 1. In-app realtime (`Socket.IO`) when app is open.
 2. Browser push notifications (`Web Push`) for background/closed tabs.
-3. Persistent in-app inbox (`Notification` collection) for missed events.
+3. Native mobile push notifications (`FCM`) for APK/iOS apps.
+4. Persistent in-app inbox (`Notification` collection) for missed events.
 
 ## 1) Generate VAPID keys
 
@@ -28,6 +29,15 @@ WEB_PUSH_PUBLIC_KEY=...
 WEB_PUSH_PRIVATE_KEY=...
 WEB_PUSH_SUBJECT=mailto:alerts@fixo.app
 WEB_PUSH_TTL_SECONDS=3600
+
+# Native mobile push (Firebase Admin)
+MOBILE_PUSH_ENABLED=true
+# Option A: full JSON string
+FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
+# Option B: split values
+FIREBASE_PROJECT_ID=...
+FIREBASE_CLIENT_EMAIL=...
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n"
 ```
 
 ## 3) Client behavior
@@ -39,6 +49,9 @@ WEB_PUSH_TTL_SECONDS=3600
   - `POST /api/notifications/push/subscribe`
   - `POST /api/notifications/push/unsubscribe`
   - `POST /api/notifications/push/unsubscribe-all`
+  - `POST /api/notifications/mobile/register`
+  - `POST /api/notifications/mobile/unregister`
+  - `POST /api/notifications/mobile/unregister-all`
 
 ## 4) Important platform limits
 
