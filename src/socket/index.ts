@@ -380,7 +380,7 @@ export const initializeSocket = (server: HTTPServer): SocketIOServer => {
     // Worker cancels during countdown (before room creation)
     socket.on('ekyc:cancel-preparing', ({ workerId }: { workerId: string }) => {
       recordSocketEvent('ekyc:cancel-preparing');
-      io.to('role:admin').emit('ekyc:call-ended');
+      io.to('role:admin').emit('ekyc:call-ended', { workerId, reason: 'worker-cancelled-preparing' });
       deleteEkycNotifications(workerId);
       console.log(`[eKYC] Worker ${workerId} cancelled during preparation`);
     });
@@ -416,7 +416,7 @@ export const initializeSocket = (server: HTTPServer): SocketIOServer => {
           const currentRoom = ekycRooms.get(roomId);
           if (currentRoom && !currentRoom.adminId) {
             io.to(roomId).emit('ekyc:call-timeout');
-            io.to('role:admin').emit('ekyc:call-ended');
+            io.to('role:admin').emit('ekyc:call-ended', { roomId, workerId, reason: 'call-timeout' });
             io.in(roomId).socketsLeave(roomId);
             ekycRooms.delete(roomId);
             setActiveEkycRooms(ekycRooms.size);
@@ -450,7 +450,7 @@ export const initializeSocket = (server: HTTPServer): SocketIOServer => {
         recordSocketEvent('ekyc:reject-call');
         if (room.timeoutId) { clearTimeout(room.timeoutId); room.timeoutId = undefined; }
         io.to(roomId).emit('ekyc:call-rejected');
-        io.to('role:admin').emit('ekyc:call-ended');
+        io.to('role:admin').emit('ekyc:call-ended', { roomId, workerId: room.workerId, reason: 'admin-rejected-call' });
         io.in(roomId).socketsLeave(roomId);
         deleteEkycNotifications(room.workerId);
         ekycRooms.delete(roomId);
@@ -519,7 +519,7 @@ export const initializeSocket = (server: HTTPServer): SocketIOServer => {
     });
 
     // End eKYC call
-    socket.on('ekyc:end-call', ({ roomId }: { roomId: string }) => {
+    socket.on('ekyc:end-call', ({ roomId, reason }: { roomId: string; reason?: string }) => {
       if (typeof roomId !== 'string' || !roomId.trim()) return;
       recordSocketEvent('ekyc:end-call');
       const room = ekycRooms.get(roomId);
@@ -527,11 +527,11 @@ export const initializeSocket = (server: HTTPServer): SocketIOServer => {
         if (room.timeoutId) { clearTimeout(room.timeoutId); room.timeoutId = undefined; }
         deleteEkycNotifications(room.workerId);
       }
-      io.to(roomId).emit('ekyc:call-ended');
+      io.to(roomId).emit('ekyc:call-ended', { roomId, workerId: room?.workerId, reason: reason || 'manual-end-call' });
       ekycRooms.delete(roomId);
       setActiveEkycRooms(ekycRooms.size);
       io.in(roomId).socketsLeave(roomId);
-      console.log(`[eKYC] Call ended: ${roomId}`);
+      console.log(`[eKYC] Call ended: ${roomId}, reason: ${reason || 'manual-end-call'}`);
     });
 
     // Admin commands worker to switch camera (front/back)
@@ -585,17 +585,46 @@ export const initializeSocket = (server: HTTPServer): SocketIOServer => {
             if (nextSocketId) userSocketMap.set(userData.userId, nextSocketId);
           }
         }
-        // Clean up any eKYC rooms this user created
-        for (const [roomId, room] of ekycRooms.entries()) {
-          if (room.workerId === userData.userId || room.adminId === userData.userId) {
-            if (room.timeoutId) {
-              clearTimeout(room.timeoutId);
-            }
-            io.to(roomId).emit('ekyc:call-ended');
-            io.in(roomId).socketsLeave(roomId);
-            ekycRooms.delete(roomId);
-            setActiveEkycRooms(ekycRooms.size);
+
+        const isUserPresentInRoom = (userId: string, roomId: string): boolean => {
+          const userSockets = userSocketsMap.get(userId);
+          if (!userSockets || userSockets.size === 0) return false;
+
+          const roomSockets = io.sockets.adapter.rooms.get(roomId);
+          if (!roomSockets || roomSockets.size === 0) return false;
+
+          for (const sid of userSockets) {
+            if (roomSockets.has(sid)) return true;
           }
+
+          return false;
+        };
+
+        // Clean up eKYC rooms only when a participant has actually left the room.
+        // This avoids false call-end events when another tab/socket of same user disconnects.
+        for (const [roomId, room] of ekycRooms.entries()) {
+          const isWorkerRoom = room.workerId === userData.userId;
+          const isAdminRoom = room.adminId === userData.userId;
+          if (!isWorkerRoom && !isAdminRoom) continue;
+
+          room.readySockets.delete(socket.id);
+
+          const workerStillPresent = isUserPresentInRoom(room.workerId, roomId);
+          const adminStillPresent = room.adminId ? isUserPresentInRoom(room.adminId, roomId) : false;
+
+          // End room when a required participant is no longer present in this room.
+          const shouldEndRoom = !workerStillPresent || (Boolean(room.adminId) && !adminStillPresent);
+          if (!shouldEndRoom) continue;
+
+          if (room.timeoutId) {
+            clearTimeout(room.timeoutId);
+          }
+          io.to(roomId).emit('ekyc:call-ended', { roomId, workerId: room.workerId, reason: 'participant-disconnected' });
+          io.in(roomId).socketsLeave(roomId);
+          void deleteEkycNotifications(room.workerId);
+          ekycRooms.delete(roomId);
+          setActiveEkycRooms(ekycRooms.size);
+          console.log(`[eKYC] Room cleaned after participant disconnect: ${roomId}`);
         }
       }
       connectedUsers.delete(socket.id);
