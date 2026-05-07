@@ -18,6 +18,7 @@ import {
   rejectBooking,
   cancelBookingByWorker,
   sendMessage,
+  requestCompletionCode,
   completeWork,
   getFunds,
   getEarningsHistory,
@@ -60,6 +61,7 @@ router.post('/booking/:id/approve', mutationGuard, approveBooking);
 router.post('/booking/:id/reject', mutationGuard, rejectBooking);
 router.post('/booking/:id/cancel', mutationGuard, cancelBookingByWorker);
 router.post('/booking/:id/message', sendMessage);
+router.post('/booking/:id/request-completion-code', mutationGuard, requestCompletionCode);
 router.post('/booking/:id/complete', mutationGuard, completeWork);
 
 router.get('/funds', getFunds);

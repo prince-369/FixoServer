@@ -64,6 +64,8 @@ const bookingSchema = new mongoose_1.Schema({
     amount: { type: Number, default: 0 },
     cashSurcharge: { type: Number, default: 0 },
     completionPin: { type: String },
+    completionRequestedByWorkerAt: { type: Date },
+    completionCodeRevealedAt: { type: Date },
     workerMessage: { type: String },
     razorpayOrderId: { type: String },
     razorpayPaymentId: { type: String },

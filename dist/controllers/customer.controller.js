@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.escalateHelpTicket = exports.appendHelpTicketMessage = exports.getHelpTicketDetail = exports.getHelpTickets = exports.createHelpTicket = exports.getChatbotQA = exports.deleteNotification = exports.markAllNotificationsRead = exports.markNotificationRead = exports.getNotifications = exports.submitReview = exports.submitRefundDetails = exports.cancelBooking = exports.getTransactions = exports.getBookingDetail = exports.getBookings = exports.getBanners = exports.getCategoryDetail = exports.getCategories = exports.deleteAccount = exports.updateProfile = exports.getProfile = void 0;
+exports.escalateHelpTicket = exports.appendHelpTicketMessage = exports.getHelpTicketDetail = exports.getHelpTickets = exports.createHelpTicket = exports.getChatbotQA = exports.deleteNotification = exports.markAllNotificationsRead = exports.markNotificationRead = exports.getNotifications = exports.submitReview = exports.submitRefundDetails = exports.cancelBooking = exports.getTransactions = exports.revealCompletionCode = exports.getBookingDetail = exports.getBookings = exports.getBanners = exports.getCategoryDetail = exports.getCategories = exports.deleteAccount = exports.updateProfile = exports.getProfile = void 0;
 const User_1 = __importDefault(require("../models/User"));
 const Booking_1 = __importDefault(require("../models/Booking"));
 const Transaction_1 = __importDefault(require("../models/Transaction"));
@@ -249,6 +249,59 @@ const getBookingDetail = async (req, res) => {
     }
 };
 exports.getBookingDetail = getBookingDetail;
+// ─── Reveal Completion Code (customer confirms work is done) ───
+const revealCompletionCode = async (req, res) => {
+    try {
+        const booking = await Booking_1.default.findOne({
+            _id: req.params.id,
+            customer: req.user.id,
+            status: { $in: ['payment_done', 'in_progress'] },
+        });
+        if (!booking) {
+            res.status(404).json({ message: 'Booking not found' });
+            return;
+        }
+        if (!booking.completionPin) {
+            res.status(400).json({ message: 'Completion code is not available yet' });
+            return;
+        }
+        if (!booking.completionRequestedByWorkerAt) {
+            res.status(400).json({ message: 'Worker has not requested completion code yet' });
+            return;
+        }
+        if (!booking.completionCodeRevealedAt) {
+            booking.completionCodeRevealedAt = new Date();
+            await booking.save();
+        }
+        const payload = {
+            bookingId: booking._id,
+            status: booking.status,
+            completionCodeRevealed: true,
+            message: 'Customer revealed completion code.',
+        };
+        if (booking.assignedWorker) {
+            (0, socket_1.notifyUser)(booking.assignedWorker.toString(), 'booking_status_updated', payload);
+            await (0, socket_1.sendNotification)({
+                recipientId: booking.assignedWorker.toString(),
+                recipientModel: 'Worker',
+                type: 'completion_code_revealed',
+                title: 'Completion Code Revealed',
+                message: 'Customer has revealed the completion code. Proceed only after confirming work is fully done.',
+                data: { bookingId: booking._id },
+            });
+        }
+        (0, socket_1.notifyUser)(req.user.id, 'booking_status_updated', payload);
+        res.json({
+            message: 'Completion code revealed. Share it only after confirming work is fully completed.',
+            booking,
+        });
+    }
+    catch (error) {
+        console.error('Reveal completion code error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.revealCompletionCode = revealCompletionCode;
 // ─── Get Transactions ───
 const getTransactions = async (req, res) => {
     try {

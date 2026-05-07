@@ -742,6 +742,8 @@ export const rejectBooking = async (req: Request, res: Response): Promise<void> 
     booking.paymentMethod = undefined;
     booking.paymentStatus = 'pending';
     booking.completionPin = undefined;
+    booking.completionRequestedByWorkerAt = undefined;
+    booking.completionCodeRevealedAt = undefined;
     await booking.save();
 
     const customerMessage = hasPendingBids
@@ -869,6 +871,66 @@ const isDuesOverdue = (worker: any): boolean => {
   return false;
 };
 
+// ─── Worker requests customer completion code ───
+export const requestCompletionCode = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const booking = await Booking.findOne({
+      _id: req.params.id,
+      assignedWorker: req.user!.id,
+      status: { $in: ['payment_done', 'in_progress'] },
+    });
+
+    if (!booking) {
+      res.status(404).json({ message: 'Booking not found' });
+      return;
+    }
+
+    if (!booking.completionPin) {
+      res.status(400).json({ message: 'Completion code is not generated yet' });
+      return;
+    }
+
+    if (!booking.completionRequestedByWorkerAt) {
+      booking.completionRequestedByWorkerAt = new Date();
+    }
+
+    // Move to in-progress once worker explicitly marks work as completed/requesting final customer confirmation.
+    if (booking.status === 'payment_done') {
+      booking.status = 'in_progress';
+    }
+
+    await booking.save();
+
+    const payload = {
+      bookingId: booking._id,
+      status: booking.status,
+      completionCodeRequested: true,
+      message: 'Worker marked work as completed and requested your completion code.',
+    };
+
+    const customerId = booking.customer.toString();
+    notifyUser(customerId, 'booking_status_updated', payload);
+    notifyUser(req.user!.id, 'booking_status_updated', payload);
+
+    await sendNotification({
+      recipientId: customerId,
+      recipientModel: 'User',
+      type: 'completion_code_requested',
+      title: 'Work Completion Confirmation Needed',
+      message: 'Worker requested your completion code. Reveal and share the code only after work is fully done.',
+      data: { bookingId: booking._id },
+    });
+
+    res.json({
+      message: 'Completion code request sent to customer',
+      booking,
+    });
+  } catch (error) {
+    console.error('Request completion code error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 // ─── Complete Work (with PIN) ───
 export const completeWork = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -881,6 +943,16 @@ export const completeWork = async (req: Request, res: Response): Promise<void> =
 
     if (!booking) {
       res.status(404).json({ message: 'Booking not found' });
+      return;
+    }
+
+    if (!booking.completionRequestedByWorkerAt) {
+      res.status(400).json({ message: 'Please request completion code from customer first' });
+      return;
+    }
+
+    if (!booking.completionCodeRevealedAt) {
+      res.status(400).json({ message: 'Customer has not revealed completion code yet' });
       return;
     }
 

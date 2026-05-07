@@ -12,6 +12,7 @@ export declare const approveBooking: (req: Request, res: Response) => Promise<vo
 export declare const rejectBooking: (req: Request, res: Response) => Promise<void>;
 export declare const cancelBookingByWorker: (req: Request, res: Response) => Promise<void>;
 export declare const sendMessage: (req: Request, res: Response) => Promise<void>;
+export declare const requestCompletionCode: (req: Request, res: Response) => Promise<void>;
 export declare const completeWork: (req: Request, res: Response) => Promise<void>;
 export declare const getFunds: (req: Request, res: Response) => Promise<void>;
 export declare const getEarningsHistory: (req: Request, res: Response) => Promise<void>;

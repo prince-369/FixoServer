@@ -20,6 +20,7 @@ router.get('/bookings', customer_controller_1.getBookings);
 router.get('/bookings/:id', customer_controller_1.getBookingDetail);
 router.get('/transactions', customer_controller_1.getTransactions);
 router.post('/bookings/:id/cancel', mutationGuard, customer_controller_1.cancelBooking);
+router.post('/bookings/:id/reveal-completion-code', mutationGuard, customer_controller_1.revealCompletionCode);
 router.post('/bookings/:id/refund-details', mutationGuard, customer_controller_1.submitRefundDetails);
 router.post('/bookings/:id/review', mutationGuard, customer_controller_1.submitReview);
 router.get('/notifications', customer_controller_1.getNotifications);

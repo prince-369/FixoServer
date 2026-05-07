@@ -33,6 +33,8 @@ export interface IBooking extends Document {
   amount: number;
   cashSurcharge: number;
   completionPin?: string;
+  completionRequestedByWorkerAt?: Date;
+  completionCodeRevealedAt?: Date;
   workerMessage?: string;
   razorpayOrderId?: string;
   razorpayPaymentId?: string;
@@ -90,6 +92,8 @@ const bookingSchema = new Schema<IBooking>(
     amount: { type: Number, default: 0 },
     cashSurcharge: { type: Number, default: 0 },
     completionPin: { type: String },
+    completionRequestedByWorkerAt: { type: Date },
+    completionCodeRevealedAt: { type: Date },
     workerMessage: { type: String },
     razorpayOrderId: { type: String },
     razorpayPaymentId: { type: String },

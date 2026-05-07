@@ -7,6 +7,7 @@ export declare const getCategoryDetail: (req: Request, res: Response) => Promise
 export declare const getBanners: (_req: Request, res: Response) => Promise<void>;
 export declare const getBookings: (req: Request, res: Response) => Promise<void>;
 export declare const getBookingDetail: (req: Request, res: Response) => Promise<void>;
+export declare const revealCompletionCode: (req: Request, res: Response) => Promise<void>;
 export declare const getTransactions: (req: Request, res: Response) => Promise<void>;
 export declare const cancelBooking: (req: Request, res: Response) => Promise<void>;
 export declare const submitRefundDetails: (req: Request, res: Response) => Promise<void>;

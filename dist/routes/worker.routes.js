@@ -23,6 +23,7 @@ router.post('/booking/:id/approve', mutationGuard, worker_controller_1.approveBo
 router.post('/booking/:id/reject', mutationGuard, worker_controller_1.rejectBooking);
 router.post('/booking/:id/cancel', mutationGuard, worker_controller_1.cancelBookingByWorker);
 router.post('/booking/:id/message', worker_controller_1.sendMessage);
+router.post('/booking/:id/request-completion-code', mutationGuard, worker_controller_1.requestCompletionCode);
 router.post('/booking/:id/complete', mutationGuard, worker_controller_1.completeWork);
 router.get('/funds', worker_controller_1.getFunds);
 router.get('/funds/history', worker_controller_1.getEarningsHistory);

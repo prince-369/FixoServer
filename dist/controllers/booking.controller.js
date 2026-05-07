@@ -64,6 +64,8 @@ const finalizeOnlineBookingPayment = async (booking, orderId, paymentId) => {
     if (!booking.completionPin) {
         booking.completionPin = (0, generatePin_1.generatePin)();
     }
+    booking.completionRequestedByWorkerAt = undefined;
+    booking.completionCodeRevealedAt = undefined;
     await booking.save();
     const existingPayment = await Transaction_1.default.findOne({
         booking: booking._id,
@@ -311,6 +313,8 @@ const initiatePayment = async (req, res) => {
             booking.paymentStatus = 'pending';
             booking.status = 'payment_done';
             booking.completionPin = (0, generatePin_1.generatePin)();
+            booking.completionRequestedByWorkerAt = undefined;
+            booking.completionCodeRevealedAt = undefined;
             await booking.save();
             // Real-time: Notify worker that cash payment mode is selected
             if (booking.assignedWorker) {

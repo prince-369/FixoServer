@@ -13,6 +13,7 @@ import {
   getBookingDetail,
   getTransactions,
   cancelBooking,
+  revealCompletionCode,
   submitRefundDetails,
   submitReview,
   getNotifications,
@@ -46,6 +47,7 @@ router.get('/bookings', getBookings);
 router.get('/bookings/:id', getBookingDetail);
 router.get('/transactions', getTransactions);
 router.post('/bookings/:id/cancel', mutationGuard, cancelBooking);
+router.post('/bookings/:id/reveal-completion-code', mutationGuard, revealCompletionCode);
 router.post('/bookings/:id/refund-details', mutationGuard, submitRefundDetails);
 router.post('/bookings/:id/review', mutationGuard, submitReview);
 

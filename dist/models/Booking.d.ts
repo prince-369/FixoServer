@@ -22,6 +22,8 @@ export interface IBooking extends Document {
     amount: number;
     cashSurcharge: number;
     completionPin?: string;
+    completionRequestedByWorkerAt?: Date;
+    completionCodeRevealedAt?: Date;
     workerMessage?: string;
     razorpayOrderId?: string;
     razorpayPaymentId?: string;

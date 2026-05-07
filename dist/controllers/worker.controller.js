@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.escalateHelpTicket = exports.appendHelpTicketMessage = exports.getHelpTicketDetail = exports.getHelpTickets = exports.createHelpTicket = exports.getChatbotQA = exports.deleteNotification = exports.markAllNotificationsRead = exports.markNotificationRead = exports.getNotifications = exports.verifyDuesPayment = exports.payDuesFromWallet = exports.payDues = exports.getWithdrawals = exports.requestWithdrawal = exports.saveBankDetails = exports.getWalletTransactions = exports.getEarningsHistory = exports.getFunds = exports.completeWork = exports.sendMessage = exports.cancelBookingByWorker = exports.rejectBooking = exports.approveBooking = exports.submitBid = exports.getWorkRequestDetail = exports.getWorkRequests = exports.getDashboard = exports.updateLocation = exports.toggleActive = exports.completeProfile = exports.updateProfile = exports.getProfile = void 0;
+exports.escalateHelpTicket = exports.appendHelpTicketMessage = exports.getHelpTicketDetail = exports.getHelpTickets = exports.createHelpTicket = exports.getChatbotQA = exports.deleteNotification = exports.markAllNotificationsRead = exports.markNotificationRead = exports.getNotifications = exports.verifyDuesPayment = exports.payDuesFromWallet = exports.payDues = exports.getWithdrawals = exports.requestWithdrawal = exports.saveBankDetails = exports.getWalletTransactions = exports.getEarningsHistory = exports.getFunds = exports.completeWork = exports.requestCompletionCode = exports.sendMessage = exports.cancelBookingByWorker = exports.rejectBooking = exports.approveBooking = exports.submitBid = exports.getWorkRequestDetail = exports.getWorkRequests = exports.getDashboard = exports.updateLocation = exports.toggleActive = exports.completeProfile = exports.updateProfile = exports.getProfile = void 0;
 const Worker_1 = __importDefault(require("../models/Worker"));
 const Booking_1 = __importDefault(require("../models/Booking"));
 const WorkBid_1 = __importDefault(require("../models/WorkBid"));
@@ -671,6 +671,8 @@ const rejectBooking = async (req, res) => {
         booking.paymentMethod = undefined;
         booking.paymentStatus = 'pending';
         booking.completionPin = undefined;
+        booking.completionRequestedByWorkerAt = undefined;
+        booking.completionCodeRevealedAt = undefined;
         await booking.save();
         const customerMessage = hasPendingBids
             ? 'Assigned worker rejected. Previous bids are available again.'
@@ -783,6 +785,58 @@ const isDuesOverdue = (worker) => {
     }
     return false;
 };
+// ─── Worker requests customer completion code ───
+const requestCompletionCode = async (req, res) => {
+    try {
+        const booking = await Booking_1.default.findOne({
+            _id: req.params.id,
+            assignedWorker: req.user.id,
+            status: { $in: ['payment_done', 'in_progress'] },
+        });
+        if (!booking) {
+            res.status(404).json({ message: 'Booking not found' });
+            return;
+        }
+        if (!booking.completionPin) {
+            res.status(400).json({ message: 'Completion code is not generated yet' });
+            return;
+        }
+        if (!booking.completionRequestedByWorkerAt) {
+            booking.completionRequestedByWorkerAt = new Date();
+        }
+        // Move to in-progress once worker explicitly marks work as completed/requesting final customer confirmation.
+        if (booking.status === 'payment_done') {
+            booking.status = 'in_progress';
+        }
+        await booking.save();
+        const payload = {
+            bookingId: booking._id,
+            status: booking.status,
+            completionCodeRequested: true,
+            message: 'Worker marked work as completed and requested your completion code.',
+        };
+        const customerId = booking.customer.toString();
+        (0, socket_1.notifyUser)(customerId, 'booking_status_updated', payload);
+        (0, socket_1.notifyUser)(req.user.id, 'booking_status_updated', payload);
+        await (0, socket_1.sendNotification)({
+            recipientId: customerId,
+            recipientModel: 'User',
+            type: 'completion_code_requested',
+            title: 'Work Completion Confirmation Needed',
+            message: 'Worker requested your completion code. Reveal and share the code only after work is fully done.',
+            data: { bookingId: booking._id },
+        });
+        res.json({
+            message: 'Completion code request sent to customer',
+            booking,
+        });
+    }
+    catch (error) {
+        console.error('Request completion code error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.requestCompletionCode = requestCompletionCode;
 // ─── Complete Work (with PIN) ───
 const completeWork = async (req, res) => {
     try {
@@ -794,6 +848,14 @@ const completeWork = async (req, res) => {
         });
         if (!booking) {
             res.status(404).json({ message: 'Booking not found' });
+            return;
+        }
+        if (!booking.completionRequestedByWorkerAt) {
+            res.status(400).json({ message: 'Please request completion code from customer first' });
+            return;
+        }
+        if (!booking.completionCodeRevealedAt) {
+            res.status(400).json({ message: 'Customer has not revealed completion code yet' });
             return;
         }
         if (booking.completionPin !== pin) {

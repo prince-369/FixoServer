@@ -218,6 +218,67 @@ export const getBookingDetail = async (req: Request, res: Response): Promise<voi
   }
 };
 
+// ─── Reveal Completion Code (customer confirms work is done) ───
+export const revealCompletionCode = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const booking = await Booking.findOne({
+      _id: req.params.id,
+      customer: req.user!.id,
+      status: { $in: ['payment_done', 'in_progress'] },
+    });
+
+    if (!booking) {
+      res.status(404).json({ message: 'Booking not found' });
+      return;
+    }
+
+    if (!booking.completionPin) {
+      res.status(400).json({ message: 'Completion code is not available yet' });
+      return;
+    }
+
+    if (!booking.completionRequestedByWorkerAt) {
+      res.status(400).json({ message: 'Worker has not requested completion code yet' });
+      return;
+    }
+
+    if (!booking.completionCodeRevealedAt) {
+      booking.completionCodeRevealedAt = new Date();
+      await booking.save();
+    }
+
+    const payload = {
+      bookingId: booking._id,
+      status: booking.status,
+      completionCodeRevealed: true,
+      message: 'Customer revealed completion code.',
+    };
+
+    if (booking.assignedWorker) {
+      notifyUser(booking.assignedWorker.toString(), 'booking_status_updated', payload);
+
+      await sendNotification({
+        recipientId: booking.assignedWorker.toString(),
+        recipientModel: 'Worker',
+        type: 'completion_code_revealed',
+        title: 'Completion Code Revealed',
+        message: 'Customer has revealed the completion code. Proceed only after confirming work is fully done.',
+        data: { bookingId: booking._id },
+      });
+    }
+
+    notifyUser(req.user!.id, 'booking_status_updated', payload);
+
+    res.json({
+      message: 'Completion code revealed. Share it only after confirming work is fully completed.',
+      booking,
+    });
+  } catch (error) {
+    console.error('Reveal completion code error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 // ─── Get Transactions ───
 export const getTransactions = async (req: Request, res: Response): Promise<void> => {
   try {
