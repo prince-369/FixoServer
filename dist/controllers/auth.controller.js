@@ -620,7 +620,19 @@ exports.loginWorker = loginWorker;
 // ─── Admin Login ───
 const loginAdmin = async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+        const password = typeof req.body?.password === 'string' ? req.body.password : '';
+        const seedEmail = process.env.ADMIN_SEED_EMAIL
+            ? process.env.ADMIN_SEED_EMAIL.trim().replace(/^['"]+|['"]+$/g, '').trim().toLowerCase()
+            : '';
+        if (!email || !password) {
+            res.status(400).json({ message: 'Email and password are required' });
+            return;
+        }
+        if (seedEmail && email !== seedEmail) {
+            res.status(401).json({ message: 'Invalid credentials' });
+            return;
+        }
         const admin = await Admin_1.default.findOne({ email }).select('+password');
         if (!admin) {
             res.status(401).json({ message: 'Invalid credentials' });

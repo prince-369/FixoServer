@@ -11,6 +11,7 @@ import ChatbotQA from '../models/ChatbotQA';
 import { notifyUser, notifyRole, sendNotification } from '../socket';
 import Notification from '../models/Notification';
 import { deleteFromCloudinary, uploadBufferToCloudinary } from '../services/cloudinary.service';
+import { getSeedAdminBootstrapStatus } from '../services/adminBootstrap.service';
 
 // ─── Dashboard Stats ───
 export const getDashboard = async (_req: Request, res: Response): Promise<void> => {
@@ -248,6 +249,17 @@ export const getPendingAdminBadges = async (_req: Request, res: Response): Promi
     });
   } catch (error) {
     console.error('Pending admin badges error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─── Admin Bootstrap Sync Status (Admin-only) ───
+export const getAdminBootstrapStatus = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const status = await getSeedAdminBootstrapStatus();
+    res.json(status);
+  } catch (error) {
+    console.error('Admin bootstrap status error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };

@@ -4,6 +4,7 @@ import { uploadSingle } from '../middlewares/upload.middleware';
 import { idempotencyGuard } from '../middlewares/idempotency.middleware';
 import {
   getDashboard,
+  getAdminBootstrapStatus,
   getPendingAdminBadges,
   getPendingEKYC,
   getWorkerEKYCDetails,
@@ -53,6 +54,7 @@ router.use(protect, authorize('admin'));
 
 // Dashboard
 router.get('/dashboard', getDashboard);
+router.get('/bootstrap-status', getAdminBootstrapStatus);
 router.get('/pending-badges', getPendingAdminBadges);
 
 // EKYC

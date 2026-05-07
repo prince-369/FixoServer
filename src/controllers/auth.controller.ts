@@ -760,7 +760,21 @@ export const loginWorker = async (req: Request, res: Response): Promise<void> =>
 // ─── Admin Login ───
 export const loginAdmin = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { email, password } = req.body;
+    const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    const seedEmail = process.env.ADMIN_SEED_EMAIL
+      ? process.env.ADMIN_SEED_EMAIL.trim().replace(/^['"]+|['"]+$/g, '').trim().toLowerCase()
+      : '';
+
+    if (!email || !password) {
+      res.status(400).json({ message: 'Email and password are required' });
+      return;
+    }
+
+    if (seedEmail && email !== seedEmail) {
+      res.status(401).json({ message: 'Invalid credentials' });
+      return;
+    }
 
     const admin = await Admin.findOne({ email }).select('+password');
     if (!admin) {

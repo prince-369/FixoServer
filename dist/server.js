@@ -11,6 +11,7 @@ const socket_1 = require("./socket");
 const env_1 = __importDefault(require("./config/env"));
 const bookingCleanup_1 = require("./jobs/bookingCleanup");
 const rateLimit_middleware_1 = require("./middlewares/rateLimit.middleware");
+const adminBootstrap_service_1 = require("./services/adminBootstrap.service");
 const server = http_1.default.createServer(app_1.default);
 let cleanupTimer = null;
 let shuttingDown = false;
@@ -23,6 +24,7 @@ server.maxRequestsPerSocket = env_1.default.MAX_REQUESTS_PER_SOCKET;
 // Connect to MongoDB and start server
 const start = async () => {
     await (0, db_1.default)();
+    await (0, adminBootstrap_service_1.syncSeedAdminCredentials)();
     // Background job: auto-cancel stale 'finding_workers' bookings
     cleanupTimer = setInterval(() => {
         void (0, bookingCleanup_1.cancelStaleBookings)();

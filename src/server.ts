@@ -6,6 +6,7 @@ import { closeSocketServer, initializeSocket } from './socket';
 import env from './config/env';
 import { cancelStaleBookings } from './jobs/bookingCleanup';
 import { closeRateLimiterStore } from './middlewares/rateLimit.middleware';
+import { syncSeedAdminCredentials } from './services/adminBootstrap.service';
 
 const server = http.createServer(app);
 let cleanupTimer: NodeJS.Timeout | null = null;
@@ -22,6 +23,7 @@ server.headersTimeout = Math.max(env.HEADERS_TIMEOUT_MS, env.KEEP_ALIVE_TIMEOUT_
 // Connect to MongoDB and start server
 const start = async () => {
   await connectDB();
+  await syncSeedAdminCredentials();
 
   // Background job: auto-cancel stale 'finding_workers' bookings
   cleanupTimer = setInterval(() => {

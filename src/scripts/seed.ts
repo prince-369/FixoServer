@@ -1,11 +1,7 @@
 import mongoose from 'mongoose';
-import bcrypt from 'bcryptjs';
 import connectDB from '../config/db';
-import Admin from '../models/Admin';
 import Category from '../models/Category';
-
-const ADMIN_SEED_EMAIL = process.env.ADMIN_SEED_EMAIL?.trim().toLowerCase();
-const ADMIN_SEED_PASSWORD = process.env.ADMIN_SEED_PASSWORD?.trim();
+import { syncSeedAdminCredentials } from '../services/adminBootstrap.service';
 
 const categories = [
   { name: 'Electricity', slug: 'electricity', description: 'Electrical repairs, wiring, fan installation, switchboard fixes', order: 1 },
@@ -26,19 +22,7 @@ const seed = async () => {
   console.log('Seeding database...');
 
   // Seed Admin
-  if (!ADMIN_SEED_EMAIL || !ADMIN_SEED_PASSWORD) {
-    console.log('[INFO] Admin seed skipped. Set ADMIN_SEED_EMAIL and ADMIN_SEED_PASSWORD in env.');
-  } else {
-    const hashedPassword = await bcrypt.hash(ADMIN_SEED_PASSWORD, 12);
-
-    const admin = await Admin.findOneAndUpdate(
-      { $or: [{ email: ADMIN_SEED_EMAIL }, { role: 'superadmin' }] },
-      { $set: { email: ADMIN_SEED_EMAIL, password: hashedPassword, role: 'superadmin' } },
-      { upsert: true, returnDocument: 'after', sort: { createdAt: 1 }, setDefaultsOnInsert: true }
-    );
-
-    console.log(`[OK] Admin credentials synced from env for ${admin?.email || ADMIN_SEED_EMAIL}`);
-  }
+  await syncSeedAdminCredentials();
 
   // Seed Categories
   for (const cat of categories) {

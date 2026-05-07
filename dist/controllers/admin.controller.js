@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getWorkerDetail = exports.getAllWorkers = exports.getCashPayments = exports.deleteChatbotQA = exports.updateChatbotQA = exports.createChatbotQA = exports.getChatbotQA = exports.deleteAdminNotification = exports.markAllAdminNotificationsRead = exports.markAdminNotificationRead = exports.getAdminNotifications = exports.rejectRefund = exports.processRefund = exports.getRefunds = exports.notifyWorkerDues = exports.replyHelpTicket = exports.resolveHelpTicket = exports.getHelpTickets = exports.getWorkerDues = exports.getCommissions = exports.getCustomers = exports.reorderBanners = exports.updateBanner = exports.deleteBanner = exports.createBanner = exports.getBanners = exports.deleteCategory = exports.updateCategoryDetails = exports.updateCategory = exports.createCategory = exports.getCategories = exports.declineWithdrawal = exports.completeWithdrawal = exports.getWithdrawals = exports.saveEkycCapture = exports.rejectWorker = exports.approveWorker = exports.getWorkerEKYCDetails = exports.getPendingEKYC = exports.getPendingAdminBadges = exports.getDashboard = void 0;
+exports.getWorkerDetail = exports.getAllWorkers = exports.getCashPayments = exports.deleteChatbotQA = exports.updateChatbotQA = exports.createChatbotQA = exports.getChatbotQA = exports.deleteAdminNotification = exports.markAllAdminNotificationsRead = exports.markAdminNotificationRead = exports.getAdminNotifications = exports.rejectRefund = exports.processRefund = exports.getRefunds = exports.notifyWorkerDues = exports.replyHelpTicket = exports.resolveHelpTicket = exports.getHelpTickets = exports.getWorkerDues = exports.getCommissions = exports.getCustomers = exports.reorderBanners = exports.updateBanner = exports.deleteBanner = exports.createBanner = exports.getBanners = exports.deleteCategory = exports.updateCategoryDetails = exports.updateCategory = exports.createCategory = exports.getCategories = exports.declineWithdrawal = exports.completeWithdrawal = exports.getWithdrawals = exports.saveEkycCapture = exports.rejectWorker = exports.approveWorker = exports.getWorkerEKYCDetails = exports.getPendingEKYC = exports.getAdminBootstrapStatus = exports.getPendingAdminBadges = exports.getDashboard = void 0;
 const Worker_1 = __importDefault(require("../models/Worker"));
 const User_1 = __importDefault(require("../models/User"));
 const Booking_1 = __importDefault(require("../models/Booking"));
@@ -49,6 +49,7 @@ const ChatbotQA_1 = __importDefault(require("../models/ChatbotQA"));
 const socket_1 = require("../socket");
 const Notification_1 = __importDefault(require("../models/Notification"));
 const cloudinary_service_1 = require("../services/cloudinary.service");
+const adminBootstrap_service_1 = require("../services/adminBootstrap.service");
 // ─── Dashboard Stats ───
 const getDashboard = async (_req, res) => {
     try {
@@ -276,6 +277,18 @@ const getPendingAdminBadges = async (_req, res) => {
     }
 };
 exports.getPendingAdminBadges = getPendingAdminBadges;
+// ─── Admin Bootstrap Sync Status (Admin-only) ───
+const getAdminBootstrapStatus = async (_req, res) => {
+    try {
+        const status = await (0, adminBootstrap_service_1.getSeedAdminBootstrapStatus)();
+        res.json(status);
+    }
+    catch (error) {
+        console.error('Admin bootstrap status error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.getAdminBootstrapStatus = getAdminBootstrapStatus;
 // ─── EKYC: Get Pending Workers ───
 const getPendingEKYC = async (_req, res) => {
     try {
