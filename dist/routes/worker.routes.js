@@ -12,6 +12,7 @@ const mutationGuard = (0, idempotency_middleware_1.idempotencyGuard)(15000);
 router.use(auth_middleware_1.protect, (0, auth_middleware_1.authorize)('worker'));
 router.get('/profile', worker_controller_1.getProfile);
 router.put('/profile', upload_middleware_1.uploadSingle, worker_controller_1.updateProfile);
+router.post('/ekyc/re-request', mutationGuard, upload_middleware_1.uploadAadhaar, worker_controller_1.reRequestEKYC);
 router.post('/complete-profile', upload_middleware_1.uploadSingle, worker_controller_1.completeProfile);
 router.put('/toggle-active', worker_controller_1.toggleActive);
 router.put('/location', worker_controller_1.updateLocation);

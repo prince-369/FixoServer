@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.escalateHelpTicket = exports.appendHelpTicketMessage = exports.getHelpTicketDetail = exports.getHelpTickets = exports.createHelpTicket = exports.getChatbotQA = exports.deleteNotification = exports.markAllNotificationsRead = exports.markNotificationRead = exports.getNotifications = exports.verifyDuesPayment = exports.payDuesFromWallet = exports.payDues = exports.getWithdrawals = exports.requestWithdrawal = exports.saveBankDetails = exports.getWalletTransactions = exports.getEarningsHistory = exports.getFunds = exports.completeWork = exports.requestCompletionCode = exports.sendMessage = exports.cancelBookingByWorker = exports.rejectBooking = exports.approveBooking = exports.submitBid = exports.getWorkRequestDetail = exports.getWorkRequests = exports.getDashboard = exports.updateLocation = exports.toggleActive = exports.completeProfile = exports.updateProfile = exports.getProfile = void 0;
+exports.escalateHelpTicket = exports.appendHelpTicketMessage = exports.getHelpTicketDetail = exports.getHelpTickets = exports.createHelpTicket = exports.getChatbotQA = exports.deleteNotification = exports.markAllNotificationsRead = exports.markNotificationRead = exports.getNotifications = exports.verifyDuesPayment = exports.payDuesFromWallet = exports.payDues = exports.getWithdrawals = exports.requestWithdrawal = exports.saveBankDetails = exports.getWalletTransactions = exports.getEarningsHistory = exports.getFunds = exports.completeWork = exports.requestCompletionCode = exports.sendMessage = exports.cancelBookingByWorker = exports.rejectBooking = exports.approveBooking = exports.submitBid = exports.getWorkRequestDetail = exports.getWorkRequests = exports.getDashboard = exports.updateLocation = exports.toggleActive = exports.completeProfile = exports.reRequestEKYC = exports.updateProfile = exports.getProfile = void 0;
 const Worker_1 = __importDefault(require("../models/Worker"));
 const Booking_1 = __importDefault(require("../models/Booking"));
 const WorkBid_1 = __importDefault(require("../models/WorkBid"));
@@ -135,6 +135,77 @@ const updateProfile = async (req, res) => {
     }
 };
 exports.updateProfile = updateProfile;
+// ─── Re-request eKYC after rejection ───
+const reRequestEKYC = async (req, res) => {
+    try {
+        const worker = await Worker_1.default.findById(req.user.id);
+        if (!worker) {
+            res.status(404).json({ message: 'Worker not found' });
+            return;
+        }
+        if (worker.accountStatus !== 'rejected') {
+            res.status(400).json({ message: 'eKYC re-request is only allowed for rejected workers' });
+            return;
+        }
+        const files = req.files;
+        const nextFullName = typeof req.body?.fullName === 'string' ? req.body.fullName.trim() : '';
+        const nextEmailRaw = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+        if (!nextFullName) {
+            res.status(400).json({ message: 'Full name is required' });
+            return;
+        }
+        if (nextEmailRaw && nextEmailRaw !== (worker.email || '').toLowerCase()) {
+            const emailOwner = await Worker_1.default.findOne({ email: nextEmailRaw, _id: { $ne: worker._id } }).select('_id');
+            if (emailOwner) {
+                res.status(400).json({ message: 'Email is already in use by another worker account' });
+                return;
+            }
+            worker.email = nextEmailRaw;
+        }
+        worker.fullName = nextFullName;
+        const frontFile = files?.aadhaarFront?.[0];
+        const backFile = files?.aadhaarBack?.[0];
+        if (frontFile) {
+            const frontUpload = await (0, cloudinary_service_1.uploadBufferToCloudinary)(frontFile.buffer, 'aadhaar');
+            worker.aadhaarFront = frontUpload.url;
+        }
+        if (backFile) {
+            const backUpload = await (0, cloudinary_service_1.uploadBufferToCloudinary)(backFile.buffer, 'aadhaar');
+            worker.aadhaarBack = backUpload.url;
+        }
+        const previousReason = worker.ekycRejectionReason || '';
+        // Move worker back into pending review queue.
+        worker.accountStatus = 'test';
+        worker.isActive = false;
+        worker.ekycCaptures = [];
+        await worker.save();
+        const updatedWorker = await Worker_1.default.findById(worker._id).populate('categories');
+        (0, socket_1.notifyUser)(worker._id.toString(), 'kyc_status_updated', {
+            workerId: worker._id,
+            status: 're_requested',
+            previousReason,
+        });
+        await (0, socket_1.sendAdminNotification)({
+            type: 'ekyc_rerequest',
+            title: 'Worker Re-requested eKYC',
+            message: `${worker.fullName} has re-requested eKYC after rejection.`,
+            data: {
+                workerId: worker._id.toString(),
+                workerName: worker.fullName,
+                previousReason,
+            },
+        });
+        res.json({
+            message: 'Details updated. Your eKYC re-request has been submitted.',
+            worker: updatedWorker,
+        });
+    }
+    catch (error) {
+        console.error('Re-request eKYC error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.reRequestEKYC = reRequestEKYC;
 // ─── Complete Profile ───
 const completeProfile = async (req, res) => {
     try {

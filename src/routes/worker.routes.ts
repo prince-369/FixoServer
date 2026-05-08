@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { protect, authorize } from '../middlewares/auth.middleware';
-import { uploadSingle } from '../middlewares/upload.middleware';
+import { uploadAadhaar, uploadSingle } from '../middlewares/upload.middleware';
 import { handleValidationErrors } from '../middlewares/error.middleware';
 import { idempotencyGuard } from '../middlewares/idempotency.middleware';
 import { bidValidation, withdrawalValidation, bankDetailsValidation } from '../utils/validators';
 import {
   getProfile,
   updateProfile,
+  reRequestEKYC,
   completeProfile,
   toggleActive,
   updateLocation,
@@ -48,6 +49,7 @@ router.use(protect, authorize('worker'));
 
 router.get('/profile', getProfile);
 router.put('/profile', uploadSingle, updateProfile);
+router.post('/ekyc/re-request', mutationGuard, uploadAadhaar, reRequestEKYC);
 router.post('/complete-profile', uploadSingle, completeProfile);
 router.put('/toggle-active', toggleActive);
 router.put('/location', updateLocation);

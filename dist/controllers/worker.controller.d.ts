@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 export declare const getProfile: (req: Request, res: Response) => Promise<void>;
 export declare const updateProfile: (req: Request, res: Response) => Promise<void>;
+export declare const reRequestEKYC: (req: Request, res: Response) => Promise<void>;
 export declare const completeProfile: (req: Request, res: Response) => Promise<void>;
 export declare const toggleActive: (req: Request, res: Response) => Promise<void>;
 export declare const updateLocation: (req: Request, res: Response) => Promise<void>;

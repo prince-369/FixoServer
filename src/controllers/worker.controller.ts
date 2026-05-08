@@ -140,6 +140,91 @@ export const updateProfile = async (req: Request, res: Response): Promise<void> 
   }
 };
 
+// ─── Re-request eKYC after rejection ───
+export const reRequestEKYC = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const worker = await Worker.findById(req.user!.id);
+    if (!worker) {
+      res.status(404).json({ message: 'Worker not found' });
+      return;
+    }
+
+    if (worker.accountStatus !== 'rejected') {
+      res.status(400).json({ message: 'eKYC re-request is only allowed for rejected workers' });
+      return;
+    }
+
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+    const nextFullName = typeof req.body?.fullName === 'string' ? req.body.fullName.trim() : '';
+    const nextEmailRaw = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+
+    if (!nextFullName) {
+      res.status(400).json({ message: 'Full name is required' });
+      return;
+    }
+
+    if (nextEmailRaw && nextEmailRaw !== (worker.email || '').toLowerCase()) {
+      const emailOwner = await Worker.findOne({ email: nextEmailRaw, _id: { $ne: worker._id } }).select('_id');
+      if (emailOwner) {
+        res.status(400).json({ message: 'Email is already in use by another worker account' });
+        return;
+      }
+      worker.email = nextEmailRaw;
+    }
+
+    worker.fullName = nextFullName;
+
+    const frontFile = files?.aadhaarFront?.[0];
+    const backFile = files?.aadhaarBack?.[0];
+
+    if (frontFile) {
+      const frontUpload = await uploadBufferToCloudinary(frontFile.buffer, 'aadhaar');
+      worker.aadhaarFront = frontUpload.url;
+    }
+
+    if (backFile) {
+      const backUpload = await uploadBufferToCloudinary(backFile.buffer, 'aadhaar');
+      worker.aadhaarBack = backUpload.url;
+    }
+
+    const previousReason = worker.ekycRejectionReason || '';
+
+    // Move worker back into pending review queue.
+    worker.accountStatus = 'test';
+    worker.isActive = false;
+    worker.ekycCaptures = [];
+
+    await worker.save();
+
+    const updatedWorker = await Worker.findById(worker._id).populate('categories');
+
+    notifyUser(worker._id.toString(), 'kyc_status_updated', {
+      workerId: worker._id,
+      status: 're_requested',
+      previousReason,
+    });
+
+    await sendAdminNotification({
+      type: 'ekyc_rerequest',
+      title: 'Worker Re-requested eKYC',
+      message: `${worker.fullName} has re-requested eKYC after rejection.`,
+      data: {
+        workerId: worker._id.toString(),
+        workerName: worker.fullName,
+        previousReason,
+      },
+    });
+
+    res.json({
+      message: 'Details updated. Your eKYC re-request has been submitted.',
+      worker: updatedWorker,
+    });
+  } catch (error) {
+    console.error('Re-request eKYC error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 // ─── Complete Profile ───
 export const completeProfile = async (req: Request, res: Response): Promise<void> => {
   try {
