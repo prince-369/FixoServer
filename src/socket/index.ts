@@ -495,8 +495,19 @@ export const initializeSocket = (server: HTTPServer): SocketIOServer => {
 
     // WebRTC answer — relay
     socket.on('ekyc:answer', ({ roomId, answer }: { roomId: string; answer: any }) => {
+      const room = ekycRooms.get(roomId);
+      if (room) room.answer = answer;
       console.log(`[eKYC] Answer received from ${socket.id}, relaying to room ${roomId}`);
       socket.to(roomId).emit('ekyc:answer', { answer });
+    });
+
+    // Worker requests buffered answer (if relay was missed)
+    socket.on('ekyc:request-answer', ({ roomId }: { roomId: string }) => {
+      const room = ekycRooms.get(roomId);
+      if (room?.answer) {
+        console.log(`[eKYC] Sending buffered answer to ${socket.id}`);
+        socket.emit('ekyc:answer', { answer: room.answer });
+      }
     });
 
     // ICE candidate — buffer + relay
