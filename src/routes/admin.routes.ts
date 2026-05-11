@@ -8,6 +8,7 @@ import {
   getPendingAdminBadges,
   getPendingEKYC,
   getWorkerEKYCDetails,
+  updateVideoKycResult,
   approveWorker,
   rejectWorker,
   saveEkycCapture,
@@ -60,6 +61,7 @@ router.get('/pending-badges', getPendingAdminBadges);
 // EKYC
 router.get('/ekyc/pending', getPendingEKYC);
 router.get('/ekyc/:workerId', getWorkerEKYCDetails);
+router.post('/ekyc/:workerId/video-result', mutationGuard, updateVideoKycResult);
 router.post('/ekyc/:workerId/approve', mutationGuard, approveWorker);
 router.post('/ekyc/:workerId/reject', mutationGuard, rejectWorker);
 router.post('/ekyc/:workerId/capture', saveEkycCapture);

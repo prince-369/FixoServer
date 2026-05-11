@@ -13,6 +13,8 @@ import Notification from '../models/Notification';
 import { deleteFromCloudinary, uploadBufferToCloudinary } from '../services/cloudinary.service';
 import { getSeedAdminBootstrapStatus } from '../services/adminBootstrap.service';
 
+const VIDEO_KYC_RETRY_COOLDOWN_MS = 3 * 60 * 1000;
+
 // ─── Dashboard Stats ───
 export const getDashboard = async (_req: Request, res: Response): Promise<void> => {
   try {
@@ -296,12 +298,88 @@ export const getWorkerEKYCDetails = async (req: Request, res: Response): Promise
   }
 };
 
+// ─── EKYC: Save Post-Call Video KYC Result ───
+export const updateVideoKycResult = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { result, reason } = req.body as { result?: 'completed' | 'incomplete'; reason?: string };
+
+    if (result !== 'completed' && result !== 'incomplete') {
+      res.status(400).json({ message: 'Result must be either completed or incomplete' });
+      return;
+    }
+
+    const worker = await Worker.findById(req.params.workerId);
+    if (!worker) {
+      res.status(404).json({ message: 'Worker not found' });
+      return;
+    }
+
+    if (result === 'completed') {
+      worker.accountStatus = 'ekyc_done';
+      worker.ekycRejectionReason = undefined;
+      worker.videoKycIncompleteReason = '';
+      worker.videoKycRetryAvailableAt = null;
+
+      await worker.save();
+
+      notifyUser(worker._id.toString(), 'kyc_status_updated', {
+        workerId: worker._id,
+        status: 'ekyc_completed',
+        worker,
+      });
+
+      res.json({
+        message: 'Video KYC marked as complete. Worker moved to verification queue.',
+        worker,
+      });
+      return;
+    }
+
+    const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
+    if (!trimmedReason) {
+      res.status(400).json({ message: 'Reason is required when marking video KYC incomplete' });
+      return;
+    }
+
+    const retryAvailableAt = new Date(Date.now() + VIDEO_KYC_RETRY_COOLDOWN_MS);
+
+    worker.accountStatus = 'ekyc_pending';
+    worker.ekycRejectionReason = undefined;
+    worker.videoKycIncompleteReason = trimmedReason;
+    worker.videoKycRetryAvailableAt = retryAvailableAt;
+
+    await worker.save();
+
+    notifyUser(worker._id.toString(), 'kyc_status_updated', {
+      workerId: worker._id,
+      status: 'ekyc_incomplete',
+      reason: trimmedReason,
+      retryAvailableAt: retryAvailableAt.toISOString(),
+      worker,
+    });
+
+    res.json({
+      message: 'Video KYC marked incomplete. Worker can retry after cooldown.',
+      worker,
+      retryAvailableAt: retryAvailableAt.toISOString(),
+    });
+  } catch (error) {
+    console.error('Update video KYC result error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 // ─── EKYC: Approve Worker ───
 export const approveWorker = async (req: Request, res: Response): Promise<void> => {
   try {
     const worker = await Worker.findByIdAndUpdate(
       req.params.workerId,
-      { accountStatus: 'approved', ekycRejectionReason: undefined },
+      {
+        accountStatus: 'approved',
+        ekycRejectionReason: undefined,
+        videoKycIncompleteReason: '',
+        videoKycRetryAvailableAt: null,
+      },
       { new: true }
     );
 
@@ -330,7 +408,12 @@ export const rejectWorker = async (req: Request, res: Response): Promise<void> =
     const { reason } = req.body;
     const worker = await Worker.findByIdAndUpdate(
       req.params.workerId,
-      { accountStatus: 'rejected', ekycRejectionReason: reason },
+      {
+        accountStatus: 'rejected',
+        ekycRejectionReason: reason,
+        videoKycIncompleteReason: '',
+        videoKycRetryAvailableAt: null,
+      },
       { new: true }
     );
 

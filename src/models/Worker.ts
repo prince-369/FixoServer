@@ -19,6 +19,8 @@ export interface IWorker extends Document {
   aadhaarBack: string;
   accountStatus: WorkerAccountStatus;
   ekycRejectionReason?: string;
+  videoKycIncompleteReason?: string;
+  videoKycRetryAvailableAt?: Date | null;
   ekycCaptures: { url: string; capturedAt: Date }[];
   profileCompleted: boolean;
   location: {
@@ -62,6 +64,8 @@ const workerSchema = new Schema<IWorker>(
       default: 'test',
     },
     ekycRejectionReason: { type: String },
+    videoKycIncompleteReason: { type: String, default: '' },
+    videoKycRetryAvailableAt: { type: Date, default: null },
     ekycCaptures: [{
       url: { type: String, required: true },
       capturedAt: { type: Date, default: Date.now },

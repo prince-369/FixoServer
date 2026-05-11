@@ -252,6 +252,8 @@ const toWorkerAuthPayload = (worker: {
   isActive: boolean;
   balance: number;
   profileImage?: string;
+  videoKycIncompleteReason?: string;
+  videoKycRetryAvailableAt?: Date | null;
 }) => ({
   id: worker._id,
   fullName: worker.fullName,
@@ -259,6 +261,8 @@ const toWorkerAuthPayload = (worker: {
   email: worker.email,
   profileImage: worker.profileImage,
   accountStatus: worker.accountStatus,
+  videoKycIncompleteReason: worker.videoKycIncompleteReason,
+  videoKycRetryAvailableAt: worker.videoKycRetryAvailableAt,
   profileCompleted: worker.profileCompleted,
   isActive: worker.isActive,
   balance: worker.balance,

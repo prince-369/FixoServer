@@ -192,6 +192,8 @@ export const reRequestEKYC = async (req: Request, res: Response): Promise<void> 
     // Move worker back into pending review queue.
     worker.accountStatus = 'test';
     worker.isActive = false;
+    worker.videoKycIncompleteReason = '';
+    worker.videoKycRetryAvailableAt = null;
     worker.ekycCaptures = [];
 
     await worker.save();
