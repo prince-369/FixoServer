@@ -16,6 +16,8 @@ export interface IWorker extends Document {
     aadhaarBack: string;
     accountStatus: WorkerAccountStatus;
     ekycRejectionReason?: string;
+    videoKycIncompleteReason?: string;
+    videoKycRetryAvailableAt?: Date | null;
     ekycCaptures: {
         url: string;
         capturedAt: Date;

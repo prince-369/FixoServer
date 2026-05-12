@@ -4,6 +4,7 @@ export declare const getPendingAdminBadges: (_req: Request, res: Response) => Pr
 export declare const getAdminBootstrapStatus: (_req: Request, res: Response) => Promise<void>;
 export declare const getPendingEKYC: (_req: Request, res: Response) => Promise<void>;
 export declare const getWorkerEKYCDetails: (req: Request, res: Response) => Promise<void>;
+export declare const updateVideoKycResult: (req: Request, res: Response) => Promise<void>;
 export declare const approveWorker: (req: Request, res: Response) => Promise<void>;
 export declare const rejectWorker: (req: Request, res: Response) => Promise<void>;
 export declare const saveEkycCapture: (req: Request, res: Response) => Promise<void>;

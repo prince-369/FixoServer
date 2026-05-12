@@ -177,6 +177,8 @@ const reRequestEKYC = async (req, res) => {
         // Move worker back into pending review queue.
         worker.accountStatus = 'test';
         worker.isActive = false;
+        worker.videoKycIncompleteReason = '';
+        worker.videoKycRetryAvailableAt = null;
         worker.ekycCaptures = [];
         await worker.save();
         const updatedWorker = await Worker_1.default.findById(worker._id).populate('categories');

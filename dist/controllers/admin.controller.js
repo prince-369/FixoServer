@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getWorkerDetail = exports.getAllWorkers = exports.getCashPayments = exports.deleteChatbotQA = exports.updateChatbotQA = exports.createChatbotQA = exports.getChatbotQA = exports.deleteAdminNotification = exports.markAllAdminNotificationsRead = exports.markAdminNotificationRead = exports.getAdminNotifications = exports.rejectRefund = exports.processRefund = exports.getRefunds = exports.notifyWorkerDues = exports.replyHelpTicket = exports.resolveHelpTicket = exports.getHelpTickets = exports.getWorkerDues = exports.getCommissions = exports.getCustomers = exports.reorderBanners = exports.updateBanner = exports.deleteBanner = exports.createBanner = exports.getBanners = exports.deleteCategory = exports.updateCategoryDetails = exports.updateCategory = exports.createCategory = exports.getCategories = exports.declineWithdrawal = exports.completeWithdrawal = exports.getWithdrawals = exports.saveEkycCapture = exports.rejectWorker = exports.approveWorker = exports.getWorkerEKYCDetails = exports.getPendingEKYC = exports.getAdminBootstrapStatus = exports.getPendingAdminBadges = exports.getDashboard = void 0;
+exports.getWorkerDetail = exports.getAllWorkers = exports.getCashPayments = exports.deleteChatbotQA = exports.updateChatbotQA = exports.createChatbotQA = exports.getChatbotQA = exports.deleteAdminNotification = exports.markAllAdminNotificationsRead = exports.markAdminNotificationRead = exports.getAdminNotifications = exports.rejectRefund = exports.processRefund = exports.getRefunds = exports.notifyWorkerDues = exports.replyHelpTicket = exports.resolveHelpTicket = exports.getHelpTickets = exports.getWorkerDues = exports.getCommissions = exports.getCustomers = exports.reorderBanners = exports.updateBanner = exports.deleteBanner = exports.createBanner = exports.getBanners = exports.deleteCategory = exports.updateCategoryDetails = exports.updateCategory = exports.createCategory = exports.getCategories = exports.declineWithdrawal = exports.completeWithdrawal = exports.getWithdrawals = exports.saveEkycCapture = exports.rejectWorker = exports.approveWorker = exports.updateVideoKycResult = exports.getWorkerEKYCDetails = exports.getPendingEKYC = exports.getAdminBootstrapStatus = exports.getPendingAdminBadges = exports.getDashboard = void 0;
 const Worker_1 = __importDefault(require("../models/Worker"));
 const User_1 = __importDefault(require("../models/User"));
 const Booking_1 = __importDefault(require("../models/Booking"));
@@ -50,6 +50,7 @@ const socket_1 = require("../socket");
 const Notification_1 = __importDefault(require("../models/Notification"));
 const cloudinary_service_1 = require("../services/cloudinary.service");
 const adminBootstrap_service_1 = require("../services/adminBootstrap.service");
+const VIDEO_KYC_RETRY_COOLDOWN_MS = 3 * 60 * 1000;
 // ─── Dashboard Stats ───
 const getDashboard = async (_req, res) => {
     try {
@@ -321,10 +322,75 @@ const getWorkerEKYCDetails = async (req, res) => {
     }
 };
 exports.getWorkerEKYCDetails = getWorkerEKYCDetails;
+// ─── EKYC: Save Post-Call Video KYC Result ───
+const updateVideoKycResult = async (req, res) => {
+    try {
+        const { result, reason } = req.body;
+        if (result !== 'completed' && result !== 'incomplete') {
+            res.status(400).json({ message: 'Result must be either completed or incomplete' });
+            return;
+        }
+        const worker = await Worker_1.default.findById(req.params.workerId);
+        if (!worker) {
+            res.status(404).json({ message: 'Worker not found' });
+            return;
+        }
+        if (result === 'completed') {
+            worker.accountStatus = 'ekyc_done';
+            worker.ekycRejectionReason = undefined;
+            worker.videoKycIncompleteReason = '';
+            worker.videoKycRetryAvailableAt = null;
+            await worker.save();
+            (0, socket_1.notifyUser)(worker._id.toString(), 'kyc_status_updated', {
+                workerId: worker._id,
+                status: 'ekyc_completed',
+                worker,
+            });
+            res.json({
+                message: 'Video KYC marked as complete. Worker moved to verification queue.',
+                worker,
+            });
+            return;
+        }
+        const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
+        if (!trimmedReason) {
+            res.status(400).json({ message: 'Reason is required when marking video KYC incomplete' });
+            return;
+        }
+        const retryAvailableAt = new Date(Date.now() + VIDEO_KYC_RETRY_COOLDOWN_MS);
+        worker.accountStatus = 'ekyc_pending';
+        worker.ekycRejectionReason = undefined;
+        worker.videoKycIncompleteReason = trimmedReason;
+        worker.videoKycRetryAvailableAt = retryAvailableAt;
+        await worker.save();
+        (0, socket_1.notifyUser)(worker._id.toString(), 'kyc_status_updated', {
+            workerId: worker._id,
+            status: 'ekyc_incomplete',
+            reason: trimmedReason,
+            retryAvailableAt: retryAvailableAt.toISOString(),
+            worker,
+        });
+        res.json({
+            message: 'Video KYC marked incomplete. Worker can retry after cooldown.',
+            worker,
+            retryAvailableAt: retryAvailableAt.toISOString(),
+        });
+    }
+    catch (error) {
+        console.error('Update video KYC result error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.updateVideoKycResult = updateVideoKycResult;
 // ─── EKYC: Approve Worker ───
 const approveWorker = async (req, res) => {
     try {
-        const worker = await Worker_1.default.findByIdAndUpdate(req.params.workerId, { accountStatus: 'approved', ekycRejectionReason: undefined }, { new: true });
+        const worker = await Worker_1.default.findByIdAndUpdate(req.params.workerId, {
+            accountStatus: 'approved',
+            ekycRejectionReason: undefined,
+            videoKycIncompleteReason: '',
+            videoKycRetryAvailableAt: null,
+        }, { new: true });
         if (!worker) {
             res.status(404).json({ message: 'Worker not found' });
             return;
@@ -347,7 +413,12 @@ exports.approveWorker = approveWorker;
 const rejectWorker = async (req, res) => {
     try {
         const { reason } = req.body;
-        const worker = await Worker_1.default.findByIdAndUpdate(req.params.workerId, { accountStatus: 'rejected', ekycRejectionReason: reason }, { new: true });
+        const worker = await Worker_1.default.findByIdAndUpdate(req.params.workerId, {
+            accountStatus: 'rejected',
+            ekycRejectionReason: reason,
+            videoKycIncompleteReason: '',
+            videoKycRetryAvailableAt: null,
+        }, { new: true });
         if (!worker) {
             res.status(404).json({ message: 'Worker not found' });
             return;

@@ -10,6 +10,7 @@ const redis_adapter_1 = require("@socket.io/redis-adapter");
 const env_1 = __importDefault(require("../config/env"));
 const Notification_1 = __importDefault(require("../models/Notification"));
 const Admin_1 = __importDefault(require("../models/Admin"));
+const Worker_1 = __importDefault(require("../models/Worker"));
 const generateToken_1 = require("../utils/generateToken");
 const webPush_service_1 = require("../services/webPush.service");
 const mobilePush_service_1 = require("../services/mobilePush.service");
@@ -69,6 +70,39 @@ const deleteEkycNotifications = async (workerId) => {
     catch (e) {
         console.error('[eKYC] Failed to delete notifications:', e);
     }
+};
+const getVideoKycRetryState = async (workerId) => {
+    try {
+        const worker = await Worker_1.default.findById(workerId).select('videoKycRetryAvailableAt videoKycIncompleteReason');
+        if (!worker?.videoKycRetryAvailableAt) {
+            return { blocked: false };
+        }
+        const retryAvailableAt = new Date(worker.videoKycRetryAvailableAt);
+        if (Number.isNaN(retryAvailableAt.getTime()) || retryAvailableAt.getTime() <= Date.now()) {
+            return { blocked: false };
+        }
+        const reason = typeof worker.videoKycIncompleteReason === 'string' && worker.videoKycIncompleteReason.trim()
+            ? worker.videoKycIncompleteReason.trim()
+            : undefined;
+        return {
+            blocked: true,
+            retryAvailableAt,
+            reason,
+        };
+    }
+    catch (error) {
+        console.error('[eKYC] Failed to resolve retry state:', error);
+        return { blocked: false };
+    }
+};
+const emitRetryBlocked = (socket, workerId, retryAvailableAt, reason) => {
+    const retrySecondsLeft = Math.max(1, Math.ceil((retryAvailableAt.getTime() - Date.now()) / 1000));
+    socket.emit('ekyc:retry-blocked', {
+        workerId,
+        reason,
+        retrySecondsLeft,
+        retryAvailableAt: retryAvailableAt.toISOString(),
+    });
 };
 const setupSocketRedisAdapter = async () => {
     if (!env_1.default.REDIS_URL || !isSocketInitialized)
@@ -302,7 +336,14 @@ const initializeSocket = (server) => {
         });
         // ─── WebRTC eKYC Video Call Signaling ───
         // Worker is preparing for eKYC (30s countdown started) — notify admins
-        socket.on('ekyc:worker-preparing', ({ workerId, workerName, workerPhone, countdownSeconds }) => {
+        socket.on('ekyc:worker-preparing', async ({ workerId, workerName, workerPhone, countdownSeconds }) => {
+            if (typeof workerId !== 'string' || !workerId.trim())
+                return;
+            const retryState = await getVideoKycRetryState(workerId);
+            if (retryState.blocked && retryState.retryAvailableAt) {
+                emitRetryBlocked(socket, workerId, retryState.retryAvailableAt, retryState.reason);
+                return;
+            }
             (0, metrics_1.recordSocketEvent)('ekyc:worker-preparing');
             const name = workerName || 'Worker';
             const phone = workerPhone || '';
@@ -325,9 +366,14 @@ const initializeSocket = (server) => {
             console.log(`[eKYC] Worker ${workerId} cancelled during preparation`);
         });
         // Worker initiates eKYC call room
-        socket.on('ekyc:create-room', ({ workerId, workerName, workerPhone }) => {
+        socket.on('ekyc:create-room', async ({ workerId, workerName, workerPhone }) => {
             if (typeof workerId !== 'string' || !workerId.trim())
                 return;
+            const retryState = await getVideoKycRetryState(workerId);
+            if (retryState.blocked && retryState.retryAvailableAt) {
+                emitRetryBlocked(socket, workerId, retryState.retryAvailableAt, retryState.reason);
+                return;
+            }
             (0, metrics_1.recordSocketEvent)('ekyc:create-room');
             const roomId = `ekyc:${workerId}`;
             const name = workerName || 'Worker';

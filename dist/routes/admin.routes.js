@@ -15,6 +15,7 @@ router.get('/pending-badges', admin_controller_1.getPendingAdminBadges);
 // EKYC
 router.get('/ekyc/pending', admin_controller_1.getPendingEKYC);
 router.get('/ekyc/:workerId', admin_controller_1.getWorkerEKYCDetails);
+router.post('/ekyc/:workerId/video-result', mutationGuard, admin_controller_1.updateVideoKycResult);
 router.post('/ekyc/:workerId/approve', mutationGuard, admin_controller_1.approveWorker);
 router.post('/ekyc/:workerId/reject', mutationGuard, admin_controller_1.rejectWorker);
 router.post('/ekyc/:workerId/capture', admin_controller_1.saveEkycCapture);

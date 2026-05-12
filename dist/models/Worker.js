@@ -48,6 +48,8 @@ const workerSchema = new mongoose_1.Schema({
         default: 'test',
     },
     ekycRejectionReason: { type: String },
+    videoKycIncompleteReason: { type: String, default: '' },
+    videoKycRetryAvailableAt: { type: Date, default: null },
     ekycCaptures: [{
             url: { type: String, required: true },
             capturedAt: { type: Date, default: Date.now },
