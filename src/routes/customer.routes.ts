@@ -26,7 +26,8 @@ import {
   getHelpTicketDetail,
   appendHelpTicketMessage,
   escalateHelpTicket,
-  deleteAccount,
+  sendDeactivateAccountOtp,
+  confirmDeactivateAccount,
 } from '../controllers/customer.controller';
 
 const router = Router();
@@ -42,7 +43,8 @@ router.use(protect, authorize('customer'), verifyUser);
 
 router.get('/profile', getProfile);
 router.put('/profile', uploadSingle, updateProfile);
-router.delete('/account', mutationGuard, deleteAccount);
+router.post('/account/deactivation/send-otp', mutationGuard, sendDeactivateAccountOtp);
+router.post('/account/deactivation/confirm', mutationGuard, confirmDeactivateAccount);
 router.get('/bookings', getBookings);
 router.get('/bookings/:id', getBookingDetail);
 router.get('/transactions', getTransactions);

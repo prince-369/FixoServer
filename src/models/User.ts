@@ -10,6 +10,8 @@ export interface IUser extends Document {
   bio?: string;
   isActive: boolean;
   deletedAt?: Date;
+  deactivationOtpHash?: string;
+  deactivationOtpExpiresAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -25,6 +27,8 @@ const userSchema = new Schema<IUser>(
     bio: { type: String, default: '', maxlength: 500 },
     isActive: { type: Boolean, default: true },
     deletedAt: { type: Date },
+    deactivationOtpHash: { type: String, select: false },
+    deactivationOtpExpiresAt: { type: Date, select: false },
   },
   { timestamps: true }
 );

@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import crypto from 'crypto';
 import User from '../models/User';
 import Booking from '../models/Booking';
 import Transaction from '../models/Transaction';
@@ -13,9 +14,16 @@ import OtpCode from '../models/OtpCode';
 import PushSubscription from '../models/PushSubscription';
 import { generateTicketNumber } from '../services/ticketNumber.service';
 import { uploadBufferToCloudinary } from '../services/cloudinary.service';
+import { sendAccountDeactivationOtpEmail } from '../services/email.service';
 import { notifyRole, notifyUser, sendNotification, sendAdminNotification } from '../socket';
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const DEACTIVATION_OTP_TTL_MINUTES = 10;
+
+const hashDeactivationOtp = (userId: string, otp: string): string =>
+  crypto.createHash('sha256').update(`${userId}:${otp}`).digest('hex');
+
+const generateOtp = (): string => String(Math.floor(100000 + Math.random() * 900000));
 
 // ─── Get Profile ───
 export const getProfile = async (req: Request, res: Response): Promise<void> => {
@@ -102,6 +110,122 @@ export const deleteAccount = async (req: Request, res: Response): Promise<void> 
     res.json({ message: 'Account deleted successfully' });
   } catch (error) {
     console.error('Delete account error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─── Send Deactivation OTP ───
+export const sendDeactivateAccountOtp = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const user = await User.findById(req.user!.id).select('fullName email isActive');
+    if (!user || user.isActive === false) {
+      res.status(404).json({ message: 'User not found' });
+      return;
+    }
+
+    const activeBookingsCount = await Booking.countDocuments({
+      customer: req.user!.id,
+      status: { $nin: ['completed', 'cancelled'] },
+    });
+
+    if (activeBookingsCount > 0) {
+      res.status(400).json({
+        message: 'You have active bookings. Complete or cancel them before deactivating your account.',
+      });
+      return;
+    }
+
+    const otp = generateOtp();
+    const otpHash = hashDeactivationOtp(user._id.toString(), otp);
+    const expiresAt = new Date(Date.now() + DEACTIVATION_OTP_TTL_MINUTES * 60 * 1000);
+
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { deactivationOtpHash: otpHash, deactivationOtpExpiresAt: expiresAt } }
+    );
+
+    const emailSent = await sendAccountDeactivationOtpEmail(user.email, otp, user.fullName);
+    if (!emailSent) {
+      res.status(500).json({ message: 'Unable to send OTP email. Please try again.' });
+      return;
+    }
+
+    res.json({ message: 'OTP sent to your email address.' });
+  } catch (error) {
+    console.error('Send deactivation OTP error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─── Confirm Account Deactivation ───
+export const confirmDeactivateAccount = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const rawOtp = typeof req.body?.otp === 'string' ? req.body.otp.trim() : '';
+    if (!/^\d{6}$/.test(rawOtp)) {
+      res.status(400).json({ message: 'Please enter a valid 6-digit OTP.' });
+      return;
+    }
+
+    const user = await User.findById(req.user!.id).select(
+      '+deactivationOtpHash +deactivationOtpExpiresAt phone isActive'
+    );
+    if (!user || user.isActive === false) {
+      res.status(404).json({ message: 'User not found' });
+      return;
+    }
+
+    if (!user.deactivationOtpHash || !user.deactivationOtpExpiresAt || user.deactivationOtpExpiresAt < new Date()) {
+      res.status(400).json({ message: 'OTP expired. Please request a new OTP.' });
+      return;
+    }
+
+    const expectedHash = hashDeactivationOtp(user._id.toString(), rawOtp);
+    if (expectedHash !== user.deactivationOtpHash) {
+      res.status(400).json({ message: 'Invalid OTP. Please try again.' });
+      return;
+    }
+
+    const activeBookingsCount = await Booking.countDocuments({
+      customer: req.user!.id,
+      status: { $nin: ['completed', 'cancelled'] },
+    });
+
+    if (activeBookingsCount > 0) {
+      res.status(400).json({
+        message: 'You have active bookings. Complete or cancel them before deactivating your account.',
+      });
+      return;
+    }
+
+    const oldPhone = user.phone;
+    const stamp = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    const anonymizedPhone = `9${stamp.slice(-9)}`;
+
+    user.fullName = 'Deactivated User';
+    user.email = `deactivated_${user._id}_${stamp}@deleted.fixo.local`;
+    user.phone = anonymizedPhone;
+    user.googleId = undefined;
+    user.profileImage = '';
+    user.bio = 'Account deactivated by user';
+    user.isActive = false;
+    user.deletedAt = new Date();
+    user.deactivationOtpHash = undefined;
+    user.deactivationOtpExpiresAt = undefined;
+    await user.save();
+
+    await Promise.all([
+      RefreshToken.deleteMany({ userId: user._id, role: 'customer' }),
+      PasswordResetToken.deleteMany({ userId: user._id, role: 'customer' }),
+      OtpCode.deleteMany({ phone: oldPhone, purpose: 'password-reset' }),
+      PushSubscription.updateMany(
+        { recipient: user._id, recipientModel: 'User' },
+        { $set: { isActive: false } }
+      ),
+    ]);
+
+    res.json({ message: 'Account deactivated successfully.' });
+  } catch (error) {
+    console.error('Confirm deactivate account error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };

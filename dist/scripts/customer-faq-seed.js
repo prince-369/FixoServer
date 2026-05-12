@@ -11,53 +11,62 @@ const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/fixo';
 const CUSTOMER_FAQS = [
     {
         category: 'Bookings',
-        question: 'Booking create karne ke baad next kya hota hai?',
-        answer: 'Aapki request nearby eligible workers ko bheji jati hai. Worker accept hone ke baad booking status update hota hai aur aap booking details page par sab progress dekh sakte ho.',
+        question: 'What happens after I create a booking?',
+        answer: 'Your request is sent to nearby eligible workers. Once a worker accepts, the booking status updates and you can track progress from the booking details page.',
         keywords: ['booking', 'request', 'worker accepted', 'status'],
         order: 1,
     },
     {
         category: 'Bookings',
-        question: 'Kya main specific worker choose kar sakta/sakti hoon?',
-        answer: 'Platform matching, bids aur availability ke basis par worker selection flow chalata hai. Aap booking details aur worker profile info dekhkar informed decision le sakte ho.',
+        question: 'Can I choose a specific worker?',
+        answer: 'The platform selects workers based on matching, bids, and availability. You can review booking details and worker profile information before making a decision.',
         keywords: ['worker selection', 'choose worker', 'bid'],
         order: 2,
     },
     {
         category: 'Payments & Refunds',
-        question: 'Payment ke kaunse options available hain?',
-        answer: 'Booking ke according online payment aur cash payment options available ho sakte hain. Transaction history aapko Payments/Transactions page me mil jayegi.',
+        question: 'What payment options are available?',
+        answer: 'Depending on the booking, online and cash payment options may be available. You can view complete payment history on the Payments or Transactions page.',
         keywords: ['payment', 'online', 'cash', 'transactions'],
         order: 3,
     },
     {
         category: 'Payments & Refunds',
-        question: 'Cancellation ke baad refund kab milta hai?',
-        answer: 'Refund timeline cancellation stage aur review par depend karti hai. Approved refund process hone par aapko notification milti hai, aur status booking/refund flow me track hota hai.',
+        question: 'When will I receive a refund after cancellation?',
+        answer: 'Refund timelines depend on cancellation stage and review outcome. Once approved, you receive a notification and can track the refund status in your booking flow.',
         keywords: ['refund', 'cancel', 'timeline', 'approval'],
         order: 4,
     },
     {
         category: 'Tracking',
-        question: 'Assigned worker ki live progress kaise dekhein?',
-        answer: 'Bookings section me active booking open karke current status, assigned worker details aur important updates real time me dekh sakte ho.',
+        question: 'How can I track the assigned worker live progress?',
+        answer: 'Open your active booking in the Bookings section to see current status, assigned worker details, and key updates in real time.',
         keywords: ['tracking', 'assigned worker', 'active booking', 'status'],
         order: 5,
     },
     {
         category: 'Account',
-        question: 'Profile details ya contact info update kaise karun?',
-        answer: 'Settings aur Profile section se aap naam, bio, photo, aur relevant account details update kar sakte ho. Save karne ke turant baad updated info reflect ho jata hai.',
+        question: 'How do I update my profile details or contact information?',
+        answer: 'You can update name, bio, photo, and related account details from the Profile and Settings sections. Changes are reflected immediately after saving.',
         keywords: ['profile', 'settings', 'update account', 'contact'],
         order: 6,
     },
     {
         category: 'Support',
-        question: 'Issue resolve na ho to support ticket ka best tareeka kya hai?',
-        answer: 'Help & Support me right category choose karke clear issue description ke saath ticket raise karein. Ticket thread me same issue continue karein aur urgent cases me escalation option use karein.',
+        question: 'What is the best way to raise a support ticket for unresolved issues?',
+        answer: 'In Help & Support, choose the correct category and submit a clear issue description. Continue in the same ticket thread and use escalation for urgent cases.',
         keywords: ['support', 'help ticket', 'escalation', 'faq'],
         order: 7,
     },
+];
+const LEGACY_HINDI_CUSTOMER_QUESTIONS = [
+    'Booking create karne ke baad next kya hota hai?',
+    'Kya main specific worker choose kar sakta/sakti hoon?',
+    'Payment ke kaunse options available hain?',
+    'Cancellation ke baad refund kab milta hai?',
+    'Assigned worker ki live progress kaise dekhein?',
+    'Profile details ya contact info update kaise karun?',
+    'Issue resolve na ho to support ticket ka best tareeka kya hai?',
 ];
 const seedCustomerFaqs = async () => {
     let created = 0;
@@ -66,6 +75,14 @@ const seedCustomerFaqs = async () => {
         console.log('[INFO] Connecting to MongoDB...');
         await mongoose_1.default.connect(MONGODB_URI);
         console.log('[OK] Connected!');
+        // Remove previously seeded Hindi versions so only English FAQs remain.
+        const cleanup = await ChatbotQA_1.default.deleteMany({
+            targetAudience: 'customer',
+            question: { $in: LEGACY_HINDI_CUSTOMER_QUESTIONS },
+        });
+        if (cleanup.deletedCount) {
+            console.log(`[CLEANUP] Removed ${cleanup.deletedCount} legacy Hindi customer FAQs.`);
+        }
         for (const faq of CUSTOMER_FAQS) {
             const existing = await ChatbotQA_1.default.findOne({
                 targetAudience: 'customer',

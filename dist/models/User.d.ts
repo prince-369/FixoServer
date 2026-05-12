@@ -9,6 +9,8 @@ export interface IUser extends Document {
     bio?: string;
     isActive: boolean;
     deletedAt?: Date;
+    deactivationOtpHash?: string;
+    deactivationOtpExpiresAt?: Date;
     createdAt: Date;
     updatedAt: Date;
 }

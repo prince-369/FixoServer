@@ -11,53 +11,62 @@ const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/fixo';
 const WORKER_FAQS = [
     {
         category: 'Jobs',
-        question: 'Online hone ke baad mujhe job requests kitni jaldi milti hain?',
-        answer: 'Job requests aapke service categories, location, rating, aur current demand par depend karti hain. Online rehne aur fast response dene se chances improve hote hain.',
+        question: 'How quickly will I start receiving job requests after going online?',
+        answer: 'Job requests depend on your service categories, location coverage, rating, and live demand in your area. Staying online consistently and responding quickly improves your chances.',
         keywords: ['online', 'jobs', 'requests', 'availability', 'worker'],
         order: 1,
     },
     {
         category: 'Jobs',
-        question: 'Bid kaise kaam karta hai aur mujhe kya amount quote karna chahiye?',
-        answer: 'Available request par aap apna quote submit kar sakte ho. Competitive aur realistic quote dena best hai. Customer compare karke accept karta hai, isliye clear pricing strategy rakhein.',
+        question: 'How does bidding work and what amount should I quote?',
+        answer: 'You can submit your quote for available requests. A competitive and realistic quote works best. Customers compare offers before accepting, so keep your pricing transparent and practical.',
         keywords: ['bid', 'quote', 'pricing', 'job request'],
         order: 2,
     },
     {
         category: 'Wallet & Payments',
-        question: 'Mera withdrawal locked kyu dikh raha hai?',
-        answer: 'Aksar withdrawal pending dues ki wajah se lock hota hai. Wallet section me dues clear karne ke baad withdrawal dobara enable ho jata hai.',
+        question: 'Why is my withdrawal currently locked?',
+        answer: 'Withdrawals are usually locked when dues are pending. Once dues are cleared from the Wallet section, withdrawals are enabled again.',
         keywords: ['withdrawal', 'dues', 'wallet', 'locked'],
         order: 3,
     },
     {
         category: 'Wallet & Payments',
-        question: 'Bank account details update kaise karun?',
-        answer: 'Worker Wallet/Settings section me Add or Update Bank option se account holder name, bank name, account number aur IFSC update kar sakte ho.',
+        question: 'How can I update my bank account details?',
+        answer: 'Go to Worker Wallet or Settings and use the Add or Update Bank option. You can update account holder name, bank name, account number, and IFSC there.',
         keywords: ['bank', 'ifsc', 'account', 'update', 'withdrawal'],
         order: 4,
     },
     {
         category: 'Account & Profile',
-        question: 'Bio, categories ya service location kaise update karun?',
-        answer: 'Worker Settings me profile section se bio edit, service categories update aur location pin set kiya ja sakta hai. Changes save karte hi profile me reflect ho jate hain.',
+        question: 'How do I update my bio, service categories, or service location?',
+        answer: 'In Worker Settings under Profile, you can edit your bio, update service categories, and set your service location pin. Changes reflect immediately after saving.',
         keywords: ['bio', 'categories', 'location', 'profile', 'settings'],
         order: 5,
     },
     {
         category: 'Ratings',
-        question: 'Meri rating kaise calculate hoti hai?',
-        answer: 'Rating completed bookings ke baad customer feedback par based hoti hai. Better service quality, punctual arrival, aur professional behavior se rating improve hoti hai.',
+        question: 'How is my rating calculated?',
+        answer: 'Your rating is based on customer feedback after completed bookings. Better service quality, punctual arrival, and professional behavior help improve your rating.',
         keywords: ['rating', 'reviews', 'feedback', 'completed bookings'],
         order: 6,
     },
     {
         category: 'Support',
-        question: 'Issue ho to support team se fastest help kaise milegi?',
-        answer: 'Help & Support me relevant category ke saath ticket raise karein aur clear issue details dein. Agar urgent ho to ticket escalate karein, support team priority se respond karti hai.',
+        question: 'What is the fastest way to get help from support?',
+        answer: 'Raise a ticket in Help & Support with the correct category and clear issue details. For urgent cases, use escalation so the support team can prioritize your request.',
         keywords: ['support', 'ticket', 'escalate', 'help'],
         order: 7,
     },
+];
+const LEGACY_HINDI_WORKER_QUESTIONS = [
+    'Online hone ke baad mujhe job requests kitni jaldi milti hain?',
+    'Bid kaise kaam karta hai aur mujhe kya amount quote karna chahiye?',
+    'Mera withdrawal locked kyu dikh raha hai?',
+    'Bank account details update kaise karun?',
+    'Bio, categories ya service location kaise update karun?',
+    'Meri rating kaise calculate hoti hai?',
+    'Issue ho to support team se fastest help kaise milegi?',
 ];
 const seedWorkerFaqs = async () => {
     let created = 0;
@@ -66,6 +75,14 @@ const seedWorkerFaqs = async () => {
         console.log('[INFO] Connecting to MongoDB...');
         await mongoose_1.default.connect(MONGODB_URI);
         console.log('[OK] Connected!');
+        // Remove previously seeded Hindi versions so only English FAQs remain.
+        const cleanup = await ChatbotQA_1.default.deleteMany({
+            targetAudience: 'worker',
+            question: { $in: LEGACY_HINDI_WORKER_QUESTIONS },
+        });
+        if (cleanup.deletedCount) {
+            console.log(`[CLEANUP] Removed ${cleanup.deletedCount} legacy Hindi worker FAQs.`);
+        }
         for (const faq of WORKER_FAQS) {
             const existing = await ChatbotQA_1.default.findOne({
                 targetAudience: 'worker',

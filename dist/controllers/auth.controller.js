@@ -244,7 +244,7 @@ const googleAuthCustomer = async (req, res) => {
         let user = await User_1.default.findOne({ $or: [{ googleId }, { email }] });
         if (user) {
             if (user.isActive === false) {
-                res.status(403).json({ message: 'This account has been deleted. Please register again.' });
+                res.status(403).json({ message: 'This account is deactivated. Please register again.' });
                 return;
             }
             if (!user.googleId) {
@@ -315,7 +315,7 @@ const completeGoogleRegistration = async (req, res) => {
         const existingByGoogle = await User_1.default.findOne({ $or: [{ googleId }, { email }] });
         if (existingByGoogle) {
             if (existingByGoogle.isActive === false) {
-                res.status(403).json({ message: 'This account has been deleted. Please register again.' });
+                res.status(403).json({ message: 'This account is deactivated. Please register again.' });
                 return;
             }
             if (existingByGoogle.phone && existingByGoogle.phone !== phone) {
@@ -378,7 +378,7 @@ const loginCustomer = async (req, res) => {
             return;
         }
         if (user.isActive === false) {
-            res.status(403).json({ message: 'This account has been deleted. Please register again.' });
+            res.status(403).json({ message: 'This account is deactivated. Please register again.' });
             return;
         }
         if (!user.password) {
@@ -803,7 +803,7 @@ const getMe = async (req, res) => {
             case 'customer': {
                 const user = await User_1.default.findById(req.user.id);
                 if (!user || user.isActive === false) {
-                    res.status(401).json({ message: 'User no longer exists' });
+                    res.status(401).json({ message: 'Account is deactivated' });
                     return;
                 }
                 res.json({ role: 'customer', user });
@@ -848,7 +848,7 @@ const refresh = async (req, res) => {
             if (!customer || customer.isActive === false) {
                 await stored.deleteOne();
                 res.clearCookie('refreshToken', refreshCookieClearOptions);
-                res.status(401).json({ message: 'User no longer exists' });
+                res.status(401).json({ message: 'Account is deactivated' });
                 return;
             }
         }

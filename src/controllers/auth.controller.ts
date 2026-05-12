@@ -334,7 +334,7 @@ export const googleAuthCustomer = async (req: Request, res: Response): Promise<v
 
     if (user) {
       if (user.isActive === false) {
-        res.status(403).json({ message: 'This account has been deleted. Please register again.' });
+        res.status(403).json({ message: 'This account is deactivated. Please register again.' });
         return;
       }
 
@@ -411,7 +411,7 @@ export const completeGoogleRegistration = async (req: Request, res: Response): P
     const existingByGoogle = await User.findOne({ $or: [{ googleId }, { email }] });
     if (existingByGoogle) {
       if (existingByGoogle.isActive === false) {
-        res.status(403).json({ message: 'This account has been deleted. Please register again.' });
+        res.status(403).json({ message: 'This account is deactivated. Please register again.' });
         return;
       }
 
@@ -482,7 +482,7 @@ export const loginCustomer = async (req: Request, res: Response): Promise<void> 
     }
 
     if (user.isActive === false) {
-      res.status(403).json({ message: 'This account has been deleted. Please register again.' });
+      res.status(403).json({ message: 'This account is deactivated. Please register again.' });
       return;
     }
 
@@ -957,7 +957,7 @@ export const getMe = async (req: Request, res: Response): Promise<void> => {
       case 'customer': {
         const user = await User.findById(req.user.id);
         if (!user || user.isActive === false) {
-          res.status(401).json({ message: 'User no longer exists' });
+          res.status(401).json({ message: 'Account is deactivated' });
           return;
         }
         res.json({ role: 'customer', user });
@@ -1002,7 +1002,7 @@ export const refresh = async (req: Request, res: Response): Promise<void> => {
       if (!customer || customer.isActive === false) {
         await stored.deleteOne();
         res.clearCookie('refreshToken', refreshCookieClearOptions);
-        res.status(401).json({ message: 'User no longer exists' });
+        res.status(401).json({ message: 'Account is deactivated' });
         return;
       }
     }

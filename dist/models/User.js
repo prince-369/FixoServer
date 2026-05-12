@@ -44,6 +44,8 @@ const userSchema = new mongoose_1.Schema({
     bio: { type: String, default: '', maxlength: 500 },
     isActive: { type: Boolean, default: true },
     deletedAt: { type: Date },
+    deactivationOtpHash: { type: String, select: false },
+    deactivationOtpExpiresAt: { type: Date, select: false },
 }, { timestamps: true });
 userSchema.index({ email: 1 });
 userSchema.index({ phone: 1 });
