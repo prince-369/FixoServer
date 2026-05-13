@@ -684,9 +684,14 @@ export const submitBid = async (req: Request, res: Response): Promise<void> => {
 
         const worker = await Worker.findById(req.user!.id).select('fullName rating profileImage');
         const customerId = booking.customer.toString();
+        const bidPayload = { ...existingBid.toObject(), worker };
         notifyBookingRoom(bookingId, 'booking:new-bid', {
           bookingId,
-          bid: { ...existingBid.toObject(), worker },
+          bid: bidPayload,
+        });
+        notifyUser(customerId, 'booking:new-bid', {
+          bookingId,
+          bid: bidPayload,
         });
 
         await sendNotification({
@@ -724,9 +729,14 @@ export const submitBid = async (req: Request, res: Response): Promise<void> => {
     // Real-time: Notify customer about new bid
     const worker = await Worker.findById(req.user!.id).select('fullName rating profileImage');
     const customerId = booking.customer.toString();
+    const bidPayload = { ...bid.toObject(), worker };
     notifyBookingRoom(bookingId, 'booking:new-bid', {
       bookingId,
-      bid: { ...bid.toObject(), worker },
+      bid: bidPayload,
+    });
+    notifyUser(customerId, 'booking:new-bid', {
+      bookingId,
+      bid: bidPayload,
     });
 
     await sendNotification({
