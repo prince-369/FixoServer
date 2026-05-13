@@ -8,6 +8,15 @@ export interface IBooking extends Document {
     customer: mongoose.Types.ObjectId;
     category: mongoose.Types.ObjectId;
     workDescription: string;
+    voiceNote?: {
+        url: string;
+        publicId: string;
+        mimeType?: string;
+        durationSec?: number;
+        language?: string;
+        transcript?: string;
+        createdAt: Date;
+    };
     customerLocation: {
         type: string;
         coordinates: number[];

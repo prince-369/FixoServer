@@ -4,7 +4,7 @@ import app from './app';
 import connectDB from './config/db';
 import { closeSocketServer, initializeSocket } from './socket';
 import env from './config/env';
-import { cancelStaleBookings } from './jobs/bookingCleanup';
+import { cancelStaleBookings, cleanupClosedBookingVoiceNotes } from './jobs/bookingCleanup';
 import { closeRateLimiterStore } from './middlewares/rateLimit.middleware';
 import { syncSeedAdminCredentials } from './services/adminBootstrap.service';
 
@@ -28,6 +28,7 @@ const start = async () => {
   // Background job: auto-cancel stale 'finding_workers' bookings
   cleanupTimer = setInterval(() => {
     void cancelStaleBookings();
+    void cleanupClosedBookingVoiceNotes();
   }, env.JOB_CLEANUP_INTERVAL_MS);
   cleanupTimer.unref();
   

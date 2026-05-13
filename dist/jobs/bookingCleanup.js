@@ -3,10 +3,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cancelStaleBookings = void 0;
+exports.cleanupClosedBookingVoiceNotes = exports.cancelStaleBookings = void 0;
 const Booking_1 = __importDefault(require("../models/Booking"));
 const socket_1 = require("../socket");
 const env_1 = __importDefault(require("../config/env"));
+const cloudinary_service_1 = require("../services/cloudinary.service");
 /**
  * Auto-cancel stale bookings that are still in 'finding_workers' status
  * after the configured stale window. This cleans up abandoned requests
@@ -56,4 +57,39 @@ const cancelStaleBookings = async () => {
     }
 };
 exports.cancelStaleBookings = cancelStaleBookings;
+/**
+ * Deletes booking voice-note media for bookings that are already completed/cancelled.
+ * This ensures media storage does not grow indefinitely.
+ */
+const cleanupClosedBookingVoiceNotes = async () => {
+    try {
+        let cleanedCount = 0;
+        while (cleanedCount < 200) {
+            const booking = await Booking_1.default.findOne({
+                status: { $in: ['completed', 'cancelled'] },
+                'voiceNote.publicId': { $exists: true, $ne: '' },
+            }).select('_id voiceNote.publicId');
+            if (!booking || !booking.voiceNote?.publicId) {
+                break;
+            }
+            try {
+                await (0, cloudinary_service_1.deleteFromCloudinary)(booking.voiceNote.publicId, 'video');
+            }
+            catch (error) {
+                console.error('Failed to delete closed-booking voice note from Cloudinary:', error);
+            }
+            await Booking_1.default.updateOne({ _id: booking._id }, { $unset: { voiceNote: 1 } });
+            cleanedCount += 1;
+        }
+        if (cleanedCount > 0) {
+            console.log(`Cleaned ${cleanedCount} closed-booking voice note(s)`);
+        }
+        return cleanedCount;
+    }
+    catch (error) {
+        console.error('Closed booking voice note cleanup error:', error);
+        return 0;
+    }
+};
+exports.cleanupClosedBookingVoiceNotes = cleanupClosedBookingVoiceNotes;
 //# sourceMappingURL=bookingCleanup.js.map

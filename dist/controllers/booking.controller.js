@@ -3,17 +3,39 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.handleRazorpayWebhook = exports.reconcileBookingPayment = exports.verifyBookingPayment = exports.initiatePayment = exports.acceptBid = exports.getBookingBids = exports.createBooking = void 0;
+exports.handleRazorpayWebhook = exports.reconcileBookingPayment = exports.verifyBookingPayment = exports.initiatePayment = exports.acceptBid = exports.getBookingBids = exports.createBooking = exports.getWorkerAvailabilitySummary = void 0;
 const Booking_1 = __importDefault(require("../models/Booking"));
 const WorkBid_1 = __importDefault(require("../models/WorkBid"));
 const Worker_1 = __importDefault(require("../models/Worker"));
 const payment_service_1 = require("../services/payment.service");
+const cloudinary_service_1 = require("../services/cloudinary.service");
 const generatePin_1 = require("../utils/generatePin");
 const generateTID_1 = require("../utils/generateTID");
 const Transaction_1 = __importDefault(require("../models/Transaction"));
 const socket_1 = require("../socket");
 const RAZORPAY_SUCCESS_EVENTS = new Set(['payment.captured', 'order.paid']);
 const WORKER_SEARCH_RADIUS_METERS = 10000;
+const WORKER_SUMMARY_RADIUS_METERS = 25000;
+const hasValidCoordinates = (coordinates) => {
+    if (!Array.isArray(coordinates) || coordinates.length !== 2)
+        return false;
+    return Number.isFinite(Number(coordinates[0])) && Number.isFinite(Number(coordinates[1]));
+};
+const toRadians = (value) => (value * Math.PI) / 180;
+const distanceMetersBetween = (a, b) => {
+    // Coordinates are [longitude, latitude]
+    const [lng1, lat1] = a;
+    const [lng2, lat2] = b;
+    const earthRadiusMeters = 6371000;
+    const dLat = toRadians(lat2 - lat1);
+    const dLng = toRadians(lng2 - lng1);
+    const lat1Rad = toRadians(lat1);
+    const lat2Rad = toRadians(lat2);
+    const haversine = Math.sin(dLat / 2) ** 2 +
+        Math.cos(lat1Rad) * Math.cos(lat2Rad) * Math.sin(dLng / 2) ** 2;
+    const arc = 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+    return earthRadiusMeters * arc;
+};
 const isGeoIndexMissingError = (error) => {
     const message = error instanceof Error ? error.message.toLowerCase() : '';
     return (message.includes('$geonear') ||
@@ -55,6 +77,97 @@ const resolveMatchingWorkers = async (categoryId, coordinates) => {
         }
     }
 };
+const fetchWorkerAvailabilitySummary = async (categoryId, coordinates) => {
+    const nearbyFilter = {
+        categories: categoryId,
+        location: {
+            $nearSphere: {
+                $geometry: {
+                    type: 'Point',
+                    coordinates,
+                },
+                $maxDistance: WORKER_SUMMARY_RADIUS_METERS,
+            },
+        },
+    };
+    const [total, active] = await Promise.all([
+        Worker_1.default.countDocuments(nearbyFilter),
+        Worker_1.default.countDocuments({ ...nearbyFilter, isActive: true, accountStatus: 'live' }),
+    ]);
+    return { total, active, radiusMeters: WORKER_SUMMARY_RADIUS_METERS };
+};
+const computeWorkerAvailabilitySummaryFallback = async (categoryId, targetCoordinates) => {
+    const workers = await Worker_1.default.find({ categories: categoryId })
+        .select('location isActive accountStatus')
+        .lean();
+    let total = 0;
+    let active = 0;
+    for (const worker of workers) {
+        const coordinates = worker?.location?.coordinates;
+        if (!hasValidCoordinates(coordinates))
+            continue;
+        const workerCoordinates = [Number(coordinates[0]), Number(coordinates[1])];
+        const distance = distanceMetersBetween(workerCoordinates, targetCoordinates);
+        if (distance > WORKER_SUMMARY_RADIUS_METERS)
+            continue;
+        total += 1;
+        if (worker.isActive === true && worker.accountStatus === 'live') {
+            active += 1;
+        }
+    }
+    return { total, active, radiusMeters: WORKER_SUMMARY_RADIUS_METERS };
+};
+const resolveWorkerAvailabilitySummary = async (categoryId, coordinates) => {
+    try {
+        return await fetchWorkerAvailabilitySummary(categoryId, coordinates);
+    }
+    catch (error) {
+        if (!isGeoIndexMissingError(error)) {
+            console.error('Primary availability summary query failed. Falling back to manual distance scan.', error);
+            return computeWorkerAvailabilitySummaryFallback(categoryId, coordinates);
+        }
+        console.error('Geo index missing while fetching worker availability summary. Attempting self-heal.', error);
+        try {
+            await Worker_1.default.collection.createIndex({ location: '2dsphere' }, { name: 'location_2dsphere' });
+            return await fetchWorkerAvailabilitySummary(categoryId, coordinates);
+        }
+        catch (retryError) {
+            console.error('Geo index self-heal failed while fetching worker availability summary. Falling back to manual distance scan.', retryError);
+            return computeWorkerAvailabilitySummaryFallback(categoryId, coordinates);
+        }
+    }
+};
+// ─── Worker Availability Summary (Customer Preview) ───
+const getWorkerAvailabilitySummary = async (req, res) => {
+    try {
+        const categoryId = String(req.query.category || '').trim();
+        const latitude = Number(req.query.latitude);
+        const longitude = Number(req.query.longitude);
+        if (!categoryId) {
+            res.status(400).json({ message: 'Category is required' });
+            return;
+        }
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+            res.status(400).json({ message: 'Valid latitude and longitude are required' });
+            return;
+        }
+        const coordinates = [longitude, latitude];
+        const summary = await resolveWorkerAvailabilitySummary(categoryId, coordinates);
+        res.json({
+            summary: {
+                total: summary.total,
+                active: summary.active,
+                inactive: Math.max(0, summary.total - summary.active),
+                radiusMeters: summary.radiusMeters,
+            },
+        });
+    }
+    catch (error) {
+        console.error('Get worker availability summary error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.getWorkerAvailabilitySummary = getWorkerAvailabilitySummary;
 const finalizeOnlineBookingPayment = async (booking, orderId, paymentId) => {
     const alreadyFinalized = booking.paymentStatus === 'paid' && booking.status === 'payment_done';
     booking.razorpayOrderId = orderId;
@@ -142,7 +255,27 @@ const reconcileBookingPaymentByOrder = async (booking, requestedOrderId) => {
 // ─── Create Booking ───
 const createBooking = async (req, res) => {
     try {
-        const { category, workDescription, latitude, longitude, address, timeSlot } = req.body;
+        const { category, workDescription, latitude, longitude, address, timeSlot, voiceLanguage, voiceTranscript, voiceDurationSec } = req.body;
+        const normalizedDescription = String(workDescription ?? '').trim();
+        let voiceNote;
+        if (req.file) {
+            const uploadedVoice = await (0, cloudinary_service_1.uploadAudioBufferToCloudinary)(req.file.buffer, 'booking-voice');
+            const parsedDurationSec = Number(voiceDurationSec);
+            voiceNote = {
+                url: uploadedVoice.url,
+                publicId: uploadedVoice.publicId,
+                mimeType: req.file.mimetype,
+                durationSec: Number.isFinite(parsedDurationSec) && parsedDurationSec > 0
+                    ? Math.round(parsedDurationSec)
+                    : undefined,
+                language: typeof voiceLanguage === 'string' ? voiceLanguage.trim() : undefined,
+                transcript: typeof voiceTranscript === 'string' && voiceTranscript.trim()
+                    ? voiceTranscript.trim()
+                    : undefined,
+                createdAt: new Date(),
+            };
+        }
+        const finalDescription = normalizedDescription || voiceNote?.transcript || 'Voice note attached by customer';
         const normalizedLatitude = Number(latitude);
         const normalizedLongitude = Number(longitude);
         if (!Number.isFinite(normalizedLatitude) || !Number.isFinite(normalizedLongitude)) {
@@ -153,7 +286,8 @@ const createBooking = async (req, res) => {
         const booking = await Booking_1.default.create({
             customer: req.user.id,
             category,
-            workDescription,
+            workDescription: finalDescription,
+            voiceNote,
             customerLocation: {
                 type: 'Point',
                 coordinates,

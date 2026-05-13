@@ -38,6 +38,15 @@ const bookingSchema = new mongoose_1.Schema({
     customer: { type: mongoose_1.Schema.Types.ObjectId, ref: 'User', required: true },
     category: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Category', required: true },
     workDescription: { type: String, required: true },
+    voiceNote: {
+        url: { type: String },
+        publicId: { type: String },
+        mimeType: { type: String },
+        durationSec: { type: Number },
+        language: { type: String },
+        transcript: { type: String },
+        createdAt: { type: Date },
+    },
     customerLocation: {
         type: { type: String, enum: ['Point'], default: 'Point' },
         coordinates: { type: [Number], required: true },

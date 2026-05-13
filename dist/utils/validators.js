@@ -48,7 +48,14 @@ exports.resetPasswordValidation = [
 ];
 exports.createBookingValidation = [
     (0, express_validator_1.body)('category').isMongoId().withMessage('Valid category ID is required'),
-    (0, express_validator_1.body)('workDescription').trim().notEmpty().withMessage('Work description is required'),
+    (0, express_validator_1.body)('workDescription').custom((value, { req }) => {
+        const description = String(value ?? '').trim();
+        const hasVoiceNote = Boolean(req.file);
+        if (!description && !hasVoiceNote) {
+            throw new Error('Work description or voice note is required');
+        }
+        return true;
+    }),
     (0, express_validator_1.body)('timeSlot').optional().isIn(['anytime', 'morning', 'afternoon', 'evening']).withMessage('Invalid time slot'),
     (0, express_validator_1.body)('latitude').isFloat({ min: -90, max: 90 }).withMessage('Valid latitude is required'),
     (0, express_validator_1.body)('longitude').isFloat({ min: -180, max: 180 }).withMessage('Valid longitude is required'),

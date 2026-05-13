@@ -37,6 +37,33 @@ export const uploadBufferToCloudinary = async (
   });
 };
 
-export const deleteFromCloudinary = async (publicId: string): Promise<void> => {
-  await cloudinary.uploader.destroy(publicId);
+export const uploadAudioBufferToCloudinary = async (
+  buffer: Buffer,
+  folder: string
+): Promise<{ url: string; publicId: string }> => {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder: `fixo/${folder}`, resource_type: 'video' },
+      (error, result) => {
+        if (error || !result) {
+          reject(error || new Error('Upload failed'));
+          return;
+        }
+
+        resolve({
+          url: result.secure_url,
+          publicId: result.public_id,
+        });
+      }
+    );
+
+    stream.end(buffer);
+  });
+};
+
+export const deleteFromCloudinary = async (
+  publicId: string,
+  resourceType: 'image' | 'video' = 'image'
+): Promise<void> => {
+  await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
 };

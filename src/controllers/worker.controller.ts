@@ -10,6 +10,7 @@ import ChatbotQA from '../models/ChatbotQA';
 import { uploadBufferToCloudinary } from '../services/cloudinary.service';
 import { generateTID } from '../utils/generateTID';
 import { generateTicketNumber } from '../services/ticketNumber.service';
+import { removeBookingVoiceNote } from '../services/bookingVoice.service';
 import { createDuesPaymentOrder, verifyPayment } from '../services/payment.service';
 import env from '../config/env';
 import { notifyUser, notifyBookingRoom, notifyRole, sendNotification, sendAdminNotification } from '../socket';
@@ -882,6 +883,7 @@ export const cancelBookingByWorker = async (req: Request, res: Response): Promis
       cancelledAt: new Date(),
     };
     await booking.save();
+    void removeBookingVoiceNote(booking);
 
     // Notify customer
     notifyUser(booking.customer.toString(), 'booking_status_updated', {
@@ -1055,6 +1057,7 @@ export const completeWork = async (req: Request, res: Response): Promise<void> =
       booking.paymentStatus = 'paid';
     }
     await booking.save();
+    void removeBookingVoiceNote(booking);
 
     const worker = await Worker.findById(req.user!.id);
     if (!worker) {

@@ -15,6 +15,7 @@ import PushSubscription from '../models/PushSubscription';
 import { generateTicketNumber } from '../services/ticketNumber.service';
 import { uploadBufferToCloudinary } from '../services/cloudinary.service';
 import { sendAccountDeactivationOtpEmail } from '../services/email.service';
+import { removeBookingVoiceNote } from '../services/bookingVoice.service';
 import { notifyRole, notifyUser, sendNotification, sendAdminNotification } from '../socket';
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -465,6 +466,7 @@ export const cancelBooking = async (req: Request, res: Response): Promise<void> 
     }
 
     await booking.save();
+    void removeBookingVoiceNote(booking);
 
     if (isOnlinePaid) {
       sendAdminNotification({

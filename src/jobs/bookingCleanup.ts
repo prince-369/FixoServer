@@ -1,6 +1,7 @@
 import Booking from '../models/Booking';
 import { notifyUser } from '../socket';
 import env from '../config/env';
+import { deleteFromCloudinary } from '../services/cloudinary.service';
 
 /**
  * Auto-cancel stale bookings that are still in 'finding_workers' status
@@ -56,6 +57,45 @@ export const cancelStaleBookings = async (): Promise<number> => {
     return cancelledCount;
   } catch (error) {
     console.error('Stale booking cleanup error:', error);
+    return 0;
+  }
+};
+
+/**
+ * Deletes booking voice-note media for bookings that are already completed/cancelled.
+ * This ensures media storage does not grow indefinitely.
+ */
+export const cleanupClosedBookingVoiceNotes = async (): Promise<number> => {
+  try {
+    let cleanedCount = 0;
+
+    while (cleanedCount < 200) {
+      const booking = await Booking.findOne({
+        status: { $in: ['completed', 'cancelled'] },
+        'voiceNote.publicId': { $exists: true, $ne: '' },
+      }).select('_id voiceNote.publicId');
+
+      if (!booking || !booking.voiceNote?.publicId) {
+        break;
+      }
+
+      try {
+        await deleteFromCloudinary(booking.voiceNote.publicId, 'video');
+      } catch (error) {
+        console.error('Failed to delete closed-booking voice note from Cloudinary:', error);
+      }
+
+      await Booking.updateOne({ _id: booking._id }, { $unset: { voiceNote: 1 } });
+      cleanedCount += 1;
+    }
+
+    if (cleanedCount > 0) {
+      console.log(`Cleaned ${cleanedCount} closed-booking voice note(s)`);
+    }
+
+    return cleanedCount;
+  } catch (error) {
+    console.error('Closed booking voice note cleanup error:', error);
     return 0;
   }
 };

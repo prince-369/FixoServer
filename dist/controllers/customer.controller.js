@@ -53,6 +53,7 @@ const PushSubscription_1 = __importDefault(require("../models/PushSubscription")
 const ticketNumber_service_1 = require("../services/ticketNumber.service");
 const cloudinary_service_1 = require("../services/cloudinary.service");
 const email_service_1 = require("../services/email.service");
+const bookingVoice_service_1 = require("../services/bookingVoice.service");
 const socket_1 = require("../socket");
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const DEACTIVATION_OTP_TTL_MINUTES = 10;
@@ -456,6 +457,7 @@ const cancelBooking = async (req, res) => {
             booking.refundDetails = undefined;
         }
         await booking.save();
+        void (0, bookingVoice_service_1.removeBookingVoiceNote)(booking);
         if (isOnlinePaid) {
             (0, socket_1.sendAdminNotification)({
                 type: 'refund_pending',

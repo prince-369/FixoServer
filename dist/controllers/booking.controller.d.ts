@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+export declare const getWorkerAvailabilitySummary: (req: Request, res: Response) => Promise<void>;
 export declare const createBooking: (req: Request, res: Response) => Promise<void>;
 export declare const getBookingBids: (req: Request, res: Response) => Promise<void>;
 export declare const acceptBid: (req: Request, res: Response) => Promise<void>;

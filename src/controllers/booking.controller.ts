@@ -4,6 +4,7 @@ import WorkBid from '../models/WorkBid';
 import Worker from '../models/Worker';
 import Notification from '../models/Notification';
 import { createOrder, fetchSuccessfulPaymentForOrder, verifyPayment, verifyWebhookSignature } from '../services/payment.service';
+import { uploadAudioBufferToCloudinary } from '../services/cloudinary.service';
 import { generatePin } from '../utils/generatePin';
 import { generateTID } from '../utils/generateTID';
 import Transaction from '../models/Transaction';
@@ -30,6 +31,32 @@ interface RazorpayWebhookBody {
 }
 
 const WORKER_SEARCH_RADIUS_METERS = 10_000;
+const WORKER_SUMMARY_RADIUS_METERS = 25_000;
+
+const hasValidCoordinates = (coordinates: unknown): coordinates is [number, number] => {
+  if (!Array.isArray(coordinates) || coordinates.length !== 2) return false;
+  return Number.isFinite(Number(coordinates[0])) && Number.isFinite(Number(coordinates[1]));
+};
+
+const toRadians = (value: number): number => (value * Math.PI) / 180;
+
+const distanceMetersBetween = (a: [number, number], b: [number, number]): number => {
+  // Coordinates are [longitude, latitude]
+  const [lng1, lat1] = a;
+  const [lng2, lat2] = b;
+  const earthRadiusMeters = 6_371_000;
+  const dLat = toRadians(lat2 - lat1);
+  const dLng = toRadians(lng2 - lng1);
+  const lat1Rad = toRadians(lat1);
+  const lat2Rad = toRadians(lat2);
+
+  const haversine =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1Rad) * Math.cos(lat2Rad) * Math.sin(dLng / 2) ** 2;
+
+  const arc = 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+  return earthRadiusMeters * arc;
+};
 
 const isGeoIndexMissingError = (error: unknown): boolean => {
   const message = error instanceof Error ? error.message.toLowerCase() : '';
@@ -77,6 +104,122 @@ const resolveMatchingWorkers = async (categoryId: string, coordinates: [number, 
       console.error('Geo index self-heal failed. Proceeding without worker notifications.', retryError);
       return [];
     }
+  }
+};
+
+const fetchWorkerAvailabilitySummary = async (
+  categoryId: string,
+  coordinates: [number, number]
+): Promise<{ total: number; active: number; radiusMeters: number }> => {
+  const nearbyFilter = {
+    categories: categoryId,
+    location: {
+      $nearSphere: {
+        $geometry: {
+          type: 'Point',
+          coordinates,
+        },
+        $maxDistance: WORKER_SUMMARY_RADIUS_METERS,
+      },
+    },
+  };
+
+  const [total, active] = await Promise.all([
+    Worker.countDocuments(nearbyFilter),
+    Worker.countDocuments({ ...nearbyFilter, isActive: true, accountStatus: 'live' }),
+  ]);
+
+  return { total, active, radiusMeters: WORKER_SUMMARY_RADIUS_METERS };
+};
+
+const computeWorkerAvailabilitySummaryFallback = async (
+  categoryId: string,
+  targetCoordinates: [number, number]
+): Promise<{ total: number; active: number; radiusMeters: number }> => {
+  const workers = await Worker.find({ categories: categoryId })
+    .select('location isActive accountStatus')
+    .lean();
+
+  let total = 0;
+  let active = 0;
+
+  for (const worker of workers) {
+    const coordinates = worker?.location?.coordinates;
+    if (!hasValidCoordinates(coordinates)) continue;
+
+    const workerCoordinates: [number, number] = [Number(coordinates[0]), Number(coordinates[1])];
+    const distance = distanceMetersBetween(workerCoordinates, targetCoordinates);
+
+    if (distance > WORKER_SUMMARY_RADIUS_METERS) continue;
+
+    total += 1;
+    if (worker.isActive === true && worker.accountStatus === 'live') {
+      active += 1;
+    }
+  }
+
+  return { total, active, radiusMeters: WORKER_SUMMARY_RADIUS_METERS };
+};
+
+const resolveWorkerAvailabilitySummary = async (
+  categoryId: string,
+  coordinates: [number, number]
+): Promise<{ total: number; active: number; radiusMeters: number }> => {
+  try {
+    return await fetchWorkerAvailabilitySummary(categoryId, coordinates);
+  } catch (error) {
+    if (!isGeoIndexMissingError(error)) {
+      console.error('Primary availability summary query failed. Falling back to manual distance scan.', error);
+      return computeWorkerAvailabilitySummaryFallback(categoryId, coordinates);
+    }
+
+    console.error('Geo index missing while fetching worker availability summary. Attempting self-heal.', error);
+
+    try {
+      await Worker.collection.createIndex(
+        { location: '2dsphere' },
+        { name: 'location_2dsphere' }
+      );
+
+      return await fetchWorkerAvailabilitySummary(categoryId, coordinates);
+    } catch (retryError) {
+      console.error('Geo index self-heal failed while fetching worker availability summary. Falling back to manual distance scan.', retryError);
+      return computeWorkerAvailabilitySummaryFallback(categoryId, coordinates);
+    }
+  }
+};
+
+// ─── Worker Availability Summary (Customer Preview) ───
+export const getWorkerAvailabilitySummary = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const categoryId = String(req.query.category || '').trim();
+    const latitude = Number(req.query.latitude);
+    const longitude = Number(req.query.longitude);
+
+    if (!categoryId) {
+      res.status(400).json({ message: 'Category is required' });
+      return;
+    }
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      res.status(400).json({ message: 'Valid latitude and longitude are required' });
+      return;
+    }
+
+    const coordinates: [number, number] = [longitude, latitude];
+    const summary = await resolveWorkerAvailabilitySummary(categoryId, coordinates);
+
+    res.json({
+      summary: {
+        total: summary.total,
+        active: summary.active,
+        inactive: Math.max(0, summary.total - summary.active),
+        radiusMeters: summary.radiusMeters,
+      },
+    });
+  } catch (error) {
+    console.error('Get worker availability summary error:', error);
+    res.status(500).json({ message: 'Server error' });
   }
 };
 
@@ -184,7 +327,40 @@ const reconcileBookingPaymentByOrder = async (
 // ─── Create Booking ───
 export const createBooking = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { category, workDescription, latitude, longitude, address, timeSlot } = req.body;
+    const { category, workDescription, latitude, longitude, address, timeSlot, voiceLanguage, voiceTranscript, voiceDurationSec } = req.body;
+
+    const normalizedDescription = String(workDescription ?? '').trim();
+
+    let voiceNote: {
+      url: string;
+      publicId: string;
+      mimeType?: string;
+      durationSec?: number;
+      language?: string;
+      transcript?: string;
+      createdAt: Date;
+    } | undefined;
+
+    if (req.file) {
+      const uploadedVoice = await uploadAudioBufferToCloudinary(req.file.buffer, 'booking-voice');
+      const parsedDurationSec = Number(voiceDurationSec);
+
+      voiceNote = {
+        url: uploadedVoice.url,
+        publicId: uploadedVoice.publicId,
+        mimeType: req.file.mimetype,
+        durationSec: Number.isFinite(parsedDurationSec) && parsedDurationSec > 0
+          ? Math.round(parsedDurationSec)
+          : undefined,
+        language: typeof voiceLanguage === 'string' ? voiceLanguage.trim() : undefined,
+        transcript: typeof voiceTranscript === 'string' && voiceTranscript.trim()
+          ? voiceTranscript.trim()
+          : undefined,
+        createdAt: new Date(),
+      };
+    }
+
+    const finalDescription = normalizedDescription || voiceNote?.transcript || 'Voice note attached by customer';
 
     const normalizedLatitude = Number(latitude);
     const normalizedLongitude = Number(longitude);
@@ -198,7 +374,8 @@ export const createBooking = async (req: Request, res: Response): Promise<void> 
     const booking = await Booking.create({
       customer: req.user!.id,
       category,
-      workDescription,
+      workDescription: finalDescription,
+      voiceNote,
       customerLocation: {
         type: 'Point',
         coordinates,

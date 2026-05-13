@@ -19,6 +19,15 @@ export interface IBooking extends Document {
   customer: mongoose.Types.ObjectId;
   category: mongoose.Types.ObjectId;
   workDescription: string;
+  voiceNote?: {
+    url: string;
+    publicId: string;
+    mimeType?: string;
+    durationSec?: number;
+    language?: string;
+    transcript?: string;
+    createdAt: Date;
+  };
   customerLocation: {
     type: string;
     coordinates: number[];
@@ -66,6 +75,15 @@ const bookingSchema = new Schema<IBooking>(
     customer: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     category: { type: Schema.Types.ObjectId, ref: 'Category', required: true },
     workDescription: { type: String, required: true },
+    voiceNote: {
+      url: { type: String },
+      publicId: { type: String },
+      mimeType: { type: String },
+      durationSec: { type: Number },
+      language: { type: String },
+      transcript: { type: String },
+      createdAt: { type: Date },
+    },
     customerLocation: {
       type: { type: String, enum: ['Point'], default: 'Point' },
       coordinates: { type: [Number], required: true },

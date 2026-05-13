@@ -28,6 +28,7 @@ const start = async () => {
     // Background job: auto-cancel stale 'finding_workers' bookings
     cleanupTimer = setInterval(() => {
         void (0, bookingCleanup_1.cancelStaleBookings)();
+        void (0, bookingCleanup_1.cleanupClosedBookingVoiceNotes)();
     }, env_1.default.JOB_CLEANUP_INTERVAL_MS);
     cleanupTimer.unref();
     server.listen(env_1.default.PORT, () => {

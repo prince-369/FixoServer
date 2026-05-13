@@ -15,6 +15,7 @@ const ChatbotQA_1 = __importDefault(require("../models/ChatbotQA"));
 const cloudinary_service_1 = require("../services/cloudinary.service");
 const generateTID_1 = require("../utils/generateTID");
 const ticketNumber_service_1 = require("../services/ticketNumber.service");
+const bookingVoice_service_1 = require("../services/bookingVoice.service");
 const payment_service_1 = require("../services/payment.service");
 const env_1 = __importDefault(require("../config/env"));
 const socket_1 = require("../socket");
@@ -792,6 +793,7 @@ const cancelBookingByWorker = async (req, res) => {
             cancelledAt: new Date(),
         };
         await booking.save();
+        void (0, bookingVoice_service_1.removeBookingVoiceNote)(booking);
         // Notify customer
         (0, socket_1.notifyUser)(booking.customer.toString(), 'booking_status_updated', {
             bookingId: booking._id,
@@ -941,6 +943,7 @@ const completeWork = async (req, res) => {
             booking.paymentStatus = 'paid';
         }
         await booking.save();
+        void (0, bookingVoice_service_1.removeBookingVoiceNote)(booking);
         const worker = await Worker_1.default.findById(req.user.id);
         if (!worker) {
             res.status(404).json({ message: 'Worker not found' });

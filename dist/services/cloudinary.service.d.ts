@@ -6,5 +6,9 @@ export declare const uploadBufferToCloudinary: (buffer: Buffer, folder: string) 
     url: string;
     publicId: string;
 }>;
-export declare const deleteFromCloudinary: (publicId: string) => Promise<void>;
+export declare const uploadAudioBufferToCloudinary: (buffer: Buffer, folder: string) => Promise<{
+    url: string;
+    publicId: string;
+}>;
+export declare const deleteFromCloudinary: (publicId: string, resourceType?: "image" | "video") => Promise<void>;
 //# sourceMappingURL=cloudinary.service.d.ts.map
