@@ -376,6 +376,7 @@ export const approveWorker = async (req: Request, res: Response): Promise<void> 
       req.params.workerId,
       {
         accountStatus: 'approved',
+        isActive: true,
         ekycRejectionReason: undefined,
         videoKycIncompleteReason: '',
         videoKycRetryAvailableAt: null,
