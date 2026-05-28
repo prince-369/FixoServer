@@ -15,6 +15,7 @@ import {
   getWorkRequests,
   getWorkRequestDetail,
   submitBid,
+  respondToNegotiation,
   approveBooking,
   rejectBooking,
   cancelBookingByWorker,
@@ -59,6 +60,7 @@ router.get('/work-requests', getWorkRequests);
 router.get('/work-requests/:id', getWorkRequestDetail);
 router.post('/work-requests/:bookingId/bid', bidValidation, handleValidationErrors, mutationGuard, submitBid);
 
+router.post('/booking/:id/bids/:bidId/negotiate-respond', mutationGuard, respondToNegotiation);
 router.post('/booking/:id/approve', mutationGuard, approveBooking);
 router.post('/booking/:id/reject', mutationGuard, rejectBooking);
 router.post('/booking/:id/cancel', mutationGuard, cancelBookingByWorker);

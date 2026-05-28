@@ -9,6 +9,7 @@ import {
   getWorkerAvailabilitySummary,
   getBookingBids,
   acceptBid,
+  counterBid,
   initiatePayment,
   verifyBookingPayment,
   reconcileBookingPayment,
@@ -27,6 +28,7 @@ router.post('/', uploadBookingVoice, createBookingValidation, handleValidationEr
 router.get('/workers/availability-summary', getWorkerAvailabilitySummary);
 router.get('/:id/bids', getBookingBids);
 router.post('/:id/bids/:bidId/accept', mutationGuard, acceptBid);
+router.post('/:id/bids/:bidId/counter', mutationGuard, counterBid);
 router.post('/:id/payment', mutationGuard, initiatePayment);
 router.post('/:id/payment/verify', mutationGuard, verifyBookingPayment);
 router.post('/:id/payment/reconcile', reconcileBookingPayment);

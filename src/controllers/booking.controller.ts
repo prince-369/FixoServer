@@ -495,7 +495,7 @@ export const acceptBid = async (req: Request, res: Response): Promise<void> => {
     booking.status = 'worker_accepted';
     booking.acceptedBid = bid._id as any;
     booking.assignedWorker = bid.worker._id as any;
-    booking.amount = bid.priceOffered;
+    booking.amount = bid.agreedAmount ?? bid.priceOffered;
     await booking.save();
 
     const populatedBooking = await Booking.findById(booking._id)
@@ -533,6 +533,66 @@ export const acceptBid = async (req: Request, res: Response): Promise<void> => {
     });
   } catch (error) {
     console.error('Accept bid error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─── Counter Bid (Customer negotiates) ───
+export const counterBid = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id: bookingId, bidId } = req.params;
+    const { amount, message } = req.body;
+
+    if (!amount || Number(amount) <= 0) {
+      res.status(400).json({ message: 'A valid counter amount is required' });
+      return;
+    }
+
+    const bid = await WorkBid.findById(bidId);
+    if (!bid) {
+      res.status(404).json({ message: 'Bid not found' });
+      return;
+    }
+
+    const booking = await Booking.findOne({
+      _id: bookingId,
+      customer: req.user!.id,
+      status: { $in: ['finding_workers', 'bids_received'] },
+    });
+    if (!booking) {
+      res.status(400).json({ message: 'Cannot negotiate on this booking' });
+      return;
+    }
+
+    if (!['none', 'worker_offered', 'declined'].includes(bid.negotiationStatus)) {
+      res.status(400).json({ message: 'Cannot send counter offer at this stage' });
+      return;
+    }
+
+    if (bid.negotiations.length >= 10) {
+      res.status(400).json({ message: 'Maximum negotiation rounds reached' });
+      return;
+    }
+
+    bid.negotiations.push({ by: 'customer', amount: Number(amount), message: message || '', createdAt: new Date() });
+    bid.negotiationStatus = 'customer_offered';
+    await bid.save();
+
+    const workerId = bid.worker.toString();
+    notifyUser(workerId, 'booking:bid-negotiation', { bookingId, bid });
+
+    await sendNotification({
+      recipientId: workerId,
+      recipientModel: 'Worker',
+      type: 'new_message',
+      title: 'Customer Counter Offer',
+      message: `Customer offered ₹${Number(amount).toLocaleString('en-IN')} — accept, counter, or decline.`,
+      data: { bookingId },
+    });
+
+    res.json({ message: 'Counter offer sent', bid });
+  } catch (error) {
+    console.error('Counter bid error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };

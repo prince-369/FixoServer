@@ -754,6 +754,67 @@ export const submitBid = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
+// ─── Respond to Negotiation (Worker accepts / counters / declines) ───
+export const respondToNegotiation = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id: bookingId, bidId } = req.params;
+    const { action, amount, message } = req.body;
+
+    if (!['accept', 'counter', 'decline'].includes(action)) {
+      res.status(400).json({ message: 'action must be accept | counter | decline' });
+      return;
+    }
+
+    const bid = await WorkBid.findOne({ _id: bidId, worker: req.user!.id });
+    if (!bid) {
+      res.status(404).json({ message: 'Bid not found' });
+      return;
+    }
+
+    if (bid.negotiationStatus !== 'customer_offered') {
+      res.status(400).json({ message: 'No pending customer offer to respond to' });
+      return;
+    }
+
+    const booking = await Booking.findOne({
+      _id: bookingId,
+      status: { $in: ['finding_workers', 'bids_received'] },
+    });
+    if (!booking) {
+      res.status(400).json({ message: 'Booking no longer available for negotiation' });
+      return;
+    }
+
+    if (action === 'accept') {
+      const lastOffer = bid.negotiations[bid.negotiations.length - 1];
+      bid.negotiationStatus = 'agreed';
+      bid.agreedAmount = lastOffer.amount;
+    } else if (action === 'counter') {
+      if (!amount || Number(amount) <= 0) {
+        res.status(400).json({ message: 'A valid counter amount is required' });
+        return;
+      }
+      if (bid.negotiations.length >= 10) {
+        res.status(400).json({ message: 'Maximum negotiation rounds reached' });
+        return;
+      }
+      bid.negotiations.push({ by: 'worker', amount: Number(amount), message: message || '', createdAt: new Date() });
+      bid.negotiationStatus = 'worker_offered';
+    } else {
+      bid.negotiationStatus = 'declined';
+    }
+
+    await bid.save();
+
+    notifyUser(booking.customer.toString(), 'booking:bid-negotiation', { bookingId, bid });
+
+    res.json({ message: 'Response sent', bid });
+  } catch (error) {
+    console.error('Respond to negotiation error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 // ─── Approve Booking (Worker confirms to go) ───
 export const approveBooking = async (req: Request, res: Response): Promise<void> => {
   try {
