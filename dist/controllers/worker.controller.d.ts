@@ -9,6 +9,7 @@ export declare const getDashboard: (req: Request, res: Response) => Promise<void
 export declare const getWorkRequests: (req: Request, res: Response) => Promise<void>;
 export declare const getWorkRequestDetail: (req: Request, res: Response) => Promise<void>;
 export declare const submitBid: (req: Request, res: Response) => Promise<void>;
+export declare const respondToNegotiation: (req: Request, res: Response) => Promise<void>;
 export declare const approveBooking: (req: Request, res: Response) => Promise<void>;
 export declare const rejectBooking: (req: Request, res: Response) => Promise<void>;
 export declare const cancelBookingByWorker: (req: Request, res: Response) => Promise<void>;

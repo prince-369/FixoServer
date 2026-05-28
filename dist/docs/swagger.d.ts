@@ -332,6 +332,27 @@ declare const swaggerSpec: {
                     };
                 };
             };
+            NegotiationEntry: {
+                type: string;
+                properties: {
+                    by: {
+                        type: string;
+                        enum: string[];
+                    };
+                    amount: {
+                        type: string;
+                        example: number;
+                    };
+                    message: {
+                        type: string;
+                        example: string;
+                    };
+                    createdAt: {
+                        type: string;
+                        format: string;
+                    };
+                };
+            };
             Bid: {
                 type: string;
                 properties: {
@@ -357,6 +378,30 @@ declare const swaggerSpec: {
                                 type: string;
                             };
                         };
+                    };
+                    priceOffered: {
+                        type: string;
+                        example: number;
+                    };
+                    status: {
+                        type: string;
+                        enum: string[];
+                    };
+                    negotiationStatus: {
+                        type: string;
+                        enum: string[];
+                        description: string;
+                    };
+                    negotiations: {
+                        type: string;
+                        items: {
+                            $ref: string;
+                        };
+                        description: string;
+                    };
+                    agreedAmount: {
+                        type: string;
+                        description: string;
                     };
                     amount: {
                         type: string;
@@ -2214,6 +2259,75 @@ declare const swaggerSpec: {
                 };
             };
         };
+        '/booking/{id}/bids/{bidId}/counter': {
+            post: {
+                tags: string[];
+                summary: string;
+                description: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                parameters: {
+                    name: string;
+                    in: string;
+                    required: boolean;
+                    description: string;
+                    schema: {
+                        type: string;
+                    };
+                }[];
+                requestBody: {
+                    required: boolean;
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: string;
+                                required: string[];
+                                properties: {
+                                    amount: {
+                                        type: string;
+                                        example: number;
+                                        description: string;
+                                    };
+                                    message: {
+                                        type: string;
+                                        example: string;
+                                        description: string;
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        message: {
+                                            type: string;
+                                            example: string;
+                                        };
+                                        bid: {
+                                            $ref: string;
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                    400: {
+                        description: string;
+                    };
+                    404: {
+                        description: string;
+                    };
+                };
+            };
+        };
         '/booking/{id}/payment': {
             post: {
                 tags: string[];
@@ -2666,6 +2780,80 @@ declare const swaggerSpec: {
                         };
                     };
                     409: {
+                        description: string;
+                    };
+                };
+            };
+        };
+        '/worker/booking/{id}/bids/{bidId}/negotiate-respond': {
+            post: {
+                tags: string[];
+                summary: string;
+                description: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                parameters: {
+                    name: string;
+                    in: string;
+                    required: boolean;
+                    description: string;
+                    schema: {
+                        type: string;
+                    };
+                }[];
+                requestBody: {
+                    required: boolean;
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: string;
+                                required: string[];
+                                properties: {
+                                    action: {
+                                        type: string;
+                                        enum: string[];
+                                        description: string;
+                                    };
+                                    amount: {
+                                        type: string;
+                                        example: number;
+                                        description: string;
+                                    };
+                                    message: {
+                                        type: string;
+                                        example: string;
+                                        description: string;
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        message: {
+                                            type: string;
+                                            example: string;
+                                        };
+                                        bid: {
+                                            $ref: string;
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                    400: {
+                        description: string;
+                    };
+                    404: {
                         description: string;
                     };
                 };

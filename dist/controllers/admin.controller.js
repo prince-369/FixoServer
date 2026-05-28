@@ -387,6 +387,7 @@ const approveWorker = async (req, res) => {
     try {
         const worker = await Worker_1.default.findByIdAndUpdate(req.params.workerId, {
             accountStatus: 'approved',
+            isActive: true,
             ekycRejectionReason: undefined,
             videoKycIncompleteReason: '',
             videoKycRetryAvailableAt: null,

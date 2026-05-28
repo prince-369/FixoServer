@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.handleRazorpayWebhook = exports.reconcileBookingPayment = exports.verifyBookingPayment = exports.initiatePayment = exports.acceptBid = exports.getBookingBids = exports.createBooking = exports.getWorkerAvailabilitySummary = void 0;
+exports.handleRazorpayWebhook = exports.reconcileBookingPayment = exports.verifyBookingPayment = exports.initiatePayment = exports.counterBid = exports.acceptBid = exports.getBookingBids = exports.createBooking = exports.getWorkerAvailabilitySummary = void 0;
 const Booking_1 = __importDefault(require("../models/Booking"));
 const WorkBid_1 = __importDefault(require("../models/WorkBid"));
 const Worker_1 = __importDefault(require("../models/Worker"));
@@ -388,7 +388,7 @@ const acceptBid = async (req, res) => {
         booking.status = 'worker_accepted';
         booking.acceptedBid = bid._id;
         booking.assignedWorker = bid.worker._id;
-        booking.amount = bid.priceOffered;
+        booking.amount = bid.agreedAmount ?? bid.priceOffered;
         await booking.save();
         const populatedBooking = await Booking_1.default.findById(booking._id)
             .populate('category', 'name slug image')
@@ -427,6 +427,58 @@ const acceptBid = async (req, res) => {
     }
 };
 exports.acceptBid = acceptBid;
+// ─── Counter Bid (Customer negotiates) ───
+const counterBid = async (req, res) => {
+    try {
+        const { id: bookingId, bidId } = req.params;
+        const { amount, message } = req.body;
+        if (!amount || Number(amount) <= 0) {
+            res.status(400).json({ message: 'A valid counter amount is required' });
+            return;
+        }
+        const bid = await WorkBid_1.default.findById(bidId);
+        if (!bid) {
+            res.status(404).json({ message: 'Bid not found' });
+            return;
+        }
+        const booking = await Booking_1.default.findOne({
+            _id: bookingId,
+            customer: req.user.id,
+            status: { $in: ['finding_workers', 'bids_received'] },
+        });
+        if (!booking) {
+            res.status(400).json({ message: 'Cannot negotiate on this booking' });
+            return;
+        }
+        if (!['none', 'worker_offered', 'declined'].includes(bid.negotiationStatus)) {
+            res.status(400).json({ message: 'Cannot send counter offer at this stage' });
+            return;
+        }
+        if (bid.negotiations.length >= 10) {
+            res.status(400).json({ message: 'Maximum negotiation rounds reached' });
+            return;
+        }
+        bid.negotiations.push({ by: 'customer', amount: Number(amount), message: message || '', createdAt: new Date() });
+        bid.negotiationStatus = 'customer_offered';
+        await bid.save();
+        const workerId = bid.worker.toString();
+        (0, socket_1.notifyUser)(workerId, 'booking:bid-negotiation', { bookingId, bid });
+        await (0, socket_1.sendNotification)({
+            recipientId: workerId,
+            recipientModel: 'Worker',
+            type: 'new_message',
+            title: 'Customer Counter Offer',
+            message: `Customer offered ₹${Number(amount).toLocaleString('en-IN')} — accept, counter, or decline.`,
+            data: { bookingId },
+        });
+        res.json({ message: 'Counter offer sent', bid });
+    }
+    catch (error) {
+        console.error('Counter bid error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.counterBid = counterBid;
 // ─── Initiate Payment ───
 const initiatePayment = async (req, res) => {
     try {

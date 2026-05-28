@@ -179,6 +179,15 @@ const swaggerSpec = {
                     createdAt: { type: 'string', format: 'date-time' },
                 },
             },
+            NegotiationEntry: {
+                type: 'object',
+                properties: {
+                    by: { type: 'string', enum: ['customer', 'worker'] },
+                    amount: { type: 'number', example: 450 },
+                    message: { type: 'string', example: 'Can you do it for ₹450?' },
+                    createdAt: { type: 'string', format: 'date-time' },
+                },
+            },
             Bid: {
                 type: 'object',
                 properties: {
@@ -193,6 +202,19 @@ const swaggerSpec = {
                             completedJobs: { type: 'integer' },
                         },
                     },
+                    priceOffered: { type: 'number', example: 500 },
+                    status: { type: 'string', enum: ['pending', 'accepted', 'rejected'] },
+                    negotiationStatus: {
+                        type: 'string',
+                        enum: ['none', 'customer_offered', 'worker_offered', 'agreed', 'declined'],
+                        description: 'Current stage of price negotiation',
+                    },
+                    negotiations: {
+                        type: 'array',
+                        items: { $ref: '#/components/schemas/NegotiationEntry' },
+                        description: 'Full back-and-forth negotiation thread',
+                    },
+                    agreedAmount: { type: 'number', description: 'Final agreed price (set when negotiationStatus = agreed)' },
                     amount: { type: 'number' },
                     eta: { type: 'string' },
                     note: { type: 'string' },
@@ -1026,6 +1048,51 @@ const swaggerSpec = {
                 },
             },
         },
+        '/booking/{id}/bids/{bidId}/counter': {
+            post: {
+                tags: ['Booking'],
+                summary: 'Customer sends a counter offer on a bid (negotiation)',
+                description: 'Allows the customer to negotiate price with a worker. Sets negotiationStatus to `customer_offered` and notifies the worker via socket + push notification. Max 10 negotiation rounds per bid.',
+                security: [{ BearerAuth: [] }],
+                parameters: [
+                    { name: 'id', in: 'path', required: true, description: 'Booking ID', schema: { type: 'string' } },
+                    { name: 'bidId', in: 'path', required: true, description: 'Bid ID to counter', schema: { type: 'string' } },
+                ],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                required: ['amount'],
+                                properties: {
+                                    amount: { type: 'number', example: 450, description: 'Counter price offered by customer' },
+                                    message: { type: 'string', example: 'Can you do it for ₹450?', description: 'Optional message to worker' },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    200: {
+                        description: 'Counter offer sent to worker',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        message: { type: 'string', example: 'Counter offer sent' },
+                                        bid: { $ref: '#/components/schemas/Bid' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    400: { description: 'Invalid amount / cannot negotiate at this stage / max rounds reached' },
+                    404: { description: 'Bid not found' },
+                },
+            },
+        },
         '/booking/{id}/payment': {
             post: {
                 tags: ['Booking'],
@@ -1228,6 +1295,52 @@ const swaggerSpec = {
                 responses: {
                     201: { description: 'Bid submitted', content: { 'application/json': { schema: { $ref: '#/components/schemas/Bid' } } } },
                     409: { description: 'Already bid on this booking' },
+                },
+            },
+        },
+        '/worker/booking/{id}/bids/{bidId}/negotiate-respond': {
+            post: {
+                tags: ['Worker'],
+                summary: 'Worker responds to customer\'s counter offer (accept / counter / decline)',
+                description: 'Worker can accept the customer\'s offered price, send their own counter amount, or decline. Only valid when negotiationStatus = `customer_offered`. Notifies customer via socket in real-time.',
+                security: [{ BearerAuth: [] }],
+                parameters: [
+                    { name: 'id', in: 'path', required: true, description: 'Booking ID', schema: { type: 'string' } },
+                    { name: 'bidId', in: 'path', required: true, description: 'Bid ID', schema: { type: 'string' } },
+                ],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                required: ['action'],
+                                properties: {
+                                    action: { type: 'string', enum: ['accept', 'counter', 'decline'], description: 'accept — agrees to customer price; counter — sends new amount; decline — ends negotiation' },
+                                    amount: { type: 'number', example: 480, description: 'Required only when action = counter' },
+                                    message: { type: 'string', example: 'Best I can do is ₹480', description: 'Optional message (counter only)' },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    200: {
+                        description: 'Response recorded and customer notified',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        message: { type: 'string', example: 'Response sent' },
+                                        bid: { $ref: '#/components/schemas/Bid' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    400: { description: 'No pending customer offer / invalid action / invalid amount / max rounds reached' },
+                    404: { description: 'Bid not found or does not belong to this worker' },
                 },
             },
         },

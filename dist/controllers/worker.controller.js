@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.escalateHelpTicket = exports.appendHelpTicketMessage = exports.getHelpTicketDetail = exports.getHelpTickets = exports.createHelpTicket = exports.getChatbotQA = exports.deleteNotification = exports.markAllNotificationsRead = exports.markNotificationRead = exports.getNotifications = exports.verifyDuesPayment = exports.payDuesFromWallet = exports.payDues = exports.getWithdrawals = exports.requestWithdrawal = exports.saveBankDetails = exports.getWalletTransactions = exports.getEarningsHistory = exports.getFunds = exports.completeWork = exports.requestCompletionCode = exports.sendMessage = exports.cancelBookingByWorker = exports.rejectBooking = exports.approveBooking = exports.submitBid = exports.getWorkRequestDetail = exports.getWorkRequests = exports.getDashboard = exports.updateLocation = exports.toggleActive = exports.completeProfile = exports.reRequestEKYC = exports.updateProfile = exports.getProfile = void 0;
+exports.escalateHelpTicket = exports.appendHelpTicketMessage = exports.getHelpTicketDetail = exports.getHelpTickets = exports.createHelpTicket = exports.getChatbotQA = exports.deleteNotification = exports.markAllNotificationsRead = exports.markNotificationRead = exports.getNotifications = exports.verifyDuesPayment = exports.payDuesFromWallet = exports.payDues = exports.getWithdrawals = exports.requestWithdrawal = exports.saveBankDetails = exports.getWalletTransactions = exports.getEarningsHistory = exports.getFunds = exports.completeWork = exports.requestCompletionCode = exports.sendMessage = exports.cancelBookingByWorker = exports.rejectBooking = exports.approveBooking = exports.respondToNegotiation = exports.submitBid = exports.getWorkRequestDetail = exports.getWorkRequests = exports.getDashboard = exports.updateLocation = exports.toggleActive = exports.completeProfile = exports.reRequestEKYC = exports.updateProfile = exports.getProfile = void 0;
 const Worker_1 = __importDefault(require("../models/Worker"));
 const Booking_1 = __importDefault(require("../models/Booking"));
 const WorkBid_1 = __importDefault(require("../models/WorkBid"));
@@ -684,6 +684,62 @@ const submitBid = async (req, res) => {
     }
 };
 exports.submitBid = submitBid;
+// ─── Respond to Negotiation (Worker accepts / counters / declines) ───
+const respondToNegotiation = async (req, res) => {
+    try {
+        const { id: bookingId, bidId } = req.params;
+        const { action, amount, message } = req.body;
+        if (!['accept', 'counter', 'decline'].includes(action)) {
+            res.status(400).json({ message: 'action must be accept | counter | decline' });
+            return;
+        }
+        const bid = await WorkBid_1.default.findOne({ _id: bidId, worker: req.user.id });
+        if (!bid) {
+            res.status(404).json({ message: 'Bid not found' });
+            return;
+        }
+        if (bid.negotiationStatus !== 'customer_offered') {
+            res.status(400).json({ message: 'No pending customer offer to respond to' });
+            return;
+        }
+        const booking = await Booking_1.default.findOne({
+            _id: bookingId,
+            status: { $in: ['finding_workers', 'bids_received'] },
+        });
+        if (!booking) {
+            res.status(400).json({ message: 'Booking no longer available for negotiation' });
+            return;
+        }
+        if (action === 'accept') {
+            const lastOffer = bid.negotiations[bid.negotiations.length - 1];
+            bid.negotiationStatus = 'agreed';
+            bid.agreedAmount = lastOffer.amount;
+        }
+        else if (action === 'counter') {
+            if (!amount || Number(amount) <= 0) {
+                res.status(400).json({ message: 'A valid counter amount is required' });
+                return;
+            }
+            if (bid.negotiations.length >= 10) {
+                res.status(400).json({ message: 'Maximum negotiation rounds reached' });
+                return;
+            }
+            bid.negotiations.push({ by: 'worker', amount: Number(amount), message: message || '', createdAt: new Date() });
+            bid.negotiationStatus = 'worker_offered';
+        }
+        else {
+            bid.negotiationStatus = 'declined';
+        }
+        await bid.save();
+        (0, socket_1.notifyUser)(booking.customer.toString(), 'booking:bid-negotiation', { bookingId, bid });
+        res.json({ message: 'Response sent', bid });
+    }
+    catch (error) {
+        console.error('Respond to negotiation error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.respondToNegotiation = respondToNegotiation;
 // ─── Approve Booking (Worker confirms to go) ───
 const approveBooking = async (req, res) => {
     try {

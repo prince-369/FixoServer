@@ -20,6 +20,7 @@ router.get('/dashboard', worker_controller_1.getDashboard);
 router.get('/work-requests', worker_controller_1.getWorkRequests);
 router.get('/work-requests/:id', worker_controller_1.getWorkRequestDetail);
 router.post('/work-requests/:bookingId/bid', validators_1.bidValidation, error_middleware_1.handleValidationErrors, mutationGuard, worker_controller_1.submitBid);
+router.post('/booking/:id/bids/:bidId/negotiate-respond', mutationGuard, worker_controller_1.respondToNegotiation);
 router.post('/booking/:id/approve', mutationGuard, worker_controller_1.approveBooking);
 router.post('/booking/:id/reject', mutationGuard, worker_controller_1.rejectBooking);
 router.post('/booking/:id/cancel', mutationGuard, worker_controller_1.cancelBookingByWorker);

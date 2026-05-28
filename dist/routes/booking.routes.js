@@ -16,6 +16,7 @@ router.post('/', upload_middleware_1.uploadBookingVoice, validators_1.createBook
 router.get('/workers/availability-summary', booking_controller_1.getWorkerAvailabilitySummary);
 router.get('/:id/bids', booking_controller_1.getBookingBids);
 router.post('/:id/bids/:bidId/accept', mutationGuard, booking_controller_1.acceptBid);
+router.post('/:id/bids/:bidId/counter', mutationGuard, booking_controller_1.counterBid);
 router.post('/:id/payment', mutationGuard, booking_controller_1.initiatePayment);
 router.post('/:id/payment/verify', mutationGuard, booking_controller_1.verifyBookingPayment);
 router.post('/:id/payment/reconcile', booking_controller_1.reconcileBookingPayment);

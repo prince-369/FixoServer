@@ -43,6 +43,20 @@ const workBidSchema = new mongoose_1.Schema({
         enum: ['pending', 'accepted', 'rejected'],
         default: 'pending',
     },
+    negotiationStatus: {
+        type: String,
+        enum: ['none', 'customer_offered', 'worker_offered', 'agreed', 'declined'],
+        default: 'none',
+    },
+    negotiations: [
+        {
+            by: { type: String, enum: ['customer', 'worker'], required: true },
+            amount: { type: Number, required: true },
+            message: { type: String, default: '' },
+            createdAt: { type: Date, default: Date.now },
+        },
+    ],
+    agreedAmount: { type: Number },
 }, { timestamps: true });
 workBidSchema.index({ booking: 1, worker: 1 }, { unique: true });
 workBidSchema.index({ booking: 1, status: 1 });
