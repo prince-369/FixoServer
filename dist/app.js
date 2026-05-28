@@ -10,10 +10,12 @@ const compression_1 = __importDefault(require("compression"));
 const cookie_parser_1 = __importDefault(require("cookie-parser"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const crypto_1 = require("crypto");
+const swagger_ui_express_1 = __importDefault(require("swagger-ui-express"));
 const env_1 = __importDefault(require("./config/env"));
 const error_middleware_1 = require("./middlewares/error.middleware");
 const rateLimit_middleware_1 = require("./middlewares/rateLimit.middleware");
 const metrics_1 = require("./monitoring/metrics");
+const swagger_1 = __importDefault(require("./docs/swagger"));
 // Import routes
 const auth_routes_1 = __importDefault(require("./routes/auth.routes"));
 const customer_routes_1 = __importDefault(require("./routes/customer.routes"));
@@ -89,6 +91,11 @@ app.use('/api/customer', rateLimit_middleware_1.mutationLimiter);
 app.use('/api/worker', rateLimit_middleware_1.mutationLimiter);
 app.use('/api/admin', rateLimit_middleware_1.mutationLimiter);
 app.use('/api/notifications', rateLimit_middleware_1.mutationLimiter);
+// Swagger UI — disable helmet CSP only for this route so inline scripts load
+app.use('/api/docs', (0, helmet_1.default)({ contentSecurityPolicy: false }), swagger_ui_express_1.default.serve, swagger_ui_express_1.default.setup(swagger_1.default, {
+    customSiteTitle: 'FIXO API Docs',
+    swaggerOptions: { persistAuthorization: true },
+}));
 // Health check
 app.get('/api/health', (_req, res) => {
     res.json({
