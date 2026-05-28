@@ -5,10 +5,12 @@ import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import mongoose from 'mongoose';
 import { randomUUID } from 'crypto';
+import swaggerUi from 'swagger-ui-express';
 import env from './config/env';
 import { errorHandler } from './middlewares/error.middleware';
 import { apiLimiter, authLimiter, mutationLimiter } from './middlewares/rateLimit.middleware';
 import { metricsMiddleware, serveMetrics } from './monitoring/metrics';
+import swaggerSpec from './docs/swagger';
 
 // Import routes
 import authRoutes from './routes/auth.routes';
@@ -97,6 +99,12 @@ app.use('/api/customer', mutationLimiter);
 app.use('/api/worker', mutationLimiter);
 app.use('/api/admin', mutationLimiter);
 app.use('/api/notifications', mutationLimiter);
+
+// Swagger UI — disable helmet CSP only for this route so inline scripts load
+app.use('/api/docs', helmet({ contentSecurityPolicy: false }), swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  customSiteTitle: 'FIXO API Docs',
+  swaggerOptions: { persistAuthorization: true },
+}));
 
 // Health check
 app.get('/api/health', (_req, res) => {
