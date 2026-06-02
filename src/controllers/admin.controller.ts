@@ -15,27 +15,47 @@ import { getSeedAdminBootstrapStatus } from '../services/adminBootstrap.service'
 
 const VIDEO_KYC_RETRY_COOLDOWN_MS = 3 * 60 * 1000;
 
+// ─── Dashboard Cache (2-minute TTL) ───
+let _dashboardCache: { data: unknown; cachedAt: number } | null = null;
+const DASHBOARD_CACHE_TTL_MS = 2 * 60 * 1000;
+export const clearDashboardCache = () => { _dashboardCache = null; };
+
 // ─── Dashboard Stats ───
 export const getDashboard = async (_req: Request, res: Response): Promise<void> => {
-  try {
-    const totalWorkers = await Worker.countDocuments();
-    const activeWorkers = await Worker.countDocuments({ isActive: true, accountStatus: 'live' });
-    const pendingEKYC = await Worker.countDocuments({ accountStatus: { $in: ['test', 'ekyc_pending', 'ekyc_done'] } });
-    const pendingWithdrawals = await Withdrawal.countDocuments({ status: 'pending' });
-    const totalCustomers = await User.countDocuments();
-    const pendingHelpTickets = await HelpTicket.countDocuments({ status: { $in: ['open', 'escalated'] } });
+  if (_dashboardCache && Date.now() - _dashboardCache.cachedAt < DASHBOARD_CACHE_TTL_MS) {
+    res.json(_dashboardCache.data);
+    return;
+  }
 
+  try {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const todayWorkDone = await Booking.countDocuments({
-      status: 'completed',
-      updatedAt: { $gte: today },
-    });
 
-    const totalBookings = await Booking.countDocuments();
-    const totalCompleted = await Booking.countDocuments({ status: 'completed' });
-    const totalCancelled = await Booking.countDocuments({ status: 'cancelled' });
-    const totalInProgress = await Booking.countDocuments({ status: 'in_progress' });
+    const [
+      totalWorkers,
+      activeWorkers,
+      pendingEKYC,
+      pendingWithdrawals,
+      totalCustomers,
+      pendingHelpTickets,
+      todayWorkDone,
+      totalBookings,
+      totalCompleted,
+      totalCancelled,
+      totalInProgress,
+    ] = await Promise.all([
+      Worker.countDocuments(),
+      Worker.countDocuments({ isActive: true, accountStatus: 'live' }),
+      Worker.countDocuments({ accountStatus: { $in: ['test', 'ekyc_pending', 'ekyc_done'] } }),
+      Withdrawal.countDocuments({ status: 'pending' }),
+      User.countDocuments(),
+      HelpTicket.countDocuments({ status: { $in: ['open', 'escalated'] } }),
+      Booking.countDocuments({ status: 'completed', updatedAt: { $gte: today } }),
+      Booking.countDocuments(),
+      Booking.countDocuments({ status: 'completed' }),
+      Booking.countDocuments({ status: 'cancelled' }),
+      Booking.countDocuments({ status: 'in_progress' }),
+    ]);
 
     // Commission earnings
     const commissionStats = await Transaction.aggregate([
@@ -197,7 +217,7 @@ export const getDashboard = async (_req: Request, res: Response): Promise<void> 
       { $project: { name: { $ifNull: ['$cat.name', 'Unknown'] }, count: 1, revenue: 1 } },
     ]);
 
-    res.json({
+    const responseData = {
       totalWorkers,
       activeWorkers,
       pendingEKYC,
@@ -213,7 +233,6 @@ export const getDashboard = async (_req: Request, res: Response): Promise<void> 
       monthlyProfit: monthlyProfit[0]?.total || 0,
       totalDuesOutstanding: duesStats[0]?.totalDues || 0,
       workersWithDues: duesStats[0]?.count || 0,
-      // Charts
       revenueChart,
       bookingsChart,
       revenueDonut,
@@ -221,7 +240,10 @@ export const getDashboard = async (_req: Request, res: Response): Promise<void> 
       paymentMethodDonut,
       workerStatusDonut,
       topCategories,
-    });
+    };
+
+    _dashboardCache = { data: responseData, cachedAt: Date.now() };
+    res.json(responseData);
   } catch (error) {
     console.error('Admin dashboard error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -269,12 +291,11 @@ export const getAdminBootstrapStatus = async (_req: Request, res: Response): Pro
 // ─── EKYC: Get Pending Workers ───
 export const getPendingEKYC = async (_req: Request, res: Response): Promise<void> => {
   try {
-    const workers = await Worker.find({
-      accountStatus: { $in: ['test', 'ekyc_pending', 'ekyc_done'] },
-    }).sort({ createdAt: -1 });
-
-    const approvedCount = await Worker.countDocuments({ accountStatus: { $in: ['approved', 'live'] } });
-    const rejectedCount = await Worker.countDocuments({ accountStatus: 'rejected' });
+    const [workers, approvedCount, rejectedCount] = await Promise.all([
+      Worker.find({ accountStatus: { $in: ['test', 'ekyc_pending', 'ekyc_done'] } }).sort({ createdAt: -1 }),
+      Worker.countDocuments({ accountStatus: { $in: ['approved', 'live'] } }),
+      Worker.countDocuments({ accountStatus: 'rejected' }),
+    ]);
 
     res.json({ workers, approvedCount, rejectedCount });
   } catch (error) {
@@ -396,6 +417,7 @@ export const approveWorker = async (req: Request, res: Response): Promise<void> 
       worker,
     });
 
+    clearDashboardCache();
     res.json({ message: 'Worker approved', worker });
   } catch (error) {
     console.error('Approve worker error:', error);
@@ -430,6 +452,7 @@ export const rejectWorker = async (req: Request, res: Response): Promise<void> =
       reason,
     });
 
+    clearDashboardCache();
     res.json({ message: 'Worker rejected', worker });
   } catch (error) {
     console.error('Reject worker error:', error);
@@ -517,6 +540,7 @@ export const completeWithdrawal = async (req: Request, res: Response): Promise<v
       withdrawal,
     });
 
+    clearDashboardCache();
     res.json({ message: 'Withdrawal completed', withdrawal });
   } catch (error) {
     console.error('Complete withdrawal error:', error);
@@ -977,23 +1001,66 @@ export const reorderBanners = async (req: Request, res: Response): Promise<void>
 };
 
 // ─── Customers List ───
-export const getCustomers = async (_req: Request, res: Response): Promise<void> => {
+export const getCustomers = async (req: Request, res: Response): Promise<void> => {
   try {
-    const customers = await User.find().sort({ createdAt: -1 });
+    const q = (req.query.q as string || '').trim();
+    const page = Math.max(1, parseInt(req.query.page as string || '1', 10));
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string || '50', 10)));
+    const skip = (page - 1) * limit;
 
-    const customerStats = await Promise.all(
-      customers.map(async (customer) => {
-        const bookingCount = await Booking.countDocuments({ customer: customer._id });
-        const completedCount = await Booking.countDocuments({ customer: customer._id, status: 'completed' });
-        return {
-          ...customer.toObject(),
-          totalBookings: bookingCount,
-          completedBookings: completedCount,
-        };
-      })
-    );
+    const searchFilter = q
+      ? { $or: [
+          { fullName: { $regex: q, $options: 'i' } },
+          { email:    { $regex: q, $options: 'i' } },
+          { phone:    { $regex: q, $options: 'i' } },
+        ]}
+      : {};
 
-    res.json({ customers: customerStats });
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const [total, newToday, activeCountResult, filteredTotal, customers] = await Promise.all([
+      User.countDocuments(),
+      User.countDocuments({ createdAt: { $gte: todayStart } }),
+      Booking.aggregate([{ $group: { _id: '$customer' } }, { $count: 'n' }]),
+      q ? User.countDocuments(searchFilter) : Promise.resolve(null as number | null),
+      User.aggregate([
+        { $match: searchFilter },
+        { $sort: { createdAt: -1 } },
+        { $skip: skip },
+        { $limit: limit },
+        {
+          $lookup: {
+            from: 'bookings',
+            localField: '_id',
+            foreignField: 'customer',
+            as: '_bookings',
+            pipeline: [{ $project: { status: 1 } }],
+          },
+        },
+        {
+          $addFields: {
+            totalBookings: { $size: '$_bookings' },
+            completedBookings: {
+              $size: { $filter: { input: '$_bookings', as: 'b', cond: { $eq: ['$$b.status', 'completed'] } } },
+            },
+          },
+        },
+        { $project: { _bookings: 0, password: 0 } },
+      ]),
+    ]);
+
+    const resolvedTotal = filteredTotal ?? total;
+    res.json({
+      customers,
+      total,
+      newToday,
+      activeCount: activeCountResult[0]?.n ?? 0,
+      page,
+      limit,
+      totalFiltered: resolvedTotal,
+      totalPages: Math.ceil(resolvedTotal / limit),
+    });
   } catch (error) {
     console.error('Get customers error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -1451,6 +1518,7 @@ export const processRefund = async (req: Request, res: Response): Promise<void> 
       data: { bookingId: booking._id },
     });
 
+    clearDashboardCache();
     res.json({ message: 'Refund processed', booking });
   } catch (error) {
     console.error('Process refund error:', error);
@@ -1624,12 +1692,13 @@ export const getAllWorkers = async (req: Request, res: Response): Promise<void> 
       .populate('categories', 'name')
       .sort({ createdAt: -1 });
 
-    const stats = {
-      total: await Worker.countDocuments(),
-      live: await Worker.countDocuments({ accountStatus: 'live' }),
-      pending: await Worker.countDocuments({ accountStatus: { $in: ['test', 'ekyc_pending', 'ekyc_done'] } }),
-      rejected: await Worker.countDocuments({ accountStatus: 'rejected' }),
-    };
+    const [statTotal, statLive, statPending, statRejected] = await Promise.all([
+      Worker.countDocuments(),
+      Worker.countDocuments({ accountStatus: 'live' }),
+      Worker.countDocuments({ accountStatus: { $in: ['test', 'ekyc_pending', 'ekyc_done'] } }),
+      Worker.countDocuments({ accountStatus: 'rejected' }),
+    ]);
+    const stats = { total: statTotal, live: statLive, pending: statPending, rejected: statRejected };
 
     res.json({ workers, stats });
   } catch (error) {
@@ -1657,11 +1726,20 @@ export const getWorkerDetail = async (req: Request, res: Response): Promise<void
       .sort({ createdAt: -1 })
       .limit(50);
 
+    const bookingStatsFacet = await Booking.aggregate([
+      { $match: { assignedWorker: worker._id } },
+      { $facet: {
+        total:      [{ $count: 'n' }],
+        completed:  [{ $match: { status: 'completed' } },  { $count: 'n' }],
+        cancelled:  [{ $match: { status: 'cancelled' } },  { $count: 'n' }],
+        inProgress: [{ $match: { status: 'in_progress' } }, { $count: 'n' }],
+      }},
+    ]);
     const bookingStats = {
-      total: await Booking.countDocuments({ assignedWorker: worker._id }),
-      completed: await Booking.countDocuments({ assignedWorker: worker._id, status: 'completed' }),
-      cancelled: await Booking.countDocuments({ assignedWorker: worker._id, status: 'cancelled' }),
-      inProgress: await Booking.countDocuments({ assignedWorker: worker._id, status: 'in_progress' }),
+      total:      bookingStatsFacet[0]?.total[0]?.n      ?? 0,
+      completed:  bookingStatsFacet[0]?.completed[0]?.n  ?? 0,
+      cancelled:  bookingStatsFacet[0]?.cancelled[0]?.n  ?? 0,
+      inProgress: bookingStatsFacet[0]?.inProgress[0]?.n ?? 0,
     };
 
     // Get reviews from completed bookings
