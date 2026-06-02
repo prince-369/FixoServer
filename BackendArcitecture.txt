@@ -1,0 +1,170 @@
+FIXO Backend Architecture
+Version: May 2026
+
+1) Executive Summary
+The FIXO backend follows a modular monolith architecture built on Express + TypeScript + MongoDB,
+with integrated real-time communication, background jobs, payments, notifications, and operational observability.
+
+It is designed to support a multi-role marketplace platform (Customer, Worker, Admin) with:
+- API-first service delivery
+- role-based access control
+- event-driven real-time updates
+- production-focused security and monitoring middleware
+
+In simple terms:
+- HTTP APIs handle core business operations.
+- Socket.IO handles live events and real-time collaboration flows.
+- MongoDB stores transactional and operational domain data.
+- Shared middleware enforces security, rate limits, idempotency, and error handling.
+
+2) Architecture Style
+Primary style: Modular Monolith + Layered Service Architecture + Event-Driven Realtime Layer
+
+This is not a microservices architecture yet. It is intentionally optimized for:
+- faster product iteration
+- lower operational complexity
+- shared domain logic reuse
+- smooth migration path to service decomposition if scale requires it
+
+3) Core Technology Stack
+- Runtime: Node.js 20+
+- Framework: Express 5 (TypeScript)
+- Database: MongoDB (Mongoose)
+- Realtime: Socket.IO (+ Redis adapter support)
+- Security Middleware: Helmet, CORS, Cookie Parser
+- Validation: express-validator
+- Rate Limiting: express-rate-limit (+ Redis store)
+- File Uploads: Multer (memory storage)
+- Payments: Razorpay integration (order, verify, webhook)
+- Messaging: Twilio (OTP), Nodemailer (email)
+- Push Notifications: Web Push + Firebase Mobile Push
+- Observability: Prometheus metrics (prom-client), Grafana/Prometheus artifacts
+- Load Testing: k6 API and socket soak scripts
+
+4) Backend Layer Breakdown
+4.1 Entry and Runtime Orchestration Layer
+- HTTP server bootstrapping and graceful shutdown lifecycle.
+- Environment-driven runtime controls (timeouts, keep-alive, socket limits).
+- Startup boot sequence includes DB connect and admin bootstrap sync.
+
+4.2 API Gateway and Middleware Layer
+- Global security middleware: helmet, CORS allowlist, body limits.
+- Request tracing via x-request-id and structured slow/error request logs.
+- Shared baseline traffic protection via global/auth/mutation rate limiters.
+- Centralized error middleware with safe production responses.
+
+4.3 Routing and Access Control Layer
+- Role-segmented route groups:
+	- auth
+	- customer
+	- worker
+	- booking
+	- admin
+	- notifications
+- Token-based protect + authorize middleware gates private endpoints.
+- verifyUser middleware validates active user existence before role actions.
+
+4.4 Domain and Business Logic Layer
+- Controllers contain use-case orchestration per domain.
+- Services encapsulate external integrations and specialized utilities:
+	- payment
+	- cloudinary upload
+	- SMS OTP
+	- email
+	- push delivery
+	- map services
+	- admin bootstrap
+
+4.5 Data Persistence Layer
+- Mongoose models represent bounded business entities:
+	- user/worker/admin identities
+	- bookings, bids, transactions, withdrawals
+	- notifications and push tokens/subscriptions
+	- idempotency and auth token state
+- TTL-based cleanup for expiring entities (OTP, refresh token, idempotency entries).
+
+4.6 Realtime Event Layer
+- Socket.IO server initialized alongside HTTP server.
+- Room model for user, role, and booking channels.
+- Realtime propagation for booking lifecycle, notifications, location, and eKYC workflows.
+- Redis adapter support for multi-instance horizontal scaling.
+
+4.7 Background and Scheduled Processing Layer
+- Periodic cleanup jobs for stale bookings and voice-note housekeeping.
+- Job intervals are environment-configurable for operational tuning.
+
+4.8 Observability and Operations Layer
+- Health and readiness endpoints.
+- Prometheus metrics endpoint (token-protected option).
+- HTTP and socket telemetry for latency, failures, concurrency, and room counts.
+- Grafana dashboard and alert templates included.
+
+5) Domain Module Map
+5.1 Identity and Access
+- Customer, Worker, Admin authentication and role authorization.
+- Access token issuance + refresh token cookie flow.
+- Password reset via OTP/email token workflows.
+
+5.2 Marketplace Core
+- Booking creation and lifecycle management.
+- Worker bid flow and bid acceptance.
+- Role-specific booking visibility and transitions.
+
+5.3 Payments and Financial Operations
+- Razorpay payment initiation and verification.
+- Server-side webhook reconciliation.
+- Transaction ledger and withdrawal modules.
+- Admin finance operations (commissions, refunds, worker dues context).
+
+5.4 Support and Compliance
+- Help ticketing and escalation model.
+- eKYC/video-KYC orchestration and admin worker approval states.
+
+5.5 Notification Fabric
+- In-app notification persistence.
+- Web push and mobile push distribution.
+- Realtime socket fan-out to online clients.
+
+6) Data and Event Flow Model
+6.1 Standard API Flow
+Client -> Express Route -> Validation -> AuthZ/AuthN -> Controller -> Service(s) -> MongoDB/External Provider -> Response
+
+6.2 Mutation Protection Flow
+Client Mutation -> Idempotency Guard -> Rate Limit -> Controller -> Commit -> Replay-safe response record
+
+6.3 Realtime Flow
+Client Action/Event -> Socket Handler -> Domain Update -> Notification Emit (user/role/booking rooms) -> Live Client Update
+
+6.4 Payment Confirmation Flow
+Client Payment Attempt -> Order Init -> Gateway Callback/Webhook -> Signature Verify -> Booking Reconcile -> Transaction Update -> Realtime Notify
+
+7) Security and Reliability Controls (Current State)
+- Helmet hardening and x-powered-by disabled.
+- Strict CORS allowlist based on environment configuration.
+- Request size limits and timeout controls.
+- JWT-based role auth for protected routes.
+- Global/auth/mutation rate limiting with Redis-backed support.
+- Idempotency middleware for write endpoints to prevent duplicate effects.
+- Webhook signature verification for payment callbacks.
+- Centralized error handling with production-safe responses.
+
+8) Scalability Characteristics
+- Designed as scale-ready modular monolith.
+- Redis-enabled rate limiter and socket adapter support horizontal scaling.
+- Domain separation in controllers/services enables future extraction into services if needed.
+- k6 load scripts included for API and socket capacity profiling.
+- Metrics and alert hooks provide performance-based scaling inputs.
+
+9) Deployment and Operations Posture
+- Render deployment blueprint available.
+- Environment matrix documentation for staging and production parity.
+- Health/readiness endpoints support orchestrator integrations.
+- Graceful shutdown path reduces in-flight request disruption.
+
+10) Final Statement for Investors
+FIXO backend is a production-oriented modular monolith architecture with integrated realtime,
+payments, notifications, and observability. It provides a strong foundation for a multi-role marketplace,
+balancing delivery speed, operational control, and scalability readiness.
+
+In practical terms, the current backend can support growth efficiently today, while preserving a clear
+upgrade path toward deeper service decomposition as traffic and business complexity increase.

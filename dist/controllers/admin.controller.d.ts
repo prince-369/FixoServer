@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+export declare const clearDashboardCache: () => void;
 export declare const getDashboard: (_req: Request, res: Response) => Promise<void>;
 export declare const getPendingAdminBadges: (_req: Request, res: Response) => Promise<void>;
 export declare const getAdminBootstrapStatus: (_req: Request, res: Response) => Promise<void>;
@@ -21,7 +22,7 @@ export declare const createBanner: (req: Request, res: Response) => Promise<void
 export declare const deleteBanner: (req: Request, res: Response) => Promise<void>;
 export declare const updateBanner: (req: Request, res: Response) => Promise<void>;
 export declare const reorderBanners: (req: Request, res: Response) => Promise<void>;
-export declare const getCustomers: (_req: Request, res: Response) => Promise<void>;
+export declare const getCustomers: (req: Request, res: Response) => Promise<void>;
 export declare const getCommissions: (_req: Request, res: Response) => Promise<void>;
 export declare const getWorkerDues: (_req: Request, res: Response) => Promise<void>;
 export declare const getHelpTickets: (req: Request, res: Response) => Promise<void>;
