@@ -107,6 +107,7 @@ app.use('/api/docs', helmet({ contentSecurityPolicy: false }), swaggerUi.serve, 
 }));
 
 // Health check
+
 app.get('/api/health', (_req, res) => {
   res.json({
     status: 'ok',
