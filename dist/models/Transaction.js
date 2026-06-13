@@ -41,7 +41,7 @@ const transactionSchema = new mongoose_1.Schema({
     worker: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Worker' },
     type: {
         type: String,
-        enum: ['booking_payment', 'worker_earning', 'refund', 'withdrawal', 'commission', 'dues_deposit', 'dues_auto_deduct', 'dues_wallet_deduct'],
+        enum: ['booking_payment', 'worker_earning', 'refund', 'withdrawal', 'commission', 'dues_deposit', 'dues_auto_deduct', 'dues_wallet_deduct', 'reward_payout', 'worker_bonus'],
         required: true,
     },
     amount: { type: Number, required: true },

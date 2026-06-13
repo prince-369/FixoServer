@@ -42,6 +42,7 @@ import {
   appendHelpTicketMessage,
   escalateHelpTicket,
 } from '../controllers/worker.controller';
+import { getWorkerPromotions, getPromotionHistory, claimPromotionBonus } from '../controllers/rewards.controller';
 
 const router = Router();
 const mutationGuard = idempotencyGuard(15_000);
@@ -78,6 +79,11 @@ router.get('/withdrawals', getWithdrawals);
 router.post('/dues/pay', mutationGuard, payDues);
 router.post('/dues/pay-wallet', mutationGuard, payDuesFromWallet);
 router.post('/dues/verify', mutationGuard, verifyDuesPayment);
+
+// Promotions & Incentives
+router.get('/promotions', getWorkerPromotions);
+router.get('/promotions/history', getPromotionHistory);
+router.post('/promotions/:id/claim-bonus', mutationGuard, claimPromotionBonus);
 
 router.get('/notifications', getNotifications);
 router.patch('/notifications/:id/read', markNotificationRead);

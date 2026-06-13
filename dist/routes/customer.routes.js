@@ -5,6 +5,7 @@ const auth_middleware_1 = require("../middlewares/auth.middleware");
 const upload_middleware_1 = require("../middlewares/upload.middleware");
 const idempotency_middleware_1 = require("../middlewares/idempotency.middleware");
 const customer_controller_1 = require("../controllers/customer.controller");
+const rewards_controller_1 = require("../controllers/rewards.controller");
 const router = (0, express_1.Router)();
 const mutationGuard = (0, idempotency_middleware_1.idempotencyGuard)(15000);
 // Public routes
@@ -24,6 +25,12 @@ router.post('/bookings/:id/cancel', mutationGuard, customer_controller_1.cancelB
 router.post('/bookings/:id/reveal-completion-code', mutationGuard, customer_controller_1.revealCompletionCode);
 router.post('/bookings/:id/refund-details', mutationGuard, customer_controller_1.submitRefundDetails);
 router.post('/bookings/:id/review', mutationGuard, customer_controller_1.submitReview);
+// Rewards & Coupons
+router.get('/rewards', rewards_controller_1.getRewards);
+router.post('/rewards/:milestoneKey/claim', mutationGuard, rewards_controller_1.claimReward);
+router.get('/rewards/claims', rewards_controller_1.getRewardClaims);
+router.get('/coupons', rewards_controller_1.getAvailableCoupons);
+router.post('/coupons/validate', rewards_controller_1.validateCoupon);
 router.get('/notifications', customer_controller_1.getNotifications);
 router.patch('/notifications/:id/read', customer_controller_1.markNotificationRead);
 router.patch('/notifications/read-all', customer_controller_1.markAllNotificationsRead);

@@ -1,0 +1,20 @@
+import { Request, Response } from 'express';
+export declare const adminListCoupons: (_req: Request, res: Response) => Promise<void>;
+export declare const adminCreateCoupon: (req: Request, res: Response) => Promise<void>;
+export declare const adminUpdateCoupon: (req: Request, res: Response) => Promise<void>;
+export declare const adminToggleCoupon: (req: Request, res: Response) => Promise<void>;
+export declare const adminDeleteCoupon: (req: Request, res: Response) => Promise<void>;
+export declare const adminListPromotions: (_req: Request, res: Response) => Promise<void>;
+export declare const adminCreatePromotion: (req: Request, res: Response) => Promise<void>;
+export declare const adminUpdatePromotion: (req: Request, res: Response) => Promise<void>;
+export declare const adminTogglePromotion: (req: Request, res: Response) => Promise<void>;
+export declare const adminDeletePromotion: (req: Request, res: Response) => Promise<void>;
+export declare const adminListMilestones: (_req: Request, res: Response) => Promise<void>;
+export declare const adminUpsertMilestone: (req: Request, res: Response) => Promise<void>;
+export declare const adminUpdateMilestone: (req: Request, res: Response) => Promise<void>;
+export declare const adminListRewardClaims: (req: Request, res: Response) => Promise<void>;
+export declare const adminApproveRewardClaim: (req: Request, res: Response) => Promise<void>;
+export declare const adminRejectRewardClaim: (req: Request, res: Response) => Promise<void>;
+export declare const adminListCouponRedemptions: (_req: Request, res: Response) => Promise<void>;
+export declare const adminIncentiveAnalytics: (_req: Request, res: Response) => Promise<void>;
+//# sourceMappingURL=incentiveAdmin.controller.d.ts.map

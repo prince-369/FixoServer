@@ -19,6 +19,7 @@ const bookingVoice_service_1 = require("../services/bookingVoice.service");
 const payment_service_1 = require("../services/payment.service");
 const env_1 = __importDefault(require("../config/env"));
 const socket_1 = require("../socket");
+const incentive_service_1 = require("../services/incentive.service");
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const WORKER_SEARCH_RADIUS_METERS = 10000;
 const hasValidCoordinates = (coordinates) => {
@@ -1018,13 +1019,38 @@ const completeWork = async (req, res) => {
         let commission = 0;
         let workerEarning = 0;
         if (booking.paymentMethod === 'online') {
-            // Online: 20% commission, worker gets 80%
+            // Online: default 20% commission, worker gets the rest.
+            // A worker promotion (reduced/zero commission) may lower the rate for this job.
+            // resolveActiveWorkerCommissionRate returns DEFAULT_COMMISSION_RATE when no
+            // campaign applies, so behaviour is identical to before in the common case.
+            let effectiveRate = incentive_service_1.DEFAULT_COMMISSION_RATE;
+            let appliedPromotion = null;
+            try {
+                const resolved = await (0, incentive_service_1.resolveActiveWorkerCommissionRate)(worker, worker.totalWorkDone);
+                effectiveRate = resolved.rate;
+                appliedPromotion = resolved.promotion;
+            }
+            catch {
+                effectiveRate = incentive_service_1.DEFAULT_COMMISSION_RATE;
+            }
             const amountInPaise = Math.round(booking.amount * 100);
-            const commissionInPaise = Math.round(amountInPaise * 0.20);
+            const commissionInPaise = Math.round(amountInPaise * effectiveRate);
             const workerEarningInPaise = amountInPaise - commissionInPaise;
             commission = commissionInPaise / 100;
             workerEarning = workerEarningInPaise / 100;
             worker.balance += workerEarning;
+            // Track commission savings for analytics (no-op when rate is default).
+            if (appliedPromotion && effectiveRate < incentive_service_1.DEFAULT_COMMISSION_RATE) {
+                const fullCommission = Math.round(amountInPaise * incentive_service_1.DEFAULT_COMMISSION_RATE) / 100;
+                void (0, incentive_service_1.recordCommissionSaving)({
+                    promotion: appliedPromotion,
+                    worker,
+                    booking: booking._id,
+                    appliedRate: effectiveRate,
+                    fullCommission,
+                    actualCommission: commission,
+                });
+            }
         }
         else {
             // Cash: NO commission — worker keeps 100% of bid amount in hand
@@ -1041,6 +1067,9 @@ const completeWork = async (req, res) => {
         worker.totalEarnings += workerEarning;
         worker.totalCommissionPaid += commission;
         await worker.save();
+        // Bonus promotions are claim-based: if this job unlocked a bonus tier,
+        // notify the worker so they can claim it from the Offers page.
+        void (0, incentive_service_1.notifyUnlockedBonusTiers)(worker);
         if (isCashBooking) {
             const cashPaymentAmount = booking.amount + (booking.cashSurcharge || 100);
             const existingCashPayment = await Transaction_1.default.findOne({

@@ -7,6 +7,7 @@ const error_middleware_1 = require("../middlewares/error.middleware");
 const idempotency_middleware_1 = require("../middlewares/idempotency.middleware");
 const validators_1 = require("../utils/validators");
 const worker_controller_1 = require("../controllers/worker.controller");
+const rewards_controller_1 = require("../controllers/rewards.controller");
 const router = (0, express_1.Router)();
 const mutationGuard = (0, idempotency_middleware_1.idempotencyGuard)(15000);
 router.use(auth_middleware_1.protect, (0, auth_middleware_1.authorize)('worker'));
@@ -36,6 +37,10 @@ router.get('/withdrawals', worker_controller_1.getWithdrawals);
 router.post('/dues/pay', mutationGuard, worker_controller_1.payDues);
 router.post('/dues/pay-wallet', mutationGuard, worker_controller_1.payDuesFromWallet);
 router.post('/dues/verify', mutationGuard, worker_controller_1.verifyDuesPayment);
+// Promotions & Incentives
+router.get('/promotions', rewards_controller_1.getWorkerPromotions);
+router.get('/promotions/history', rewards_controller_1.getPromotionHistory);
+router.post('/promotions/:id/claim-bonus', mutationGuard, rewards_controller_1.claimPromotionBonus);
 router.get('/notifications', worker_controller_1.getNotifications);
 router.patch('/notifications/:id/read', worker_controller_1.markNotificationRead);
 router.patch('/notifications/read-all', worker_controller_1.markAllNotificationsRead);

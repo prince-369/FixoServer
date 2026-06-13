@@ -13,6 +13,7 @@ const generatePin_1 = require("../utils/generatePin");
 const generateTID_1 = require("../utils/generateTID");
 const Transaction_1 = __importDefault(require("../models/Transaction"));
 const socket_1 = require("../socket");
+const incentive_service_1 = require("../services/incentive.service");
 const RAZORPAY_SUCCESS_EVENTS = new Set(['payment.captured', 'order.paid']);
 const WORKER_SEARCH_RADIUS_METERS = 10000;
 const WORKER_SUMMARY_RADIUS_METERS = 25000;
@@ -225,6 +226,17 @@ const finalizeOnlineBookingPayment = async (booking, orderId, paymentId) => {
             title: 'Payment Received (Online)',
             message: 'Online payment completed. You can proceed to the location.',
             data: { bookingId: booking._id },
+        });
+    }
+    // Record coupon redemption once payment is confirmed (idempotent on booking).
+    if (!alreadyFinalized && booking.couponCampaign && booking.discountAmount > 0) {
+        void (0, incentive_service_1.recordCouponRedemption)({
+            couponId: booking.couponCampaign,
+            couponCode: booking.couponCode,
+            userId: booking.customer,
+            bookingId: booking._id,
+            discountAmount: booking.discountAmount,
+            orderAmount: booking.amount,
         });
     }
     return { alreadyFinalized };
@@ -530,16 +542,38 @@ const initiatePayment = async (req, res) => {
             });
             return;
         }
-        // Online payment
-        const order = await (0, payment_service_1.createOrder)(booking.amount, booking._id.toString());
+        // Online payment — optional coupon discount (platform-absorbed; worker earning is unchanged)
+        let payableAmount = booking.amount;
+        if (req.body.couponCode) {
+            try {
+                const couponResult = await (0, incentive_service_1.validateAndPriceCoupon)({
+                    code: String(req.body.couponCode),
+                    customerId: req.user.id,
+                    amount: booking.amount,
+                });
+                if (couponResult.valid && couponResult.campaign) {
+                    booking.couponCode = couponResult.campaign.code;
+                    booking.couponCampaign = couponResult.campaign._id;
+                    booking.discountAmount = couponResult.discountAmount;
+                    payableAmount = Math.max(0, booking.amount - couponResult.discountAmount);
+                }
+            }
+            catch {
+                // On any coupon error, fall back to full price — never block payment.
+                payableAmount = booking.amount;
+            }
+        }
+        const order = await (0, payment_service_1.createOrder)(payableAmount, booking._id.toString());
         booking.razorpayOrderId = order.id;
         await booking.save();
         res.json({
             razorpayOrder: {
                 id: order.id,
-                amount: booking.amount * 100, // Razorpay uses paise
+                amount: payableAmount * 100, // Razorpay uses paise
             },
             booking,
+            discountAmount: booking.discountAmount || 0,
+            payableAmount,
         });
     }
     catch (error) {

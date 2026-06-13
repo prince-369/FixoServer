@@ -30,6 +30,9 @@ export interface IBooking extends Document {
     paymentStatus: PaymentStatus;
     amount: number;
     cashSurcharge: number;
+    couponCode?: string;
+    couponCampaign?: mongoose.Types.ObjectId;
+    discountAmount: number;
     completionPin?: string;
     completionRequestedByWorkerAt?: Date;
     completionCodeRevealedAt?: Date;

@@ -5,6 +5,7 @@ const auth_middleware_1 = require("../middlewares/auth.middleware");
 const upload_middleware_1 = require("../middlewares/upload.middleware");
 const idempotency_middleware_1 = require("../middlewares/idempotency.middleware");
 const admin_controller_1 = require("../controllers/admin.controller");
+const incentiveAdmin_controller_1 = require("../controllers/incentiveAdmin.controller");
 const router = (0, express_1.Router)();
 const mutationGuard = (0, idempotency_middleware_1.idempotencyGuard)(20000);
 router.use(auth_middleware_1.protect, (0, auth_middleware_1.authorize)('admin'));
@@ -60,6 +61,29 @@ router.get('/cash-payments', admin_controller_1.getCashPayments);
 // Workers
 router.get('/workers', admin_controller_1.getAllWorkers);
 router.get('/workers/:id', admin_controller_1.getWorkerDetail);
+// ── Incentives: Coupons ──
+router.get('/coupons', incentiveAdmin_controller_1.adminListCoupons);
+router.post('/coupons', mutationGuard, incentiveAdmin_controller_1.adminCreateCoupon);
+router.put('/coupons/:id', mutationGuard, incentiveAdmin_controller_1.adminUpdateCoupon);
+router.post('/coupons/:id/toggle', mutationGuard, incentiveAdmin_controller_1.adminToggleCoupon);
+router.delete('/coupons/:id', mutationGuard, incentiveAdmin_controller_1.adminDeleteCoupon);
+// ── Incentives: Worker Promotions ──
+router.get('/promotions', incentiveAdmin_controller_1.adminListPromotions);
+router.post('/promotions', mutationGuard, incentiveAdmin_controller_1.adminCreatePromotion);
+router.put('/promotions/:id', mutationGuard, incentiveAdmin_controller_1.adminUpdatePromotion);
+router.post('/promotions/:id/toggle', mutationGuard, incentiveAdmin_controller_1.adminTogglePromotion);
+router.delete('/promotions/:id', mutationGuard, incentiveAdmin_controller_1.adminDeletePromotion);
+// ── Incentives: Reward Milestones ──
+router.get('/reward-milestones', incentiveAdmin_controller_1.adminListMilestones);
+router.post('/reward-milestones', mutationGuard, incentiveAdmin_controller_1.adminUpsertMilestone);
+router.put('/reward-milestones/:id', mutationGuard, incentiveAdmin_controller_1.adminUpdateMilestone);
+// ── Incentives: Reward Claims ──
+router.get('/reward-claims', incentiveAdmin_controller_1.adminListRewardClaims);
+router.post('/reward-claims/:id/approve', mutationGuard, incentiveAdmin_controller_1.adminApproveRewardClaim);
+router.post('/reward-claims/:id/reject', mutationGuard, incentiveAdmin_controller_1.adminRejectRewardClaim);
+// ── Incentives: Analytics ──
+router.get('/incentive-analytics', incentiveAdmin_controller_1.adminIncentiveAnalytics);
+router.get('/coupon-redemptions', incentiveAdmin_controller_1.adminListCouponRedemptions);
 // Notifications
 router.get('/notifications', admin_controller_1.getAdminNotifications);
 router.patch('/notifications/:id/read', admin_controller_1.markAdminNotificationRead);

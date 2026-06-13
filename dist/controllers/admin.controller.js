@@ -45,6 +45,7 @@ const Withdrawal_1 = __importDefault(require("../models/Withdrawal"));
 const Category_1 = __importDefault(require("../models/Category"));
 const Banner_1 = __importDefault(require("../models/Banner"));
 const HelpTicket_1 = __importDefault(require("../models/HelpTicket"));
+const RewardClaim_1 = __importDefault(require("../models/RewardClaim"));
 const ChatbotQA_1 = __importDefault(require("../models/ChatbotQA"));
 const socket_1 = require("../socket");
 const Notification_1 = __importDefault(require("../models/Notification"));
@@ -264,19 +265,21 @@ exports.getDashboard = getDashboard;
 // ─── Lightweight Pending Badge Counts ───
 const getPendingAdminBadges = async (_req, res) => {
     try {
-        const [pendingEKYC, pendingWithdrawals, pendingRefunds, pendingSupport] = await Promise.all([
+        const [pendingEKYC, pendingWithdrawals, pendingRefunds, pendingSupport, pendingRewardClaims] = await Promise.all([
             Worker_1.default.countDocuments({ accountStatus: { $in: ['test', 'ekyc_pending', 'ekyc_done'] } }),
             Withdrawal_1.default.countDocuments({ status: 'pending' }),
             Booking_1.default.countDocuments({ paymentStatus: 'refund_pending' }),
             HelpTicket_1.default.countDocuments({ status: { $in: ['open', 'escalated'] } }),
+            RewardClaim_1.default.countDocuments({ status: 'pending_approval' }),
         ]);
         const pendingFinance = pendingWithdrawals + pendingRefunds;
-        const totalActionRequired = pendingEKYC + pendingFinance + pendingSupport;
+        const totalActionRequired = pendingEKYC + pendingFinance + pendingSupport + pendingRewardClaims;
         res.json({
             pendingEKYC,
             pendingWithdrawals,
             pendingRefunds,
             pendingSupport,
+            pendingRewardClaims,
             pendingFinance,
             totalActionRequired,
         });

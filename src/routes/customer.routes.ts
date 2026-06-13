@@ -29,6 +29,13 @@ import {
   sendDeactivateAccountOtp,
   confirmDeactivateAccount,
 } from '../controllers/customer.controller';
+import {
+  getRewards,
+  claimReward,
+  getRewardClaims,
+  getAvailableCoupons,
+  validateCoupon,
+} from '../controllers/rewards.controller';
 
 const router = Router();
 const mutationGuard = idempotencyGuard(15_000);
@@ -52,6 +59,13 @@ router.post('/bookings/:id/cancel', mutationGuard, cancelBooking);
 router.post('/bookings/:id/reveal-completion-code', mutationGuard, revealCompletionCode);
 router.post('/bookings/:id/refund-details', mutationGuard, submitRefundDetails);
 router.post('/bookings/:id/review', mutationGuard, submitReview);
+
+// Rewards & Coupons
+router.get('/rewards', getRewards);
+router.post('/rewards/:milestoneKey/claim', mutationGuard, claimReward);
+router.get('/rewards/claims', getRewardClaims);
+router.get('/coupons', getAvailableCoupons);
+router.post('/coupons/validate', validateCoupon);
 
 router.get('/notifications', getNotifications);
 router.patch('/notifications/:id/read', markNotificationRead);

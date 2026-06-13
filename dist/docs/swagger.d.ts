@@ -836,6 +836,546 @@ declare const swaggerSpec: {
                     };
                 };
             };
+            RewardMilestone: {
+                type: string;
+                properties: {
+                    _id: {
+                        type: string;
+                    };
+                    key: {
+                        type: string;
+                        example: string;
+                    };
+                    bookingsRequired: {
+                        type: string;
+                        example: number;
+                    };
+                    rewardAmount: {
+                        type: string;
+                        example: number;
+                    };
+                    label: {
+                        type: string;
+                        example: string;
+                    };
+                    isActive: {
+                        type: string;
+                    };
+                    order: {
+                        type: string;
+                    };
+                };
+            };
+            RewardMilestoneView: {
+                type: string;
+                properties: {
+                    key: {
+                        type: string;
+                        example: string;
+                    };
+                    bookingsRequired: {
+                        type: string;
+                    };
+                    rewardAmount: {
+                        type: string;
+                    };
+                    label: {
+                        type: string;
+                    };
+                    achieved: {
+                        type: string;
+                    };
+                    claimed: {
+                        type: string;
+                    };
+                    claimable: {
+                        type: string;
+                    };
+                    claimStatus: {
+                        type: string;
+                        enum: string[];
+                        nullable: boolean;
+                    };
+                    claimRejectionReason: {
+                        type: string;
+                        nullable: boolean;
+                    };
+                    progressPercent: {
+                        type: string;
+                        example: number;
+                    };
+                };
+            };
+            RewardClaim: {
+                type: string;
+                properties: {
+                    _id: {
+                        type: string;
+                    };
+                    customer: {
+                        type: string;
+                    };
+                    milestoneKey: {
+                        type: string;
+                    };
+                    bookingsRequired: {
+                        type: string;
+                    };
+                    rewardAmount: {
+                        type: string;
+                    };
+                    status: {
+                        type: string;
+                        enum: string[];
+                    };
+                    payoutDetails: {
+                        type: string;
+                        properties: {
+                            method: {
+                                type: string;
+                                enum: string[];
+                            };
+                            upiId: {
+                                type: string;
+                            };
+                            holderName: {
+                                type: string;
+                            };
+                            bankName: {
+                                type: string;
+                            };
+                            bankAccountNumber: {
+                                type: string;
+                            };
+                            ifscCode: {
+                                type: string;
+                            };
+                        };
+                    };
+                    eligibleCountAtClaim: {
+                        type: string;
+                    };
+                    rejectionReason: {
+                        type: string;
+                    };
+                    createdAt: {
+                        type: string;
+                        format: string;
+                    };
+                };
+            };
+            Coupon: {
+                type: string;
+                properties: {
+                    _id: {
+                        type: string;
+                    };
+                    code: {
+                        type: string;
+                        example: string;
+                    };
+                    title: {
+                        type: string;
+                    };
+                    description: {
+                        type: string;
+                    };
+                    discountType: {
+                        type: string;
+                        enum: string[];
+                    };
+                    discountValue: {
+                        type: string;
+                        example: number;
+                    };
+                    minOrderAmount: {
+                        type: string;
+                    };
+                    maxDiscount: {
+                        type: string;
+                        nullable: boolean;
+                    };
+                    expiresAt: {
+                        type: string;
+                        format: string;
+                        nullable: boolean;
+                    };
+                    usageLimit: {
+                        type: string;
+                        nullable: boolean;
+                    };
+                    perUserLimit: {
+                        type: string;
+                    };
+                    usedCount: {
+                        type: string;
+                    };
+                    budgetLimit: {
+                        type: string;
+                        nullable: boolean;
+                    };
+                    spentBudget: {
+                        type: string;
+                    };
+                    isActive: {
+                        type: string;
+                    };
+                    status: {
+                        type: string;
+                        enum: string[];
+                    };
+                };
+            };
+            CouponPublic: {
+                type: string;
+                description: string;
+                properties: {
+                    _id: {
+                        type: string;
+                    };
+                    code: {
+                        type: string;
+                    };
+                    title: {
+                        type: string;
+                    };
+                    description: {
+                        type: string;
+                    };
+                    discountType: {
+                        type: string;
+                        enum: string[];
+                    };
+                    discountValue: {
+                        type: string;
+                    };
+                    minOrderAmount: {
+                        type: string;
+                    };
+                    maxDiscount: {
+                        type: string;
+                        nullable: boolean;
+                    };
+                    expiresAt: {
+                        type: string;
+                        format: string;
+                        nullable: boolean;
+                    };
+                };
+            };
+            CouponCreateBody: {
+                type: string;
+                required: string[];
+                properties: {
+                    code: {
+                        type: string;
+                        example: string;
+                    };
+                    title: {
+                        type: string;
+                        example: string;
+                    };
+                    description: {
+                        type: string;
+                    };
+                    discountType: {
+                        type: string;
+                        enum: string[];
+                    };
+                    discountValue: {
+                        type: string;
+                        example: number;
+                    };
+                    minOrderAmount: {
+                        type: string;
+                        example: number;
+                    };
+                    maxDiscount: {
+                        type: string;
+                        example: number;
+                    };
+                    expiresAt: {
+                        type: string;
+                        format: string;
+                        example: string;
+                    };
+                    usageLimit: {
+                        type: string;
+                        example: number;
+                    };
+                    perUserLimit: {
+                        type: string;
+                        example: number;
+                    };
+                    budgetLimit: {
+                        type: string;
+                        example: number;
+                    };
+                };
+            };
+            WorkerPromotion: {
+                type: string;
+                properties: {
+                    _id: {
+                        type: string;
+                    };
+                    title: {
+                        type: string;
+                    };
+                    description: {
+                        type: string;
+                    };
+                    type: {
+                        type: string;
+                        enum: string[];
+                    };
+                    commissionRate: {
+                        type: string;
+                        example: number;
+                    };
+                    zeroCommissionScope: {
+                        type: string;
+                        enum: string[];
+                    };
+                    firstOrdersCount: {
+                        type: string;
+                    };
+                    bonusTiers: {
+                        type: string;
+                        items: {
+                            type: string;
+                            properties: {
+                                jobsRequired: {
+                                    type: string;
+                                };
+                                bonusAmount: {
+                                    type: string;
+                                };
+                            };
+                        };
+                    };
+                    appliesToAllWorkers: {
+                        type: string;
+                    };
+                    startsAt: {
+                        type: string;
+                        format: string;
+                    };
+                    endsAt: {
+                        type: string;
+                        format: string;
+                        nullable: boolean;
+                    };
+                    budgetLimit: {
+                        type: string;
+                        nullable: boolean;
+                    };
+                    spentBudget: {
+                        type: string;
+                    };
+                    isActive: {
+                        type: string;
+                    };
+                    status: {
+                        type: string;
+                        enum: string[];
+                    };
+                };
+            };
+            WorkerPromotionView: {
+                type: string;
+                description: string;
+                properties: {
+                    _id: {
+                        type: string;
+                    };
+                    title: {
+                        type: string;
+                    };
+                    description: {
+                        type: string;
+                    };
+                    type: {
+                        type: string;
+                        enum: string[];
+                    };
+                    commissionRate: {
+                        type: string;
+                    };
+                    defaultRate: {
+                        type: string;
+                    };
+                    zeroCommissionScope: {
+                        type: string;
+                    };
+                    firstOrdersCount: {
+                        type: string;
+                    };
+                    ordersUsed: {
+                        type: string;
+                    };
+                    bonusTiers: {
+                        type: string;
+                        items: {
+                            type: string;
+                            properties: {
+                                jobsRequired: {
+                                    type: string;
+                                };
+                                bonusAmount: {
+                                    type: string;
+                                };
+                                progress: {
+                                    type: string;
+                                };
+                                progressPercent: {
+                                    type: string;
+                                };
+                                claimed: {
+                                    type: string;
+                                };
+                                claimable: {
+                                    type: string;
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+            WorkerPromotionCreateBody: {
+                type: string;
+                required: string[];
+                properties: {
+                    title: {
+                        type: string;
+                    };
+                    description: {
+                        type: string;
+                    };
+                    type: {
+                        type: string;
+                        enum: string[];
+                    };
+                    commissionRate: {
+                        type: string;
+                        description: string;
+                        example: number;
+                    };
+                    zeroCommissionScope: {
+                        type: string;
+                        enum: string[];
+                        description: string;
+                    };
+                    firstOrdersCount: {
+                        type: string;
+                        description: string;
+                        example: number;
+                    };
+                    bonusTiers: {
+                        type: string;
+                        description: string;
+                        items: {
+                            type: string;
+                            properties: {
+                                jobsRequired: {
+                                    type: string;
+                                    example: number;
+                                };
+                                bonusAmount: {
+                                    type: string;
+                                    example: number;
+                                };
+                            };
+                        };
+                    };
+                    appliesToAllWorkers: {
+                        type: string;
+                        default: boolean;
+                    };
+                    targetWorkers: {
+                        type: string;
+                        items: {
+                            type: string;
+                        };
+                    };
+                    startsAt: {
+                        type: string;
+                        format: string;
+                    };
+                    endsAt: {
+                        type: string;
+                        format: string;
+                    };
+                    durationDays: {
+                        type: string;
+                        example: number;
+                    };
+                    budgetLimit: {
+                        type: string;
+                    };
+                };
+            };
+            IncentiveAnalytics: {
+                type: string;
+                properties: {
+                    totalIncentiveCost: {
+                        type: string;
+                    };
+                    coupons: {
+                        type: string;
+                        properties: {
+                            used: {
+                                type: string;
+                            };
+                            discountTotal: {
+                                type: string;
+                            };
+                            activeCount: {
+                                type: string;
+                            };
+                        };
+                    };
+                    rewards: {
+                        type: string;
+                        properties: {
+                            paidTotal: {
+                                type: string;
+                            };
+                            byStatus: {
+                                type: string;
+                                additionalProperties: {
+                                    type: string;
+                                    properties: {
+                                        count: {
+                                            type: string;
+                                        };
+                                        total: {
+                                            type: string;
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                    workerPromotions: {
+                        type: string;
+                        properties: {
+                            bonusPaidTotal: {
+                                type: string;
+                            };
+                            commissionSavingTotal: {
+                                type: string;
+                            };
+                            participatingWorkers: {
+                                type: string;
+                            };
+                            activeCount: {
+                                type: string;
+                            };
+                        };
+                    };
+                };
+            };
         };
     };
     security: {
@@ -5171,6 +5711,1139 @@ declare const swaggerSpec: {
                             'application/json': {
                                 schema: {
                                     $ref: string;
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        '/customer/rewards': {
+            get: {
+                tags: string[];
+                summary: string;
+                description: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        completedBookings: {
+                                            type: string;
+                                            example: number;
+                                        };
+                                        totalClaimedAmount: {
+                                            type: string;
+                                            example: number;
+                                        };
+                                        nextMilestone: {
+                                            $ref: string;
+                                        };
+                                        milestones: {
+                                            type: string;
+                                            items: {
+                                                $ref: string;
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        '/customer/rewards/{milestoneKey}/claim': {
+            post: {
+                tags: string[];
+                summary: string;
+                description: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                parameters: {
+                    name: string;
+                    in: string;
+                    required: boolean;
+                    description: string;
+                    schema: {
+                        type: string;
+                    };
+                }[];
+                requestBody: {
+                    required: boolean;
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: string;
+                                required: string[];
+                                properties: {
+                                    method: {
+                                        type: string;
+                                        enum: string[];
+                                        example: string;
+                                    };
+                                    upiId: {
+                                        type: string;
+                                        description: string;
+                                    };
+                                    holderName: {
+                                        type: string;
+                                        description: string;
+                                    };
+                                    bankName: {
+                                        type: string;
+                                    };
+                                    bankAccountNumber: {
+                                        type: string;
+                                    };
+                                    ifscCode: {
+                                        type: string;
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+                responses: {
+                    201: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        message: {
+                                            type: string;
+                                        };
+                                        claim: {
+                                            $ref: string;
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                    403: {
+                        description: string;
+                    };
+                    404: {
+                        description: string;
+                    };
+                    409: {
+                        description: string;
+                    };
+                };
+            };
+        };
+        '/customer/rewards/claims': {
+            get: {
+                tags: string[];
+                summary: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        claims: {
+                                            type: string;
+                                            items: {
+                                                $ref: string;
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        '/customer/coupons': {
+            get: {
+                tags: string[];
+                summary: string;
+                description: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        coupons: {
+                                            type: string;
+                                            items: {
+                                                $ref: string;
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        '/customer/coupons/validate': {
+            post: {
+                tags: string[];
+                summary: string;
+                description: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                requestBody: {
+                    required: boolean;
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: string;
+                                required: string[];
+                                properties: {
+                                    code: {
+                                        type: string;
+                                        example: string;
+                                    };
+                                    bookingId: {
+                                        type: string;
+                                        description: string;
+                                    };
+                                    amount: {
+                                        type: string;
+                                        description: string;
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        valid: {
+                                            type: string;
+                                        };
+                                        code: {
+                                            type: string;
+                                        };
+                                        discountAmount: {
+                                            type: string;
+                                        };
+                                        finalAmount: {
+                                            type: string;
+                                        };
+                                        orderAmount: {
+                                            type: string;
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                    400: {
+                        description: string;
+                    };
+                };
+            };
+        };
+        '/worker/promotions': {
+            get: {
+                tags: string[];
+                summary: string;
+                description: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        promotions: {
+                                            type: string;
+                                            items: {
+                                                $ref: string;
+                                            };
+                                        };
+                                        summary: {
+                                            type: string;
+                                            properties: {
+                                                totalWorkDone: {
+                                                    type: string;
+                                                };
+                                                currentCommissionRate: {
+                                                    type: string;
+                                                    example: number;
+                                                };
+                                                defaultCommissionRate: {
+                                                    type: string;
+                                                    example: number;
+                                                };
+                                                commissionSavedTotal: {
+                                                    type: string;
+                                                };
+                                                bonusEarnedTotal: {
+                                                    type: string;
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        '/worker/promotions/history': {
+            get: {
+                tags: string[];
+                summary: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        history: {
+                                            type: string;
+                                            items: {
+                                                type: string;
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        '/worker/promotions/{id}/claim-bonus': {
+            post: {
+                tags: string[];
+                summary: string;
+                description: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                parameters: {
+                    name: string;
+                    in: string;
+                    required: boolean;
+                    description: string;
+                    schema: {
+                        type: string;
+                    };
+                }[];
+                requestBody: {
+                    required: boolean;
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: string;
+                                required: string[];
+                                properties: {
+                                    jobsRequired: {
+                                        type: string;
+                                        example: number;
+                                        description: string;
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        message: {
+                                            type: string;
+                                        };
+                                        bonusAmount: {
+                                            type: string;
+                                        };
+                                        newBalance: {
+                                            type: string;
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                    400: {
+                        description: string;
+                    };
+                    404: {
+                        description: string;
+                    };
+                };
+            };
+        };
+        '/admin/coupons': {
+            get: {
+                tags: string[];
+                summary: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        coupons: {
+                                            type: string;
+                                            items: {
+                                                $ref: string;
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+            post: {
+                tags: string[];
+                summary: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                requestBody: {
+                    required: boolean;
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: string;
+                            };
+                        };
+                    };
+                };
+                responses: {
+                    201: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        coupon: {
+                                            $ref: string;
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                    409: {
+                        description: string;
+                    };
+                };
+            };
+        };
+        '/admin/coupons/{id}': {
+            put: {
+                tags: string[];
+                summary: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                parameters: {
+                    name: string;
+                    in: string;
+                    required: boolean;
+                    schema: {
+                        type: string;
+                    };
+                }[];
+                requestBody: {
+                    required: boolean;
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: string;
+                            };
+                        };
+                    };
+                };
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        coupon: {
+                                            $ref: string;
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                    404: {
+                        description: string;
+                    };
+                };
+            };
+            delete: {
+                tags: string[];
+                summary: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                parameters: {
+                    name: string;
+                    in: string;
+                    required: boolean;
+                    schema: {
+                        type: string;
+                    };
+                }[];
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    $ref: string;
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        '/admin/coupons/{id}/toggle': {
+            post: {
+                tags: string[];
+                summary: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                parameters: {
+                    name: string;
+                    in: string;
+                    required: boolean;
+                    schema: {
+                        type: string;
+                    };
+                }[];
+                requestBody: {
+                    required: boolean;
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: string;
+                                required: string[];
+                                properties: {
+                                    action: {
+                                        type: string;
+                                        enum: string[];
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        coupon: {
+                                            $ref: string;
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        '/admin/promotions': {
+            get: {
+                tags: string[];
+                summary: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        promotions: {
+                                            type: string;
+                                            items: {
+                                                $ref: string;
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+            post: {
+                tags: string[];
+                summary: string;
+                description: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                requestBody: {
+                    required: boolean;
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: string;
+                            };
+                        };
+                    };
+                };
+                responses: {
+                    201: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        promotion: {
+                                            $ref: string;
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        '/admin/promotions/{id}': {
+            put: {
+                tags: string[];
+                summary: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                parameters: {
+                    name: string;
+                    in: string;
+                    required: boolean;
+                    schema: {
+                        type: string;
+                    };
+                }[];
+                requestBody: {
+                    required: boolean;
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: string;
+                            };
+                        };
+                    };
+                };
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        promotion: {
+                                            $ref: string;
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+            delete: {
+                tags: string[];
+                summary: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                parameters: {
+                    name: string;
+                    in: string;
+                    required: boolean;
+                    schema: {
+                        type: string;
+                    };
+                }[];
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    $ref: string;
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        '/admin/promotions/{id}/toggle': {
+            post: {
+                tags: string[];
+                summary: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                parameters: {
+                    name: string;
+                    in: string;
+                    required: boolean;
+                    schema: {
+                        type: string;
+                    };
+                }[];
+                requestBody: {
+                    required: boolean;
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: string;
+                                required: string[];
+                                properties: {
+                                    action: {
+                                        type: string;
+                                        enum: string[];
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        promotion: {
+                                            $ref: string;
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        '/admin/reward-milestones': {
+            get: {
+                tags: string[];
+                summary: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        milestones: {
+                                            type: string;
+                                            items: {
+                                                $ref: string;
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+            post: {
+                tags: string[];
+                summary: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                requestBody: {
+                    required: boolean;
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: string;
+                                required: string[];
+                                properties: {
+                                    key: {
+                                        type: string;
+                                        example: string;
+                                    };
+                                    bookingsRequired: {
+                                        type: string;
+                                        example: number;
+                                    };
+                                    rewardAmount: {
+                                        type: string;
+                                        example: number;
+                                    };
+                                    label: {
+                                        type: string;
+                                    };
+                                    order: {
+                                        type: string;
+                                    };
+                                    isActive: {
+                                        type: string;
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        milestone: {
+                                            $ref: string;
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        '/admin/reward-milestones/{id}': {
+            put: {
+                tags: string[];
+                summary: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                parameters: {
+                    name: string;
+                    in: string;
+                    required: boolean;
+                    schema: {
+                        type: string;
+                    };
+                }[];
+                requestBody: {
+                    required: boolean;
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: string;
+                                properties: {
+                                    bookingsRequired: {
+                                        type: string;
+                                    };
+                                    rewardAmount: {
+                                        type: string;
+                                    };
+                                    label: {
+                                        type: string;
+                                    };
+                                    order: {
+                                        type: string;
+                                    };
+                                    isActive: {
+                                        type: string;
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        milestone: {
+                                            $ref: string;
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        '/admin/reward-claims': {
+            get: {
+                tags: string[];
+                summary: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                parameters: {
+                    name: string;
+                    in: string;
+                    schema: {
+                        type: string;
+                        enum: string[];
+                    };
+                }[];
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        claims: {
+                                            type: string;
+                                            items: {
+                                                $ref: string;
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        '/admin/reward-claims/{id}/approve': {
+            post: {
+                tags: string[];
+                summary: string;
+                description: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                parameters: {
+                    name: string;
+                    in: string;
+                    required: boolean;
+                    schema: {
+                        type: string;
+                    };
+                }[];
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        message: {
+                                            type: string;
+                                        };
+                                        claim: {
+                                            $ref: string;
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                    400: {
+                        description: string;
+                    };
+                    404: {
+                        description: string;
+                    };
+                };
+            };
+        };
+        '/admin/reward-claims/{id}/reject': {
+            post: {
+                tags: string[];
+                summary: string;
+                description: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                parameters: {
+                    name: string;
+                    in: string;
+                    required: boolean;
+                    schema: {
+                        type: string;
+                    };
+                }[];
+                requestBody: {
+                    required: boolean;
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: string;
+                                required: string[];
+                                properties: {
+                                    reason: {
+                                        type: string;
+                                        example: string;
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        message: {
+                                            type: string;
+                                        };
+                                        claim: {
+                                            $ref: string;
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        '/admin/incentive-analytics': {
+            get: {
+                tags: string[];
+                summary: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    $ref: string;
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        '/admin/coupon-redemptions': {
+            get: {
+                tags: string[];
+                summary: string;
+                description: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                responses: {
+                    200: {
+                        description: string;
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: string;
+                                    properties: {
+                                        totalPlatformCost: {
+                                            type: string;
+                                        };
+                                        redemptions: {
+                                            type: string;
+                                            items: {
+                                                type: string;
+                                                properties: {
+                                                    couponCode: {
+                                                        type: string;
+                                                    };
+                                                    orderAmount: {
+                                                        type: string;
+                                                    };
+                                                    discountAmount: {
+                                                        type: string;
+                                                    };
+                                                    customerPaid: {
+                                                        type: string;
+                                                    };
+                                                    platformBorne: {
+                                                        type: string;
+                                                    };
+                                                    createdAt: {
+                                                        type: string;
+                                                        format: string;
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
                                 };
                             };
                         };

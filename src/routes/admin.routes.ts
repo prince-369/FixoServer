@@ -47,6 +47,26 @@ import {
   markAllAdminNotificationsRead,
   deleteAdminNotification,
 } from '../controllers/admin.controller';
+import {
+  adminListCoupons,
+  adminCreateCoupon,
+  adminUpdateCoupon,
+  adminToggleCoupon,
+  adminDeleteCoupon,
+  adminListPromotions,
+  adminCreatePromotion,
+  adminUpdatePromotion,
+  adminTogglePromotion,
+  adminDeletePromotion,
+  adminListMilestones,
+  adminUpsertMilestone,
+  adminUpdateMilestone,
+  adminListRewardClaims,
+  adminApproveRewardClaim,
+  adminRejectRewardClaim,
+  adminIncentiveAnalytics,
+  adminListCouponRedemptions,
+} from '../controllers/incentiveAdmin.controller';
 
 const router = Router();
 const mutationGuard = idempotencyGuard(20_000);
@@ -117,6 +137,34 @@ router.get('/cash-payments', getCashPayments);
 // Workers
 router.get('/workers', getAllWorkers);
 router.get('/workers/:id', getWorkerDetail);
+
+// ── Incentives: Coupons ──
+router.get('/coupons', adminListCoupons);
+router.post('/coupons', mutationGuard, adminCreateCoupon);
+router.put('/coupons/:id', mutationGuard, adminUpdateCoupon);
+router.post('/coupons/:id/toggle', mutationGuard, adminToggleCoupon);
+router.delete('/coupons/:id', mutationGuard, adminDeleteCoupon);
+
+// ── Incentives: Worker Promotions ──
+router.get('/promotions', adminListPromotions);
+router.post('/promotions', mutationGuard, adminCreatePromotion);
+router.put('/promotions/:id', mutationGuard, adminUpdatePromotion);
+router.post('/promotions/:id/toggle', mutationGuard, adminTogglePromotion);
+router.delete('/promotions/:id', mutationGuard, adminDeletePromotion);
+
+// ── Incentives: Reward Milestones ──
+router.get('/reward-milestones', adminListMilestones);
+router.post('/reward-milestones', mutationGuard, adminUpsertMilestone);
+router.put('/reward-milestones/:id', mutationGuard, adminUpdateMilestone);
+
+// ── Incentives: Reward Claims ──
+router.get('/reward-claims', adminListRewardClaims);
+router.post('/reward-claims/:id/approve', mutationGuard, adminApproveRewardClaim);
+router.post('/reward-claims/:id/reject', mutationGuard, adminRejectRewardClaim);
+
+// ── Incentives: Analytics ──
+router.get('/incentive-analytics', adminIncentiveAnalytics);
+router.get('/coupon-redemptions', adminListCouponRedemptions);
 
 // Notifications
 router.get('/notifications', getAdminNotifications);

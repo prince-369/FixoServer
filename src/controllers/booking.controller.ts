@@ -9,6 +9,7 @@ import { generatePin } from '../utils/generatePin';
 import { generateTID } from '../utils/generateTID';
 import Transaction from '../models/Transaction';
 import { notifyWorkers, notifyUser, sendNotification, sendAdminNotification } from '../socket';
+import { validateAndPriceCoupon, recordCouponRedemption } from '../services/incentive.service';
 
 const RAZORPAY_SUCCESS_EVENTS = new Set(['payment.captured', 'order.paid']);
 
@@ -288,6 +289,18 @@ const finalizeOnlineBookingPayment = async (
       title: 'Payment Received (Online)',
       message: 'Online payment completed. You can proceed to the location.',
       data: { bookingId: booking._id },
+    });
+  }
+
+  // Record coupon redemption once payment is confirmed (idempotent on booking).
+  if (!alreadyFinalized && booking.couponCampaign && booking.discountAmount > 0) {
+    void recordCouponRedemption({
+      couponId: booking.couponCampaign,
+      couponCode: booking.couponCode,
+      userId: booking.customer,
+      bookingId: booking._id,
+      discountAmount: booking.discountAmount,
+      orderAmount: booking.amount,
     });
   }
 
@@ -655,8 +668,28 @@ export const initiatePayment = async (req: Request, res: Response): Promise<void
       return;
     }
 
-    // Online payment
-    const order = await createOrder(booking.amount, booking._id.toString());
+    // Online payment — optional coupon discount (platform-absorbed; worker earning is unchanged)
+    let payableAmount = booking.amount;
+    if (req.body.couponCode) {
+      try {
+        const couponResult = await validateAndPriceCoupon({
+          code: String(req.body.couponCode),
+          customerId: req.user!.id,
+          amount: booking.amount,
+        });
+        if (couponResult.valid && couponResult.campaign) {
+          booking.couponCode = couponResult.campaign.code;
+          booking.couponCampaign = couponResult.campaign._id as typeof booking.couponCampaign;
+          booking.discountAmount = couponResult.discountAmount;
+          payableAmount = Math.max(0, booking.amount - couponResult.discountAmount);
+        }
+      } catch {
+        // On any coupon error, fall back to full price — never block payment.
+        payableAmount = booking.amount;
+      }
+    }
+
+    const order = await createOrder(payableAmount, booking._id.toString());
 
     booking.razorpayOrderId = order.id;
     await booking.save();
@@ -664,9 +697,11 @@ export const initiatePayment = async (req: Request, res: Response): Promise<void
     res.json({
       razorpayOrder: {
         id: order.id,
-        amount: booking.amount * 100, // Razorpay uses paise
+        amount: payableAmount * 100, // Razorpay uses paise
       },
       booking,
+      discountAmount: booking.discountAmount || 0,
+      payableAmount,
     });
   } catch (error) {
     console.error('Initiate payment error:', error);

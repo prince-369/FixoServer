@@ -41,6 +41,9 @@ export interface IBooking extends Document {
   paymentStatus: PaymentStatus;
   amount: number;
   cashSurcharge: number;
+  couponCode?: string;
+  couponCampaign?: mongoose.Types.ObjectId;
+  discountAmount: number;
   completionPin?: string;
   completionRequestedByWorkerAt?: Date;
   completionCodeRevealedAt?: Date;
@@ -109,6 +112,9 @@ const bookingSchema = new Schema<IBooking>(
     },
     amount: { type: Number, default: 0 },
     cashSurcharge: { type: Number, default: 0 },
+    couponCode: { type: String },
+    couponCampaign: { type: Schema.Types.ObjectId, ref: 'CouponCampaign' },
+    discountAmount: { type: Number, default: 0 },
     completionPin: { type: String },
     completionRequestedByWorkerAt: { type: Date },
     completionCodeRevealedAt: { type: Date },

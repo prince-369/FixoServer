@@ -1,5 +1,5 @@
 import mongoose, { Document } from 'mongoose';
-export type TransactionType = 'booking_payment' | 'worker_earning' | 'refund' | 'withdrawal' | 'commission' | 'dues_deposit' | 'dues_auto_deduct' | 'dues_wallet_deduct';
+export type TransactionType = 'booking_payment' | 'worker_earning' | 'refund' | 'withdrawal' | 'commission' | 'dues_deposit' | 'dues_auto_deduct' | 'dues_wallet_deduct' | 'reward_payout' | 'worker_bonus';
 export type TransactionMethod = 'online' | 'cash';
 export type TransactionStatus = 'pending' | 'completed' | 'failed';
 export interface ITransaction extends Document {

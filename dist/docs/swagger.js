@@ -17,6 +17,7 @@ const swaggerSpec = {
         { name: 'Booking', description: 'Create bookings, bids, payments (customer-facing)' },
         { name: 'Worker', description: 'Worker profile, work requests, earnings, dues, eKYC' },
         { name: 'Admin', description: 'Admin dashboard, eKYC review, payouts, categories, content' },
+        { name: 'Rewards & Incentives', description: 'Customer rewards/coupons, worker promotions, and admin incentive management' },
         { name: 'Notifications', description: 'Web push & mobile push subscription management' },
     ],
     components: {
@@ -427,6 +428,196 @@ const swaggerSpec = {
                 properties: {
                     token: { type: 'string', description: 'FCM device token' },
                     platform: { type: 'string', enum: ['android', 'ios'], example: 'android' },
+                },
+            },
+            // ── Rewards & Incentives schemas ──
+            RewardMilestone: {
+                type: 'object',
+                properties: {
+                    _id: { type: 'string' },
+                    key: { type: 'string', example: 'm10' },
+                    bookingsRequired: { type: 'integer', example: 10 },
+                    rewardAmount: { type: 'number', example: 150 },
+                    label: { type: 'string', example: 'Bronze Reward' },
+                    isActive: { type: 'boolean' },
+                    order: { type: 'integer' },
+                },
+            },
+            RewardMilestoneView: {
+                type: 'object',
+                properties: {
+                    key: { type: 'string', example: 'm10' },
+                    bookingsRequired: { type: 'integer' },
+                    rewardAmount: { type: 'number' },
+                    label: { type: 'string' },
+                    achieved: { type: 'boolean' },
+                    claimed: { type: 'boolean' },
+                    claimable: { type: 'boolean' },
+                    claimStatus: { type: 'string', enum: ['pending_approval', 'approved', 'paid', 'rejected'], nullable: true },
+                    claimRejectionReason: { type: 'string', nullable: true },
+                    progressPercent: { type: 'integer', example: 80 },
+                },
+            },
+            RewardClaim: {
+                type: 'object',
+                properties: {
+                    _id: { type: 'string' },
+                    customer: { type: 'string' },
+                    milestoneKey: { type: 'string' },
+                    bookingsRequired: { type: 'integer' },
+                    rewardAmount: { type: 'number' },
+                    status: { type: 'string', enum: ['pending_approval', 'approved', 'paid', 'rejected'] },
+                    payoutDetails: {
+                        type: 'object',
+                        properties: {
+                            method: { type: 'string', enum: ['upi', 'bank'] },
+                            upiId: { type: 'string' },
+                            holderName: { type: 'string' },
+                            bankName: { type: 'string' },
+                            bankAccountNumber: { type: 'string' },
+                            ifscCode: { type: 'string' },
+                        },
+                    },
+                    eligibleCountAtClaim: { type: 'integer' },
+                    rejectionReason: { type: 'string' },
+                    createdAt: { type: 'string', format: 'date-time' },
+                },
+            },
+            Coupon: {
+                type: 'object',
+                properties: {
+                    _id: { type: 'string' },
+                    code: { type: 'string', example: 'FIXO20' },
+                    title: { type: 'string' },
+                    description: { type: 'string' },
+                    discountType: { type: 'string', enum: ['percentage', 'flat'] },
+                    discountValue: { type: 'number', example: 20 },
+                    minOrderAmount: { type: 'number' },
+                    maxDiscount: { type: 'number', nullable: true },
+                    expiresAt: { type: 'string', format: 'date-time', nullable: true },
+                    usageLimit: { type: 'integer', nullable: true },
+                    perUserLimit: { type: 'integer' },
+                    usedCount: { type: 'integer' },
+                    budgetLimit: { type: 'number', nullable: true },
+                    spentBudget: { type: 'number' },
+                    isActive: { type: 'boolean' },
+                    status: { type: 'string', enum: ['active', 'paused'] },
+                },
+            },
+            CouponPublic: {
+                type: 'object',
+                description: 'Customer-facing coupon (internal budget fields hidden)',
+                properties: {
+                    _id: { type: 'string' },
+                    code: { type: 'string' },
+                    title: { type: 'string' },
+                    description: { type: 'string' },
+                    discountType: { type: 'string', enum: ['percentage', 'flat'] },
+                    discountValue: { type: 'number' },
+                    minOrderAmount: { type: 'number' },
+                    maxDiscount: { type: 'number', nullable: true },
+                    expiresAt: { type: 'string', format: 'date-time', nullable: true },
+                },
+            },
+            CouponCreateBody: {
+                type: 'object',
+                required: ['code', 'title', 'discountType', 'discountValue'],
+                properties: {
+                    code: { type: 'string', example: 'FIXO20' },
+                    title: { type: 'string', example: '20% Off First Service' },
+                    description: { type: 'string' },
+                    discountType: { type: 'string', enum: ['percentage', 'flat'] },
+                    discountValue: { type: 'number', example: 20 },
+                    minOrderAmount: { type: 'number', example: 500 },
+                    maxDiscount: { type: 'number', example: 200 },
+                    expiresAt: { type: 'string', format: 'date', example: '2026-07-31' },
+                    usageLimit: { type: 'integer', example: 1000 },
+                    perUserLimit: { type: 'integer', example: 1 },
+                    budgetLimit: { type: 'number', example: 50000 },
+                },
+            },
+            WorkerPromotion: {
+                type: 'object',
+                properties: {
+                    _id: { type: 'string' },
+                    title: { type: 'string' },
+                    description: { type: 'string' },
+                    type: { type: 'string', enum: ['reduced_commission', 'zero_commission', 'bonus_earning'] },
+                    commissionRate: { type: 'number', example: 0.1 },
+                    zeroCommissionScope: { type: 'string', enum: ['first_orders', 'date_range'] },
+                    firstOrdersCount: { type: 'integer' },
+                    bonusTiers: {
+                        type: 'array',
+                        items: { type: 'object', properties: { jobsRequired: { type: 'integer' }, bonusAmount: { type: 'number' } } },
+                    },
+                    appliesToAllWorkers: { type: 'boolean' },
+                    startsAt: { type: 'string', format: 'date-time' },
+                    endsAt: { type: 'string', format: 'date-time', nullable: true },
+                    budgetLimit: { type: 'number', nullable: true },
+                    spentBudget: { type: 'number' },
+                    isActive: { type: 'boolean' },
+                    status: { type: 'string', enum: ['active', 'paused'] },
+                },
+            },
+            WorkerPromotionView: {
+                type: 'object',
+                description: 'Worker-facing promotion with progress',
+                properties: {
+                    _id: { type: 'string' },
+                    title: { type: 'string' },
+                    description: { type: 'string' },
+                    type: { type: 'string', enum: ['reduced_commission', 'zero_commission', 'bonus_earning'] },
+                    commissionRate: { type: 'number' },
+                    defaultRate: { type: 'number' },
+                    zeroCommissionScope: { type: 'string' },
+                    firstOrdersCount: { type: 'integer' },
+                    ordersUsed: { type: 'integer' },
+                    bonusTiers: {
+                        type: 'array',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                jobsRequired: { type: 'integer' },
+                                bonusAmount: { type: 'number' },
+                                progress: { type: 'integer' },
+                                progressPercent: { type: 'integer' },
+                                claimed: { type: 'boolean' },
+                                claimable: { type: 'boolean' },
+                            },
+                        },
+                    },
+                },
+            },
+            WorkerPromotionCreateBody: {
+                type: 'object',
+                required: ['title', 'type'],
+                properties: {
+                    title: { type: 'string' },
+                    description: { type: 'string' },
+                    type: { type: 'string', enum: ['reduced_commission', 'zero_commission', 'bonus_earning'] },
+                    commissionRate: { type: 'number', description: 'For reduced_commission (0–1, e.g. 0.10)', example: 0.1 },
+                    zeroCommissionScope: { type: 'string', enum: ['first_orders', 'date_range'], description: 'For zero_commission' },
+                    firstOrdersCount: { type: 'integer', description: 'For zero_commission first_orders scope', example: 5 },
+                    bonusTiers: {
+                        type: 'array',
+                        description: 'For bonus_earning',
+                        items: { type: 'object', properties: { jobsRequired: { type: 'integer', example: 20 }, bonusAmount: { type: 'number', example: 500 } } },
+                    },
+                    appliesToAllWorkers: { type: 'boolean', default: true },
+                    targetWorkers: { type: 'array', items: { type: 'string' } },
+                    startsAt: { type: 'string', format: 'date-time' },
+                    endsAt: { type: 'string', format: 'date-time' },
+                    durationDays: { type: 'integer', example: 7 },
+                    budgetLimit: { type: 'number' },
+                },
+            },
+            IncentiveAnalytics: {
+                type: 'object',
+                properties: {
+                    totalIncentiveCost: { type: 'number' },
+                    coupons: { type: 'object', properties: { used: { type: 'integer' }, discountTotal: { type: 'number' }, activeCount: { type: 'integer' } } },
+                    rewards: { type: 'object', properties: { paidTotal: { type: 'number' }, byStatus: { type: 'object', additionalProperties: { type: 'object', properties: { count: { type: 'integer' }, total: { type: 'number' } } } } } },
+                    workerPromotions: { type: 'object', properties: { bonusPaidTotal: { type: 'number' }, commissionSavingTotal: { type: 'number' }, participatingWorkers: { type: 'integer' }, activeCount: { type: 'integer' } } },
                 },
             },
         },
@@ -2182,6 +2373,382 @@ const swaggerSpec = {
                 parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
                 responses: {
                     200: { description: 'Deleted', content: { 'application/json': { schema: { $ref: '#/components/schemas/MessageResponse' } } } },
+                },
+            },
+        },
+        // ════════════════════════════════════════════════════════════════
+        // REWARDS & INCENTIVES — Customer
+        // ════════════════════════════════════════════════════════════════
+        '/customer/rewards': {
+            get: {
+                tags: ['Rewards & Incentives'],
+                summary: 'Get customer reward milestones + live progress',
+                description: 'Returns all reward milestones with the customer\'s completed-booking count, which milestones are achieved/claimed/claimable, and total amount already paid out.',
+                security: [{ BearerAuth: [] }],
+                responses: {
+                    200: {
+                        description: 'Rewards progress',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        completedBookings: { type: 'integer', example: 12 },
+                                        totalClaimedAmount: { type: 'number', example: 150 },
+                                        nextMilestone: { $ref: '#/components/schemas/RewardMilestoneView' },
+                                        milestones: { type: 'array', items: { $ref: '#/components/schemas/RewardMilestoneView' } },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        '/customer/rewards/{milestoneKey}/claim': {
+            post: {
+                tags: ['Rewards & Incentives'],
+                summary: 'Claim a reward milestone (creates a payout request)',
+                description: 'Customer submits bank details to claim an achieved milestone. Admin reviews and marks it paid. A previously rejected milestone can be claimed again. Eligibility (completed + paid bookings) is re-checked server-side.',
+                security: [{ BearerAuth: [] }],
+                parameters: [{ name: 'milestoneKey', in: 'path', required: true, description: 'Milestone key e.g. m10', schema: { type: 'string' } }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                required: ['method'],
+                                properties: {
+                                    method: { type: 'string', enum: ['upi', 'bank'], example: 'bank' },
+                                    upiId: { type: 'string', description: 'Required if method = upi' },
+                                    holderName: { type: 'string', description: 'Required if method = bank' },
+                                    bankName: { type: 'string' },
+                                    bankAccountNumber: { type: 'string' },
+                                    ifscCode: { type: 'string' },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    201: { description: 'Claim submitted for review', content: { 'application/json': { schema: { type: 'object', properties: { message: { type: 'string' }, claim: { $ref: '#/components/schemas/RewardClaim' } } } } } },
+                    403: { description: 'Not enough completed bookings to claim' },
+                    404: { description: 'Milestone not found' },
+                    409: { description: 'Already claimed (active claim exists)' },
+                },
+            },
+        },
+        '/customer/rewards/claims': {
+            get: {
+                tags: ['Rewards & Incentives'],
+                summary: 'Get the customer\'s reward claim history',
+                security: [{ BearerAuth: [] }],
+                responses: {
+                    200: { description: 'Claims list', content: { 'application/json': { schema: { type: 'object', properties: { claims: { type: 'array', items: { $ref: '#/components/schemas/RewardClaim' } } } } } } },
+                },
+            },
+        },
+        '/customer/coupons': {
+            get: {
+                tags: ['Rewards & Incentives'],
+                summary: 'List coupons available to this customer',
+                description: 'Active, non-expired coupons the customer has not yet exhausted (respects per-user limit).',
+                security: [{ BearerAuth: [] }],
+                responses: {
+                    200: { description: 'Available coupons', content: { 'application/json': { schema: { type: 'object', properties: { coupons: { type: 'array', items: { $ref: '#/components/schemas/CouponPublic' } } } } } } },
+                },
+            },
+        },
+        '/customer/coupons/validate': {
+            post: {
+                tags: ['Rewards & Incentives'],
+                summary: 'Validate a coupon and preview the discount',
+                description: 'Read-only check (no redemption). Pass a bookingId (uses its amount) or an explicit amount. Discounts apply to online payment only.',
+                security: [{ BearerAuth: [] }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                required: ['code'],
+                                properties: {
+                                    code: { type: 'string', example: 'FIXO20' },
+                                    bookingId: { type: 'string', description: 'Booking to price against (preferred)' },
+                                    amount: { type: 'number', description: 'Order amount if no bookingId' },
+                                },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    200: { description: 'Coupon valid — discount preview', content: { 'application/json': { schema: { type: 'object', properties: { valid: { type: 'boolean' }, code: { type: 'string' }, discountAmount: { type: 'number' }, finalAmount: { type: 'number' }, orderAmount: { type: 'number' } } } } } },
+                    400: { description: 'Invalid / expired / min-order not met / already used' },
+                },
+            },
+        },
+        // ════════════════════════════════════════════════════════════════
+        // REWARDS & INCENTIVES — Worker
+        // ════════════════════════════════════════════════════════════════
+        '/worker/promotions': {
+            get: {
+                tags: ['Rewards & Incentives'],
+                summary: 'Get active worker promotions + progress summary',
+                description: 'Returns reduced/zero-commission and bonus-earning promotions applicable to the worker, with bonus-tier progress (claimable flags), current effective commission rate, total commission saved and bonus earned.',
+                security: [{ BearerAuth: [] }],
+                responses: {
+                    200: {
+                        description: 'Promotions + summary',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        promotions: { type: 'array', items: { $ref: '#/components/schemas/WorkerPromotionView' } },
+                                        summary: {
+                                            type: 'object',
+                                            properties: {
+                                                totalWorkDone: { type: 'integer' },
+                                                currentCommissionRate: { type: 'number', example: 0.1 },
+                                                defaultCommissionRate: { type: 'number', example: 0.2 },
+                                                commissionSavedTotal: { type: 'number' },
+                                                bonusEarnedTotal: { type: 'number' },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        '/worker/promotions/history': {
+            get: {
+                tags: ['Rewards & Incentives'],
+                summary: 'Worker promotion redemption history (bonuses + commission savings)',
+                security: [{ BearerAuth: [] }],
+                responses: {
+                    200: { description: 'History list', content: { 'application/json': { schema: { type: 'object', properties: { history: { type: 'array', items: { type: 'object' } } } } } } },
+                },
+            },
+        },
+        '/worker/promotions/{id}/claim-bonus': {
+            post: {
+                tags: ['Rewards & Incentives'],
+                summary: 'Claim an unlocked bonus tier → credit wallet',
+                description: 'Worker claims a bonus milestone they have reached. The bonus is credited to their wallet balance (a worker_bonus transaction) and can then be withdrawn or used against dues. Idempotent — each tier can be claimed once.',
+                security: [{ BearerAuth: [] }],
+                parameters: [{ name: 'id', in: 'path', required: true, description: 'Promotion ID', schema: { type: 'string' } }],
+                requestBody: {
+                    required: true,
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                required: ['jobsRequired'],
+                                properties: { jobsRequired: { type: 'integer', example: 5, description: 'The tier (jobs threshold) being claimed' } },
+                            },
+                        },
+                    },
+                },
+                responses: {
+                    200: { description: 'Bonus credited', content: { 'application/json': { schema: { type: 'object', properties: { message: { type: 'string' }, bonusAmount: { type: 'number' }, newBalance: { type: 'number' } } } } } },
+                    400: { description: 'Not eligible / already claimed / budget exhausted' },
+                    404: { description: 'Worker or promotion not found' },
+                },
+            },
+        },
+        // ════════════════════════════════════════════════════════════════
+        // REWARDS & INCENTIVES — Admin: Coupons
+        // ════════════════════════════════════════════════════════════════
+        '/admin/coupons': {
+            get: {
+                tags: ['Rewards & Incentives'],
+                summary: 'List all coupon campaigns',
+                security: [{ BearerAuth: [] }],
+                responses: { 200: { description: 'Coupons', content: { 'application/json': { schema: { type: 'object', properties: { coupons: { type: 'array', items: { $ref: '#/components/schemas/Coupon' } } } } } } } },
+            },
+            post: {
+                tags: ['Rewards & Incentives'],
+                summary: 'Create a coupon campaign',
+                security: [{ BearerAuth: [] }],
+                requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/CouponCreateBody' } } } },
+                responses: { 201: { description: 'Created', content: { 'application/json': { schema: { type: 'object', properties: { coupon: { $ref: '#/components/schemas/Coupon' } } } } } }, 409: { description: 'Code already exists' } },
+            },
+        },
+        '/admin/coupons/{id}': {
+            put: {
+                tags: ['Rewards & Incentives'],
+                summary: 'Update a coupon campaign',
+                security: [{ BearerAuth: [] }],
+                parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+                requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/CouponCreateBody' } } } },
+                responses: { 200: { description: 'Updated', content: { 'application/json': { schema: { type: 'object', properties: { coupon: { $ref: '#/components/schemas/Coupon' } } } } } }, 404: { description: 'Not found' } },
+            },
+            delete: {
+                tags: ['Rewards & Incentives'],
+                summary: 'Delete a coupon campaign',
+                security: [{ BearerAuth: [] }],
+                parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+                responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: { $ref: '#/components/schemas/MessageResponse' } } } } },
+            },
+        },
+        '/admin/coupons/{id}/toggle': {
+            post: {
+                tags: ['Rewards & Incentives'],
+                summary: 'Pause or resume a coupon',
+                security: [{ BearerAuth: [] }],
+                parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+                requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['action'], properties: { action: { type: 'string', enum: ['pause', 'resume'] } } } } } },
+                responses: { 200: { description: 'Toggled', content: { 'application/json': { schema: { type: 'object', properties: { coupon: { $ref: '#/components/schemas/Coupon' } } } } } } },
+            },
+        },
+        // ─── Admin: Worker Promotions ───
+        '/admin/promotions': {
+            get: {
+                tags: ['Rewards & Incentives'],
+                summary: 'List all worker promotions',
+                security: [{ BearerAuth: [] }],
+                responses: { 200: { description: 'Promotions', content: { 'application/json': { schema: { type: 'object', properties: { promotions: { type: 'array', items: { $ref: '#/components/schemas/WorkerPromotion' } } } } } } } },
+            },
+            post: {
+                tags: ['Rewards & Incentives'],
+                summary: 'Create a worker promotion',
+                description: 'Type reduced_commission needs commissionRate; zero_commission needs zeroCommissionScope (+ firstOrdersCount); bonus_earning needs bonusTiers.',
+                security: [{ BearerAuth: [] }],
+                requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkerPromotionCreateBody' } } } },
+                responses: { 201: { description: 'Created', content: { 'application/json': { schema: { type: 'object', properties: { promotion: { $ref: '#/components/schemas/WorkerPromotion' } } } } } } },
+            },
+        },
+        '/admin/promotions/{id}': {
+            put: {
+                tags: ['Rewards & Incentives'],
+                summary: 'Update a worker promotion',
+                security: [{ BearerAuth: [] }],
+                parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+                requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkerPromotionCreateBody' } } } },
+                responses: { 200: { description: 'Updated', content: { 'application/json': { schema: { type: 'object', properties: { promotion: { $ref: '#/components/schemas/WorkerPromotion' } } } } } } },
+            },
+            delete: {
+                tags: ['Rewards & Incentives'],
+                summary: 'Delete a worker promotion',
+                security: [{ BearerAuth: [] }],
+                parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+                responses: { 200: { description: 'Deleted', content: { 'application/json': { schema: { $ref: '#/components/schemas/MessageResponse' } } } } },
+            },
+        },
+        '/admin/promotions/{id}/toggle': {
+            post: {
+                tags: ['Rewards & Incentives'],
+                summary: 'Pause or resume a worker promotion',
+                security: [{ BearerAuth: [] }],
+                parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+                requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['action'], properties: { action: { type: 'string', enum: ['pause', 'resume'] } } } } } },
+                responses: { 200: { description: 'Toggled', content: { 'application/json': { schema: { type: 'object', properties: { promotion: { $ref: '#/components/schemas/WorkerPromotion' } } } } } } },
+            },
+        },
+        // ─── Admin: Reward Milestones ───
+        '/admin/reward-milestones': {
+            get: {
+                tags: ['Rewards & Incentives'],
+                summary: 'List reward milestones',
+                security: [{ BearerAuth: [] }],
+                responses: { 200: { description: 'Milestones', content: { 'application/json': { schema: { type: 'object', properties: { milestones: { type: 'array', items: { $ref: '#/components/schemas/RewardMilestone' } } } } } } } },
+            },
+            post: {
+                tags: ['Rewards & Incentives'],
+                summary: 'Create or upsert a reward milestone (by key)',
+                security: [{ BearerAuth: [] }],
+                requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['key', 'bookingsRequired', 'rewardAmount'], properties: { key: { type: 'string', example: 'm10' }, bookingsRequired: { type: 'integer', example: 10 }, rewardAmount: { type: 'number', example: 150 }, label: { type: 'string' }, order: { type: 'integer' }, isActive: { type: 'boolean' } } } } } },
+                responses: { 200: { description: 'Upserted', content: { 'application/json': { schema: { type: 'object', properties: { milestone: { $ref: '#/components/schemas/RewardMilestone' } } } } } } },
+            },
+        },
+        '/admin/reward-milestones/{id}': {
+            put: {
+                tags: ['Rewards & Incentives'],
+                summary: 'Update a reward milestone',
+                security: [{ BearerAuth: [] }],
+                parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+                requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { bookingsRequired: { type: 'integer' }, rewardAmount: { type: 'number' }, label: { type: 'string' }, order: { type: 'integer' }, isActive: { type: 'boolean' } } } } } },
+                responses: { 200: { description: 'Updated', content: { 'application/json': { schema: { type: 'object', properties: { milestone: { $ref: '#/components/schemas/RewardMilestone' } } } } } } },
+            },
+        },
+        // ─── Admin: Reward Claims review ───
+        '/admin/reward-claims': {
+            get: {
+                tags: ['Rewards & Incentives'],
+                summary: 'List reward claims for review',
+                security: [{ BearerAuth: [] }],
+                parameters: [{ name: 'status', in: 'query', schema: { type: 'string', enum: ['pending_approval', 'paid', 'rejected', 'all'] } }],
+                responses: { 200: { description: 'Claims', content: { 'application/json': { schema: { type: 'object', properties: { claims: { type: 'array', items: { $ref: '#/components/schemas/RewardClaim' } } } } } } } },
+            },
+        },
+        '/admin/reward-claims/{id}/approve': {
+            post: {
+                tags: ['Rewards & Incentives'],
+                summary: 'Approve a reward claim & mark it paid',
+                description: 'Marks the claim paid (records a reward_payout transaction) after the admin has manually transferred the funds. Notifies the customer.',
+                security: [{ BearerAuth: [] }],
+                parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+                responses: { 200: { description: 'Approved & paid', content: { 'application/json': { schema: { type: 'object', properties: { message: { type: 'string' }, claim: { $ref: '#/components/schemas/RewardClaim' } } } } } }, 400: { description: 'Already paid' }, 404: { description: 'Not found' } },
+            },
+        },
+        '/admin/reward-claims/{id}/reject': {
+            post: {
+                tags: ['Rewards & Incentives'],
+                summary: 'Reject a reward claim (reason required)',
+                description: 'Rejects with a reason the customer can see. A rejected milestone can be claimed again by the customer with corrected details.',
+                security: [{ BearerAuth: [] }],
+                parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+                requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['reason'], properties: { reason: { type: 'string', example: 'Bank account details are incorrect' } } } } } },
+                responses: { 200: { description: 'Rejected', content: { 'application/json': { schema: { type: 'object', properties: { message: { type: 'string' }, claim: { $ref: '#/components/schemas/RewardClaim' } } } } } } },
+            },
+        },
+        // ─── Admin: Incentive analytics ───
+        '/admin/incentive-analytics': {
+            get: {
+                tags: ['Rewards & Incentives'],
+                summary: 'Aggregate incentive analytics (cost, ROI, participation)',
+                security: [{ BearerAuth: [] }],
+                responses: { 200: { description: 'Analytics', content: { 'application/json': { schema: { $ref: '#/components/schemas/IncentiveAnalytics' } } } } },
+            },
+        },
+        '/admin/coupon-redemptions': {
+            get: {
+                tags: ['Rewards & Incentives'],
+                summary: 'Coupon redemptions ledger (per-use financial impact)',
+                description: 'Lists each coupon use with order value, customer-paid amount, and the discount the platform absorbed (worker earning is always the full order value).',
+                security: [{ BearerAuth: [] }],
+                responses: {
+                    200: {
+                        description: 'Redemptions ledger',
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        totalPlatformCost: { type: 'number' },
+                                        redemptions: {
+                                            type: 'array',
+                                            items: {
+                                                type: 'object',
+                                                properties: {
+                                                    couponCode: { type: 'string' },
+                                                    orderAmount: { type: 'number' },
+                                                    discountAmount: { type: 'number' },
+                                                    customerPaid: { type: 'number' },
+                                                    platformBorne: { type: 'number' },
+                                                    createdAt: { type: 'string', format: 'date-time' },
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
                 },
             },
         },
