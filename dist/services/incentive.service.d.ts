@@ -1,9 +1,7 @@
 import mongoose from 'mongoose';
 import { ICouponCampaign } from '../models/CouponCampaign';
-import { IWorkerPromotion } from '../models/WorkerPromotion';
 import { AuditActorModel } from '../models/IncentiveAuditLog';
 import { IWorker } from '../models/Worker';
-export declare const DEFAULT_COMMISSION_RATE = 0.2;
 export declare const audit: (params: {
     action: string;
     actorId?: mongoose.Types.ObjectId | string;
@@ -15,18 +13,6 @@ export declare const audit: (params: {
     meta?: Record<string, unknown>;
 }) => Promise<void>;
 export declare const getCustomerEligibleCount: (customerId: mongoose.Types.ObjectId | string) => Promise<number>;
-export declare const resolveActiveWorkerCommissionRate: (worker: IWorker, completedJobsBefore: number) => Promise<{
-    rate: number;
-    promotion: IWorkerPromotion | null;
-}>;
-export declare const recordCommissionSaving: (params: {
-    promotion: IWorkerPromotion;
-    worker: IWorker;
-    booking: mongoose.Types.ObjectId | string;
-    appliedRate: number;
-    fullCommission: number;
-    actualCommission: number;
-}) => Promise<void>;
 export declare const notifyUnlockedBonusTiers: (worker: IWorker) => Promise<void>;
 export declare const claimWorkerBonusTier: (params: {
     worker: IWorker;

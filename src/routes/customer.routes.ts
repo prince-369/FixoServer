@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { protect, authorize, verifyUser } from '../middlewares/auth.middleware';
+import { blockGuard } from '../middlewares/block.middleware';
 import { uploadSingle } from '../middlewares/upload.middleware';
 import { handleValidationErrors } from '../middlewares/error.middleware';
 import { idempotencyGuard } from '../middlewares/idempotency.middleware';
@@ -28,6 +29,8 @@ import {
   escalateHelpTicket,
   sendDeactivateAccountOtp,
   confirmDeactivateAccount,
+  getServiceAvailability,
+  joinWaitlist,
 } from '../controllers/customer.controller';
 import {
   getRewards,
@@ -44,9 +47,13 @@ const mutationGuard = idempotencyGuard(15_000);
 router.get('/categories', getCategories);
 router.get('/categories/:id', getCategoryDetail);
 router.get('/banners', getBanners);
+router.get('/service-availability', getServiceAvailability);
 
 // Protected customer routes
 router.use(protect, authorize('customer'), verifyUser);
+router.use(blockGuard);
+
+router.post('/waitlist', mutationGuard, joinWaitlist);
 
 router.get('/profile', getProfile);
 router.put('/profile', uploadSingle, updateProfile);

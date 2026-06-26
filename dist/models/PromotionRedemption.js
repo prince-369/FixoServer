@@ -37,12 +37,9 @@ const mongoose_1 = __importStar(require("mongoose"));
 const promotionRedemptionSchema = new mongoose_1.Schema({
     promotion: { type: mongoose_1.Schema.Types.ObjectId, ref: 'WorkerPromotion', required: true },
     worker: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Worker', required: true },
-    kind: { type: String, enum: ['commission_saving', 'bonus'], required: true },
+    kind: { type: String, enum: ['bonus'], required: true },
     milestoneJobs: { type: Number },
     bonusAmount: { type: Number },
-    booking: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Booking' },
-    commissionSaved: { type: Number },
-    appliedRate: { type: Number },
 }, { timestamps: true });
 // Idempotent bonus: a worker can claim each bonus tier of a promotion only once.
 promotionRedemptionSchema.index({ promotion: 1, worker: 1, milestoneJobs: 1 }, { unique: true, partialFilterExpression: { kind: 'bonus' } });

@@ -33,7 +33,17 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.blockSchemaDefinition = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
+// Shared temporary-block sub-document (used by User and Worker).
+exports.blockSchemaDefinition = {
+    isBlocked: { type: Boolean, default: false },
+    reason: { type: String, default: '' },
+    blockedAt: { type: Date, default: null },
+    blockedUntil: { type: Date, default: null },
+    blockedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Admin', default: null },
+    blockCount: { type: Number, default: 0 },
+};
 const userSchema = new mongoose_1.Schema({
     fullName: { type: String, required: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
@@ -43,6 +53,7 @@ const userSchema = new mongoose_1.Schema({
     profileImage: { type: String, default: '' },
     bio: { type: String, default: '', maxlength: 500 },
     isActive: { type: Boolean, default: true },
+    block: { type: exports.blockSchemaDefinition, default: () => ({}) },
     deletedAt: { type: Date },
     deactivationOtpHash: { type: String, select: false },
     deactivationOtpExpiresAt: { type: Date, select: false },

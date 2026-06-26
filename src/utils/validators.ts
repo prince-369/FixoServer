@@ -29,8 +29,8 @@ export const loginValidation = [
 ];
 
 export const workerLoginValidation = [
-  body('phone').trim().notEmpty().withMessage('Phone number is required')
-    .matches(/^[6-9]\d{9}$/).withMessage('Valid 10-digit Indian phone number required'),
+  body('identifier').optional().trim(),
+  body('phone').optional().trim(),
   body('password').notEmpty().withMessage('Password is required'),
 ];
 

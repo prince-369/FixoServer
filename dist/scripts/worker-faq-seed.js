@@ -25,9 +25,9 @@ const WORKER_FAQS = [
     },
     {
         category: 'Wallet & Payments',
-        question: 'Why is my withdrawal currently locked?',
-        answer: 'Withdrawals are usually locked when dues are pending. Once dues are cleared from the Wallet section, withdrawals are enabled again.',
-        keywords: ['withdrawal', 'dues', 'wallet', 'locked'],
+        question: 'How much commission does Fixo charge?',
+        answer: 'Fixo is completely free for workers. There is no commission and no platform charges — you keep 100% of every job amount.',
+        keywords: ['commission', 'charges', 'free', 'fees'],
         order: 3,
     },
     {

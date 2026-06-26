@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const auth_middleware_1 = require("../middlewares/auth.middleware");
+const block_middleware_1 = require("../middlewares/block.middleware");
 const upload_middleware_1 = require("../middlewares/upload.middleware");
 const idempotency_middleware_1 = require("../middlewares/idempotency.middleware");
 const customer_controller_1 = require("../controllers/customer.controller");
@@ -12,8 +13,11 @@ const mutationGuard = (0, idempotency_middleware_1.idempotencyGuard)(15000);
 router.get('/categories', customer_controller_1.getCategories);
 router.get('/categories/:id', customer_controller_1.getCategoryDetail);
 router.get('/banners', customer_controller_1.getBanners);
+router.get('/service-availability', customer_controller_1.getServiceAvailability);
 // Protected customer routes
 router.use(auth_middleware_1.protect, (0, auth_middleware_1.authorize)('customer'), auth_middleware_1.verifyUser);
+router.use(block_middleware_1.blockGuard);
+router.post('/waitlist', mutationGuard, customer_controller_1.joinWaitlist);
 router.get('/profile', customer_controller_1.getProfile);
 router.put('/profile', upload_middleware_1.uploadSingle, customer_controller_1.updateProfile);
 router.post('/account/deactivation/send-otp', mutationGuard, customer_controller_1.sendDeactivateAccountOtp);

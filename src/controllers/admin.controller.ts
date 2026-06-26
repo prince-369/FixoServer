@@ -10,6 +10,13 @@ import HelpTicket from '../models/HelpTicket';
 import RewardClaim from '../models/RewardClaim';
 import ChatbotQA from '../models/ChatbotQA';
 import { notifyUser, notifyRole, sendNotification } from '../socket';
+import { logAdminActivity } from '../utils/adminActivity';
+import { blockPayload } from '../utils/userBlock';
+import MobilePushToken from '../models/MobilePushToken';
+import PushSubscription from '../models/PushSubscription';
+import Waitlist from '../models/Waitlist';
+import { sendMobilePushNotification } from '../services/mobilePush.service';
+import { sendWebPushNotification } from '../services/webPush.service';
 import Notification from '../models/Notification';
 import { deleteFromCloudinary, uploadBufferToCloudinary } from '../services/cloudinary.service';
 import { getSeedAdminBootstrapStatus } from '../services/adminBootstrap.service';
@@ -58,57 +65,11 @@ export const getDashboard = async (_req: Request, res: Response): Promise<void> 
       Booking.countDocuments({ status: 'in_progress' }),
     ]);
 
-    // Commission earnings
-    const commissionStats = await Transaction.aggregate([
-      { $match: { type: 'commission', status: 'completed' } },
-      { $group: { _id: null, total: { $sum: '$amount' } } },
-    ]);
-
-    // Monthly profit (last 30 days)
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const monthlyProfit = await Transaction.aggregate([
-      {
-        $match: {
-          type: { $in: ['commission', 'dues_deposit', 'dues_auto_deduct', 'dues_wallet_deduct'] },
-          status: 'completed',
-          createdAt: { $gte: thirtyDaysAgo },
-        },
-      },
-      { $group: { _id: null, total: { $sum: '$amount' } } },
-    ]);
-
-    // Total dues outstanding
-    const duesStats = await Worker.aggregate([
-      { $match: { dues: { $gt: 0 } } },
-      { $group: { _id: null, totalDues: { $sum: '$dues' }, count: { $sum: 1 } } },
-    ]);
-
-    // --- Chart Data: Last 7 days revenue (daily breakdown) ---
+    // --- Chart Data: Last 7 days bookings (daily) ---
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
     sevenDaysAgo.setHours(0, 0, 0, 0);
 
-    const dailyRevenue = await Transaction.aggregate([
-      {
-        $match: {
-          type: { $in: ['commission', 'dues_deposit', 'dues_auto_deduct', 'dues_wallet_deduct'] },
-          status: 'completed',
-          createdAt: { $gte: sevenDaysAgo },
-        },
-      },
-      {
-        $group: {
-          _id: {
-            date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
-            type: '$type',
-          },
-          total: { $sum: '$amount' },
-        },
-      },
-    ]);
-
-    // --- Chart Data: Last 7 days bookings (daily) ---
     const dailyBookings = await Booking.aggregate([
       { $match: { createdAt: { $gte: sevenDaysAgo } } },
       {
@@ -122,23 +83,13 @@ export const getDashboard = async (_req: Request, res: Response): Promise<void> 
       },
     ]);
 
-    // Build last 7 days arrays
-    const revenueChart: { date: string; commission: number; dues: number; total: number }[] = [];
+    // Build last 7 days bookings array
     const bookingsChart: { date: string; completed: number; cancelled: number; other: number; total: number }[] = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
       const dateStr = d.toISOString().split('T')[0];
       const dayLabel = d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric' });
-
-      let commission = 0, dues = 0;
-      for (const r of dailyRevenue) {
-        if (r._id.date === dateStr) {
-          if (r._id.type === 'commission') commission = r.total;
-          else dues += r.total;
-        }
-      }
-      revenueChart.push({ date: dayLabel, commission, dues, total: commission + dues });
 
       let completed = 0, cancelled = 0, other = 0;
       for (const b of dailyBookings) {
@@ -150,23 +101,6 @@ export const getDashboard = async (_req: Request, res: Response): Promise<void> 
       }
       bookingsChart.push({ date: dayLabel, completed, cancelled, other, total: completed + cancelled + other });
     }
-
-    // --- Donut: Revenue breakdown ---
-    const revenueBreakdown = await Transaction.aggregate([
-      { $match: { type: { $in: ['commission', 'dues_deposit', 'dues_auto_deduct', 'dues_wallet_deduct'] }, status: 'completed' } },
-      { $group: { _id: '$type', total: { $sum: '$amount' } } },
-    ]);
-    const revenueDonut = revenueBreakdown.map((r) => ({
-      name:
-        r._id === 'commission'
-          ? 'Online Commission'
-          : r._id === 'dues_deposit'
-            ? 'Dues (Razorpay)'
-            : r._id === 'dues_wallet_deduct'
-              ? 'Dues (Wallet)'
-              : 'Dues (Auto-Deduct)',
-      value: r.total,
-    }));
 
     // --- Donut: Booking status distribution ---
     const bookingStatusAgg = await Booking.aggregate([
@@ -230,13 +164,7 @@ export const getDashboard = async (_req: Request, res: Response): Promise<void> 
       totalCompleted,
       totalCancelled,
       totalInProgress,
-      totalCommissionEarnings: commissionStats[0]?.total || 0,
-      monthlyProfit: monthlyProfit[0]?.total || 0,
-      totalDuesOutstanding: duesStats[0]?.totalDues || 0,
-      workersWithDues: duesStats[0]?.count || 0,
-      revenueChart,
       bookingsChart,
-      revenueDonut,
       bookingStatusDonut,
       paymentMethodDonut,
       workerStatusDonut,
@@ -421,6 +349,7 @@ export const approveWorker = async (req: Request, res: Response): Promise<void> 
     });
 
     clearDashboardCache();
+    await logAdminActivity(req, { action: 'kyc.approve', category: 'kyc', targetType: 'worker', targetId: String(worker._id) });
     res.json({ message: 'Worker approved', worker });
   } catch (error) {
     console.error('Approve worker error:', error);
@@ -456,6 +385,7 @@ export const rejectWorker = async (req: Request, res: Response): Promise<void> =
     });
 
     clearDashboardCache();
+    await logAdminActivity(req, { action: 'kyc.reject', category: 'kyc', targetType: 'worker', targetId: String(worker._id) });
     res.json({ message: 'Worker rejected', worker });
   } catch (error) {
     console.error('Reject worker error:', error);
@@ -544,6 +474,7 @@ export const completeWithdrawal = async (req: Request, res: Response): Promise<v
     });
 
     clearDashboardCache();
+    await logAdminActivity(req, { action: 'withdrawal.complete', category: 'withdrawals', targetType: 'withdrawal', targetId: String(withdrawal._id), amount: withdrawal.amount });
     res.json({ message: 'Withdrawal completed', withdrawal });
   } catch (error) {
     console.error('Complete withdrawal error:', error);
@@ -584,6 +515,7 @@ export const declineWithdrawal = async (req: Request, res: Response): Promise<vo
       withdrawal,
     });
 
+    await logAdminActivity(req, { action: 'withdrawal.decline', category: 'withdrawals', targetType: 'withdrawal', targetId: String(withdrawal._id), amount: withdrawal.amount });
     res.json({ message: 'Withdrawal declined, amount refunded to worker', withdrawal });
   } catch (error) {
     console.error('Decline withdrawal error:', error);
@@ -617,6 +549,24 @@ export const createCategory = async (req: Request, res: Response): Promise<void>
     notifyRole('customer', 'service_updated', { action: 'created', category });
     notifyRole('worker', 'service_updated', { action: 'created', category });
     notifyRole('admin', 'service_updated', { action: 'created', category });
+
+    // Auto-announce the new service to every customer and worker
+    // (in-app notification + live banner + push).
+    const data = { categoryId: String(category._id) };
+    void broadcastToAudience(
+      'customer',
+      'New Service Available! 🎉',
+      `You can now get "${category.name}" done on Fixo. Book this service now!`,
+      data,
+      'service_added',
+    ).catch(() => {});
+    void broadcastToAudience(
+      'worker',
+      'New Service Added! 🛠️',
+      `You can now take "${category.name}" jobs. Update your skills in Settings if you offer this service.`,
+      data,
+      'service_added',
+    ).catch(() => {});
 
     res.status(201).json({ message: 'Category created', category });
   } catch (error) {
@@ -1070,134 +1020,6 @@ export const getCustomers = async (req: Request, res: Response): Promise<void> =
   }
 };
 
-// ─── Commission Details ───
-export const getCommissions = async (_req: Request, res: Response): Promise<void> => {
-  try {
-    // Detailed per-transaction commission list with customer + worker + booking info
-    const commissions = await Transaction.find({ type: 'commission', status: 'completed' })
-      .populate('worker', 'fullName phone profileImage')
-      .populate({
-        path: 'booking',
-        select: 'workDescription category amount paymentMethod customer',
-        populate: [
-          { path: 'category', select: 'name' },
-          { path: 'customer', select: 'fullName phone' },
-        ],
-      })
-      .sort({ createdAt: -1 });
-
-    const totalCommission = commissions.reduce((sum, c) => sum + c.amount, 0);
-
-    // Per-worker breakdown
-    const perWorker = await Transaction.aggregate([
-      { $match: { type: 'commission', status: 'completed' } },
-      {
-        $group: {
-          _id: '$worker',
-          total: { $sum: '$amount' },
-          count: { $sum: 1 },
-        },
-      },
-      {
-        $lookup: {
-          from: 'workers',
-          localField: '_id',
-          foreignField: '_id',
-          as: 'worker',
-        },
-      },
-      { $unwind: '$worker' },
-      { $sort: { total: -1 } },
-    ]);
-
-    // Dues income (paid dues deposits — platform revenue from cash surcharges)
-    const duesIncome = await Transaction.aggregate([
-      { $match: { type: { $in: ['dues_deposit', 'dues_auto_deduct', 'dues_wallet_deduct'] }, status: 'completed' } },
-      { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } },
-    ]);
-
-    // Total revenue = online commissions + cash dues collected
-    const totalDuesCollected = duesIncome[0]?.total || 0;
-
-    res.json({
-      commissions,
-      totalCommission,
-      totalDuesCollected,
-      totalRevenue: totalCommission + totalDuesCollected,
-      perWorker,
-      commissionRate: '20%',
-    });
-  } catch (error) {
-    console.error('Get commissions error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-
-// ─── Worker Dues ───
-export const getWorkerDues = async (_req: Request, res: Response): Promise<void> => {
-  try {
-    // Workers with outstanding dues — include duesSince for overdue calculation
-    const workersWithDues = await Worker.find({ dues: { $gt: 0 } })
-      .select('fullName phone dues duesSince profileImage balance')
-      .sort({ dues: -1 });
-
-    const collectedByWorker = await Transaction.aggregate([
-      { $match: { type: { $in: ['dues_deposit', 'dues_auto_deduct', 'dues_wallet_deduct'] }, status: 'completed' } },
-      { $group: { _id: '$worker', totalCollected: { $sum: '$amount' } } },
-    ]);
-    const collectedMap = new Map<string, number>(
-      collectedByWorker
-        .filter((row) => row?._id)
-        .map((row) => [String(row._id), row.totalCollected || 0])
-    );
-
-    // Enrich with overdue status
-    const enrichedDues = workersWithDues.map((w: any) => {
-      const obj = w.toObject();
-      const daysSinceDues = w.duesSince
-        ? Math.floor((Date.now() - new Date(w.duesSince).getTime()) / (1000 * 60 * 60 * 24))
-        : 0;
-      return {
-        ...obj,
-        duesPending: obj.dues || 0,
-        duesCollectedTotal: collectedMap.get(String(obj._id)) || 0,
-        daysSinceDues,
-        isOverdue: daysSinceDues >= 10,
-        withdrawalDisabled: obj.dues > 0,
-      };
-    });
-
-    // Paid dues history (Razorpay payments + auto-deductions)
-    const workersPaidDues = await Transaction.find({
-      type: { $in: ['dues_deposit', 'dues_auto_deduct', 'dues_wallet_deduct'] },
-      status: 'completed',
-    })
-      .populate('worker', 'fullName phone profileImage')
-      .sort({ createdAt: -1 })
-      .limit(100);
-
-    // Summary stats
-    const totalOutstanding = workersWithDues.reduce((s, w) => s + (w.dues || 0), 0);
-    const totalCollected = await Transaction.aggregate([
-      { $match: { type: { $in: ['dues_deposit', 'dues_auto_deduct', 'dues_wallet_deduct'] }, status: 'completed' } },
-      { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } },
-    ]);
-    const overdueCount = enrichedDues.filter((d) => d.isOverdue).length;
-
-    res.json({
-      workersWithDues: enrichedDues,
-      workersPaidDues,
-      totalOutstanding,
-      totalCollected: totalCollected[0]?.total || 0,
-      totalPayments: totalCollected[0]?.count || 0,
-      overdueCount,
-    });
-  } catch (error) {
-    console.error('Get worker dues error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-
 // ─── Help Tickets ───
 export const getHelpTickets = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -1359,6 +1181,7 @@ export const resolveHelpTicket = async (req: Request, res: Response): Promise<vo
       }
     }
 
+    await logAdminActivity(req, { action: 'ticket.resolve', category: 'support', targetType: 'ticket', targetId: String(ticket?._id || ''), meta: { userModel: ticket?.userModel } });
     res.json({ message: 'Ticket resolved', ticket });
   } catch (error) {
     console.error('Resolve help ticket error:', error);
@@ -1408,31 +1231,6 @@ export const replyHelpTicket = async (req: Request, res: Response): Promise<void
     res.json({ message: 'Reply sent', ticket: ticketForAdmin || ticket });
   } catch (error) {
     console.error('Reply help ticket error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-
-// ─── Notify Worker About Dues ───
-export const notifyWorkerDues = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const worker = await Worker.findById(req.params.workerId);
-    if (!worker || worker.dues <= 0) {
-      res.status(404).json({ message: 'Worker not found or no dues pending' });
-      return;
-    }
-
-    await sendNotification({
-      recipientId: worker._id.toString(),
-      recipientModel: 'Worker',
-      type: 'dues_reminder',
-      title: 'Dues Payment Reminder',
-      message: `You have ₹${worker.dues} in pending cash surcharge dues. Please pay at your earliest convenience.`,
-      data: { dues: worker.dues },
-    });
-
-    res.json({ message: 'Dues notification sent to worker' });
-  } catch (error) {
-    console.error('Notify worker dues error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1522,6 +1320,7 @@ export const processRefund = async (req: Request, res: Response): Promise<void> 
     });
 
     clearDashboardCache();
+    await logAdminActivity(req, { action: 'refund.process', category: 'refunds', targetType: 'booking', targetId: String(booking._id), amount: booking.amount });
     res.json({ message: 'Refund processed', booking });
   } catch (error) {
     console.error('Process refund error:', error);
@@ -1568,6 +1367,7 @@ export const rejectRefund = async (req: Request, res: Response): Promise<void> =
       data: { bookingId: booking._id },
     });
 
+    await logAdminActivity(req, { action: 'refund.reject', category: 'refunds', targetType: 'booking', targetId: String(booking._id) });
     res.json({ message: 'Refund rejected', booking });
   } catch (error) {
     console.error('Reject refund error:', error);
@@ -1658,24 +1458,6 @@ export const deleteChatbotQA = async (req: Request, res: Response): Promise<void
   }
 };
 
-// ─── Cash Payments by Customers ───
-export const getCashPayments = async (_req: Request, res: Response): Promise<void> => {
-  try {
-    const cashBookings = await Booking.find({
-      paymentMethod: 'cash',
-      status: 'completed',
-    })
-      .populate('customer', 'fullName phone')
-      .populate('assignedWorker', 'fullName phone dues')
-      .sort({ updatedAt: -1 });
-
-    res.json({ cashBookings });
-  } catch (error) {
-    console.error('Get cash payments error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-
 // ─── Workers List ───
 export const getAllWorkers = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -1691,7 +1473,7 @@ export const getAllWorkers = async (req: Request, res: Response): Promise<void> 
     }
 
     const workers = await Worker.find(filter)
-      .select('fullName phone profileImage accountStatus isActive categories rating totalWorkDone totalEarnings balance dues createdAt')
+      .select('fullName phone profileImage accountStatus isActive categories rating totalWorkDone totalEarnings balance block createdAt')
       .populate('categories', 'name')
       .sort({ createdAt: -1 });
 
@@ -1769,6 +1551,302 @@ export const getWorkerDetail = async (req: Request, res: Response): Promise<void
     res.json({ worker, bookings, bookingStats, reviewBookings, transactions, withdrawals });
   } catch (error) {
     console.error('Get worker detail error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ───────────────────────────────────────────────────────────────
+// Cancellation moderation: temporary block / unblock + flag watch
+// ───────────────────────────────────────────────────────────────
+
+const applyBlock = (doc: { block?: any }, hours: number, reason: string, adminId: string) => {
+  if (!doc.block) doc.block = {};
+  doc.block.isBlocked = true;
+  doc.block.reason = reason || 'Temporarily restricted for excessive cancellations.';
+  doc.block.blockedAt = new Date();
+  doc.block.blockedUntil = new Date(Date.now() + hours * 60 * 60 * 1000);
+  doc.block.blockedBy = adminId;
+  doc.block.blockCount = (doc.block.blockCount || 0) + 1;
+};
+
+const clearBlock = (doc: { block?: any }) => {
+  if (!doc.block) doc.block = {};
+  doc.block.isBlocked = false;
+  doc.block.reason = '';
+  doc.block.blockedAt = null;
+  doc.block.blockedUntil = null;
+  doc.block.blockedBy = null;
+};
+
+export const blockCustomer = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const hours = Number(req.body?.hours);
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+    if (!hours || hours <= 0 || hours > 720) { res.status(400).json({ message: 'Provide valid block hours (1-720)' }); return; }
+    const user = await User.findById(req.params.id);
+    if (!user) { res.status(404).json({ message: 'Customer not found' }); return; }
+    applyBlock(user, hours, reason, req.user!.id);
+    await user.save();
+    notifyUser(user._id.toString(), 'account_blocked', { block: blockPayload(user.block) });
+    await logAdminActivity(req, { action: 'customer.block', category: 'moderation', targetType: 'customer', targetId: String(user._id), meta: { hours, reason } });
+    res.json({ message: `Customer blocked for ${hours} hours`, block: blockPayload(user.block) });
+  } catch (error) {
+    console.error('Block customer error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+export const unblockCustomer = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) { res.status(404).json({ message: 'Customer not found' }); return; }
+    clearBlock(user);
+    await user.save();
+    notifyUser(user._id.toString(), 'account_unblocked', {});
+    await logAdminActivity(req, { action: 'customer.unblock', category: 'moderation', targetType: 'customer', targetId: String(user._id) });
+    res.json({ message: 'Customer unblocked' });
+  } catch (error) {
+    console.error('Unblock customer error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+export const blockWorkerAccount = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const hours = Number(req.body?.hours);
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+    if (!hours || hours <= 0 || hours > 720) { res.status(400).json({ message: 'Provide valid block hours (1-720)' }); return; }
+    const worker = await Worker.findById(req.params.id);
+    if (!worker) { res.status(404).json({ message: 'Worker not found' }); return; }
+    applyBlock(worker, hours, reason, req.user!.id);
+    await worker.save();
+    notifyUser(worker._id.toString(), 'account_blocked', { block: blockPayload(worker.block) });
+    await logAdminActivity(req, { action: 'worker.block', category: 'moderation', targetType: 'worker', targetId: String(worker._id), meta: { hours, reason } });
+    res.json({ message: `Worker blocked for ${hours} hours`, block: blockPayload(worker.block) });
+  } catch (error) {
+    console.error('Block worker error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+export const unblockWorkerAccount = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const worker = await Worker.findById(req.params.id);
+    if (!worker) { res.status(404).json({ message: 'Worker not found' }); return; }
+    clearBlock(worker);
+    await worker.save();
+    notifyUser(worker._id.toString(), 'account_unblocked', {});
+    await logAdminActivity(req, { action: 'worker.unblock', category: 'moderation', targetType: 'worker', targetId: String(worker._id) });
+    res.json({ message: 'Worker unblocked' });
+  } catch (error) {
+    console.error('Unblock worker error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Customers / workers with many recent cancellations (default: >= 3 in 24h).
+export const getCancellationFlags = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const hours = Math.min(168, Math.max(1, Number(req.query.hours) || 24));
+    const min = Math.max(2, Number(req.query.min) || 3);
+    const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+
+    const [custAgg, workAgg] = await Promise.all([
+      Booking.aggregate([
+        { $match: { 'cancellation.cancelledBy': 'customer', 'cancellation.cancelledAt': { $gte: since } } },
+        { $group: { _id: '$customer', count: { $sum: 1 }, lastAt: { $max: '$cancellation.cancelledAt' } } },
+        { $match: { count: { $gte: min } } },
+        { $sort: { count: -1 } },
+      ]),
+      Booking.aggregate([
+        { $match: { 'cancellation.cancelledBy': 'worker', 'cancellation.cancelledAt': { $gte: since } } },
+        { $group: { _id: '$assignedWorker', count: { $sum: 1 }, lastAt: { $max: '$cancellation.cancelledAt' } } },
+        { $match: { count: { $gte: min } } },
+        { $sort: { count: -1 } },
+      ]),
+    ]);
+
+    const custIds = custAgg.map((c) => c._id).filter(Boolean);
+    const workIds = workAgg.map((w) => w._id).filter(Boolean);
+    const [users, workers] = await Promise.all([
+      User.find({ _id: { $in: custIds } }).select('fullName phone email profileImage block'),
+      Worker.find({ _id: { $in: workIds } }).select('fullName phone email profileImage block'),
+    ]);
+    const uMap = new Map(users.map((u) => [String(u._id), u]));
+    const wMap = new Map(workers.map((w) => [String(w._id), w]));
+
+    const customers = custAgg
+      .map((c) => {
+        const u = uMap.get(String(c._id));
+        return u ? { _id: u._id, fullName: u.fullName, phone: u.phone, email: u.email, profileImage: u.profileImage, cancelCount: c.count, lastAt: c.lastAt, block: blockPayload(u.block) } : null;
+      })
+      .filter(Boolean);
+    const flaggedWorkers = workAgg
+      .map((w) => {
+        const d = wMap.get(String(w._id));
+        return d ? { _id: d._id, fullName: d.fullName, phone: d.phone, email: d.email, profileImage: d.profileImage, cancelCount: w.count, lastAt: w.lastAt, block: blockPayload(d.block) } : null;
+      })
+      .filter(Boolean);
+
+    res.json({ window: { hours, min }, customers, workers: flaggedWorkers });
+  } catch (error) {
+    console.error('Get cancellation flags error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ───────────────────────────────────────────────────────────────
+// Admin push / broadcast notifications (Swiggy/Zomato style)
+// ───────────────────────────────────────────────────────────────
+
+const resolveAudience = (raw: string) =>
+  raw === 'worker'
+    ? { Model: Worker, recipientModel: 'Worker' as const, role: 'worker' as const }
+    : { Model: User, recipientModel: 'User' as const, role: 'customer' as const };
+
+// Best-effort push fan-out to everyone who has a registered device/browser.
+const broadcastPushToTokenHolders = async (
+  recipientModel: 'User' | 'Worker',
+  title: string,
+  message: string,
+  data: Record<string, unknown>,
+) => {
+  try {
+    const [mobileIds, webIds] = await Promise.all([
+      MobilePushToken.find({ recipientModel, isActive: true }).distinct('recipient'),
+      PushSubscription.find({ recipientModel }).distinct('recipient'),
+    ]);
+    const unique = new Set<string>([...mobileIds.map(String), ...webIds.map(String)]);
+    const now = new Date();
+    for (const recipientId of unique) {
+      const payload = { recipientId, recipientModel, notificationId: 'broadcast', type: 'admin_broadcast', title, message, data, createdAt: now };
+      await Promise.allSettled([sendMobilePushNotification(payload), sendWebPushNotification(payload)]);
+    }
+  } catch (error) {
+    console.error('Broadcast push fan-out error:', error);
+  }
+};
+
+// Core broadcast: in-app (bulk) + live socket + background push fan-out.
+// Returns how many recipients received the in-app notification.
+export const broadcastToAudience = async (
+  audience: 'customer' | 'worker',
+  title: string,
+  message: string,
+  data: Record<string, unknown> = {},
+  type = 'admin_broadcast',
+): Promise<number> => {
+  const { Model, recipientModel, role } = resolveAudience(audience);
+  const filter = recipientModel === 'User' ? { isActive: { $ne: false } } : {};
+  const recipients = await (Model as typeof User).find(filter).select('_id').lean();
+
+  if (recipients.length) {
+    const docs = recipients.map((r) => ({ recipient: r._id, recipientModel, type, title, message, data }));
+    await Notification.insertMany(docs, { ordered: false }).catch(() => {});
+  }
+  notifyRole(role, 'notification_event', { type, title, message, isRead: false, createdAt: new Date(), data });
+  void broadcastPushToTokenHolders(recipientModel, title, message, data);
+  return recipients.length;
+};
+
+// POST /admin/push/:audience/broadcast  — send to ALL customers or ALL workers
+export const broadcastNotification = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const audience = String(req.params.audience) === 'worker' ? 'worker' : 'customer';
+    const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+    const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+    if (!title || !message) { res.status(400).json({ message: 'Title and message are required' }); return; }
+    if (title.length > 120 || message.length > 500) { res.status(400).json({ message: 'Title/message too long' }); return; }
+
+    const count = await broadcastToAudience(audience, title, message, { broadcast: true });
+    await logAdminActivity(req, { action: `notify.broadcast.${audience}`, category: 'notifications', meta: { count, title } });
+    res.json({ message: `Notification sent to ${count} ${audience}s`, count });
+  } catch (error) {
+    console.error('Broadcast notification error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// POST /admin/push/:audience/personal  — send to one selected user
+export const personalNotification = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { Model, recipientModel, role } = resolveAudience(String(req.params.audience));
+    const recipientId = typeof req.body?.recipientId === 'string' ? req.body.recipientId : '';
+    const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+    const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+    if (!recipientId || !title || !message) { res.status(400).json({ message: 'Recipient, title and message are required' }); return; }
+
+    const exists = await (Model as typeof User).exists({ _id: recipientId });
+    if (!exists) { res.status(404).json({ message: `${role} not found` }); return; }
+
+    // sendNotification already does in-app + socket + web/mobile push.
+    await sendNotification({ recipientId, recipientModel, type: 'admin_personal', title, message, data: { personal: true } });
+
+    await logAdminActivity(req, { action: `notify.personal.${role}`, category: 'notifications', targetType: role, targetId: recipientId, meta: { title } });
+    res.json({ message: 'Notification sent' });
+  } catch (error) {
+    console.error('Personal notification error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// GET /admin/waitlist — locations customers requested where Fixo isn't available yet
+export const getWaitlist = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const status = req.query.status === 'reached' ? 'reached' : 'pending';
+    const [waitlist, pendingCount, reachedCount] = await Promise.all([
+      Waitlist.find({ status }).populate('user', 'fullName phone email').sort({ createdAt: -1 }).limit(300).lean(),
+      Waitlist.countDocuments({ status: 'pending' }),
+      Waitlist.countDocuments({ status: 'reached' }),
+    ]);
+    res.json({ waitlist, stats: { pending: pendingCount, reached: reachedCount } });
+  } catch (error) {
+    console.error('Get waitlist error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+export const markWaitlistReached = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const entry = await Waitlist.findByIdAndUpdate(req.params.id, { status: 'reached' }, { new: true });
+    if (!entry) { res.status(404).json({ message: 'Entry not found' }); return; }
+    notifyUser(entry.user.toString(), 'notification_event', {
+      type: 'service_added',
+      title: 'Great news! 🎉',
+      message: 'Fixo is now available in your requested area. You can book a service now!',
+      isRead: false, createdAt: new Date(), data: {},
+    });
+    await sendNotification({
+      recipientId: entry.user.toString(), recipientModel: 'User', type: 'service_added',
+      title: 'Great news! 🎉', message: 'Fixo is now available in your requested area. You can book a service now!',
+    });
+    await logAdminActivity(req, { action: 'waitlist.reached', category: 'general', targetType: 'waitlist', targetId: String(entry._id) });
+    res.json({ message: 'Marked as reached & customer notified' });
+  } catch (error) {
+    console.error('Mark waitlist reached error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// GET /admin/push/:audience/recipients?q=  — search users for the personal picker
+export const searchNotificationRecipients = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { Model } = resolveAudience(String(req.params.audience));
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const filter = q
+      ? { $or: [
+          { fullName: { $regex: q, $options: 'i' } },
+          { phone: { $regex: q, $options: 'i' } },
+          { email: { $regex: q, $options: 'i' } },
+        ] }
+      : {};
+    const recipients = await (Model as typeof User).find(filter)
+      .select('fullName phone email profileImage')
+      .sort({ createdAt: -1 })
+      .limit(20);
+    res.json({ recipients });
+  } catch (error) {
+    console.error('Search recipients error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };

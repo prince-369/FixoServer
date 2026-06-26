@@ -1,7 +1,11 @@
 import { Router } from 'express';
 import { protect, authorize } from '../middlewares/auth.middleware';
+import { requirePermission, requireSuperAdmin } from '../middlewares/permission.middleware';
 import { uploadSingle } from '../middlewares/upload.middleware';
 import { idempotencyGuard } from '../middlewares/idempotency.middleware';
+import {
+  getStaffMeta, listStaff, createStaff, updateStaff, deleteStaff, getStaffActivity,
+} from '../controllers/staff.controller';
 import {
   getDashboard,
   getAdminBootstrapStatus,
@@ -26,8 +30,6 @@ import {
   deleteBanner,
   reorderBanners,
   getCustomers,
-  getCommissions,
-  getWorkerDues,
   getHelpTickets,
   resolveHelpTicket,
   replyHelpTicket,
@@ -35,13 +37,21 @@ import {
   createChatbotQA,
   updateChatbotQA,
   deleteChatbotQA,
-  getCashPayments,
-  notifyWorkerDues,
   processRefund,
   getRefunds,
   rejectRefund,
   getAllWorkers,
   getWorkerDetail,
+  blockCustomer,
+  unblockCustomer,
+  blockWorkerAccount,
+  unblockWorkerAccount,
+  getCancellationFlags,
+  broadcastNotification,
+  personalNotification,
+  searchNotificationRecipients,
+  getWaitlist,
+  markWaitlistReached,
   getAdminNotifications,
   markAdminNotificationRead,
   markAllAdminNotificationsRead,
@@ -72,6 +82,32 @@ const router = Router();
 const mutationGuard = idempotencyGuard(20_000);
 
 router.use(protect, authorize('admin'));
+
+// ─── Staff Management (Super Admin only) ───
+router.get('/staff/meta', requireSuperAdmin, getStaffMeta);
+router.get('/staff/activity', requireSuperAdmin, getStaffActivity);
+router.get('/staff', requireSuperAdmin, listStaff);
+router.post('/staff', requireSuperAdmin, mutationGuard, createStaff);
+router.put('/staff/:id', requireSuperAdmin, mutationGuard, updateStaff);
+router.delete('/staff/:id', requireSuperAdmin, deleteStaff);
+
+// ─── Per-section permission gates (super admin always passes) ───
+router.use('/dashboard', requirePermission('dashboard'));
+router.use('/ekyc', requirePermission('kyc'));
+router.use('/withdrawals', requirePermission('withdrawals'));
+router.use('/categories', requirePermission('categories'));
+router.use('/banners', requirePermission('banners'));
+router.use('/customers', requirePermission('customers'));
+router.use('/help-tickets', requirePermission('support_customer', 'support_worker'));
+router.use('/refunds', requirePermission('refunds'));
+router.use('/chatbot-qa', requirePermission('chatbot'));
+router.use('/workers', requirePermission('workers'));
+router.use('/coupons', requirePermission('coupons'));
+router.use('/coupon-redemptions', requirePermission('coupons', 'analytics'));
+router.use('/promotions', requirePermission('promotions'));
+router.use('/reward-milestones', requirePermission('incentives'));
+router.use('/reward-claims', requirePermission('reward_claims'));
+router.use('/incentive-analytics', requirePermission('analytics', 'incentives'));
 
 // Dashboard
 router.get('/dashboard', getDashboard);
@@ -105,15 +141,8 @@ router.post('/banners/reorder', mutationGuard, reorderBanners);
 router.put('/banners/:id', mutationGuard, uploadSingle, updateBanner);
 router.delete('/banners/:id', mutationGuard, deleteBanner);
 
-// Customers
+// Customers (gated by the /customers path-permission above)
 router.get('/customers', getCustomers);
-
-// Commissions
-router.get('/commissions', getCommissions);
-
-// Worker Dues
-router.get('/worker-dues', getWorkerDues);
-router.post('/worker-dues/:workerId/notify', mutationGuard, notifyWorkerDues);
 
 // Help Tickets
 router.get('/help-tickets', getHelpTickets);
@@ -131,12 +160,27 @@ router.post('/chatbot-qa', mutationGuard, createChatbotQA);
 router.put('/chatbot-qa/:id', mutationGuard, updateChatbotQA);
 router.delete('/chatbot-qa/:id', mutationGuard, deleteChatbotQA);
 
-// Cash payments
-router.get('/cash-payments', getCashPayments);
-
-// Workers
+// Workers (gated by the /workers path-permission above)
 router.get('/workers', getAllWorkers);
 router.get('/workers/:id', getWorkerDetail);
+
+// ─── Cancellation moderation (customer-side and worker-side permissions) ───
+router.get('/moderation/flags', requirePermission('moderation_customer', 'moderation_worker'), getCancellationFlags);
+router.post('/moderation/customer/:id/block', requirePermission('moderation_customer'), mutationGuard, blockCustomer);
+router.post('/moderation/customer/:id/unblock', requirePermission('moderation_customer'), mutationGuard, unblockCustomer);
+router.post('/moderation/worker/:id/block', requirePermission('moderation_worker'), mutationGuard, blockWorkerAccount);
+router.post('/moderation/worker/:id/unblock', requirePermission('moderation_worker'), mutationGuard, unblockWorkerAccount);
+
+// ─── Admin push / broadcast notifications (per-audience permission) ───
+const requireNotifyPerm = (req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) =>
+  requirePermission(req.params.audience === 'worker' ? 'notify_worker' : 'notify_customer')(req, res, next);
+router.get('/push/:audience/recipients', requireNotifyPerm, searchNotificationRecipients);
+router.post('/push/:audience/broadcast', requireNotifyPerm, mutationGuard, broadcastNotification);
+router.post('/push/:audience/personal', requireNotifyPerm, mutationGuard, personalNotification);
+
+// ─── Service-area waitlist (customer-side) ───
+router.get('/waitlist', requirePermission('customers'), getWaitlist);
+router.post('/waitlist/:id/reached', requirePermission('customers'), mutationGuard, markWaitlistReached);
 
 // ── Incentives: Coupons ──
 router.get('/coupons', adminListCoupons);

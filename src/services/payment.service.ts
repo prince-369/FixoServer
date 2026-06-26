@@ -43,17 +43,6 @@ export const verifyWebhookSignature = (rawBody: string, signature: string): bool
   return expectedSignature === signature;
 };
 
-export const createDuesPaymentOrder = async (amount: number, workerId: string) => {
-  const options = {
-    amount: amount * 100,
-    currency: 'INR',
-    receipt: `dues_${workerId}`,
-  };
-
-  const order = await razorpay.orders.create(options);
-  return order;
-};
-
 export const fetchSuccessfulPaymentForOrder = async (
   orderId: string
 ): Promise<RazorpayOrderPayment | null> => {

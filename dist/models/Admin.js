@@ -34,10 +34,19 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
+const adminPermissions_1 = require("../config/adminPermissions");
 const adminSchema = new mongoose_1.Schema({
+    name: { type: String, default: 'Admin', trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     password: { type: String, required: true, select: false },
-    role: { type: String, default: 'superadmin' },
+    // 'super_admin' + the 9 staff roles (see config/adminPermissions). Legacy
+    // records may still carry 'superadmin'; the auth layer normalises that.
+    role: { type: String, enum: [...adminPermissions_1.ROLE_KEYS, 'superadmin'], default: 'super_admin' },
+    // Explicit permission grants. Empty → fall back to the role defaults.
+    permissions: { type: [String], default: [] },
+    isActive: { type: Boolean, default: true },
+    createdBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Admin', default: null },
+    lastLoginAt: { type: Date, default: null },
 }, { timestamps: true });
 exports.default = mongoose_1.default.model('Admin', adminSchema);
 //# sourceMappingURL=Admin.js.map

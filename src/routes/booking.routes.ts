@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { protect, authorize, verifyUser } from '../middlewares/auth.middleware';
+import { blockGuard } from '../middlewares/block.middleware';
 import { handleValidationErrors } from '../middlewares/error.middleware';
 import { idempotencyGuard } from '../middlewares/idempotency.middleware';
 import { uploadBookingVoice } from '../middlewares/upload.middleware';
@@ -23,6 +24,7 @@ const mutationGuard = idempotencyGuard(20_000);
 router.post('/webhook/razorpay', handleRazorpayWebhook);
 
 router.use(protect, authorize('customer'), verifyUser);
+router.use(blockGuard);
 
 router.post('/', uploadBookingVoice, createBookingValidation, handleValidationErrors, mutationGuard, createBooking);
 router.get('/workers/availability-summary', getWorkerAvailabilitySummary);

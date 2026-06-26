@@ -5,6 +5,8 @@ import axios from 'axios';
 import User from '../models/User';
 import Worker from '../models/Worker';
 import Admin from '../models/Admin';
+import { effectivePermissions, isSuperAdminEmail } from '../config/adminPermissions';
+import { blockPayload, clearExpiredBlock } from '../utils/userBlock';
 import RefreshToken from '../models/RefreshToken';
 import PasswordResetToken from '../models/PasswordResetToken';
 import { generateAccessToken, generateRefreshTokenString } from '../utils/generateToken';
@@ -729,9 +731,19 @@ export const registerWorker = async (req: Request, res: Response): Promise<void>
 // ─── Worker Login ───
 export const loginWorker = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { phone, password } = req.body;
+    const { phone, password, identifier } = req.body;
 
-    const worker = await Worker.findOne({ phone }).select('+password');
+    // Support both `identifier` (email or phone) and legacy `phone` field.
+    const loginId = (identifier || phone || '').trim();
+    if (!loginId) {
+      res.status(400).json({ message: 'Phone or email is required' });
+      return;
+    }
+
+    const isEmail = loginId.includes('@');
+    const query = isEmail ? { email: loginId.toLowerCase() } : { phone: loginId };
+
+    const worker = await Worker.findOne(query).select('+password');
     if (!worker) {
       res.status(401).json({ message: 'Invalid credentials' });
       return;
@@ -766,20 +778,13 @@ export const loginAdmin = async (req: Request, res: Response): Promise<void> => 
   try {
     const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
     const password = typeof req.body?.password === 'string' ? req.body.password : '';
-    const seedEmail = process.env.ADMIN_SEED_EMAIL
-      ? process.env.ADMIN_SEED_EMAIL.trim().replace(/^['"]+|['"]+$/g, '').trim().toLowerCase()
-      : '';
 
     if (!email || !password) {
       res.status(400).json({ message: 'Email and password are required' });
       return;
     }
 
-    if (seedEmail && email !== seedEmail) {
-      res.status(401).json({ message: 'Invalid credentials' });
-      return;
-    }
-
+    // Any admin record (super admin OR staff) can log in — gated by isActive.
     const admin = await Admin.findOne({ email }).select('+password');
     if (!admin) {
       res.status(401).json({ message: 'Invalid credentials' });
@@ -792,12 +797,28 @@ export const loginAdmin = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
+    const superAdmin = admin.role === 'super_admin' || admin.role === 'superadmin' || isSuperAdminEmail(admin.email);
+    if (!superAdmin && admin.isActive === false) {
+      res.status(403).json({ message: 'Your staff account has been disabled. Contact the Super Admin.' });
+      return;
+    }
+
+    admin.lastLoginAt = new Date();
+    await admin.save();
+
     const accessToken = await issueTokens(res, admin._id.toString(), 'admin');
 
     res.json({
       message: 'Login successful',
       accessToken,
-      admin: { id: admin._id, email: admin.email, role: admin.role },
+      admin: {
+        id: admin._id,
+        name: admin.name,
+        email: admin.email,
+        role: superAdmin ? 'super_admin' : admin.role,
+        permissions: effectivePermissions(admin),
+        isSuperAdmin: superAdmin,
+      },
     });
   } catch (error) {
     console.error('Login admin error:', error);
@@ -960,17 +981,41 @@ export const getMe = async (req: Request, res: Response): Promise<void> => {
           res.status(401).json({ message: 'Account is deactivated' });
           return;
         }
-        res.json({ role: 'customer', user });
+        await clearExpiredBlock(user);
+        res.json({ role: 'customer', user, block: blockPayload(user.block) });
         break;
       }
       case 'worker': {
         const worker = await Worker.findById(req.user.id).populate('categories');
-        res.json({ role: 'worker', worker });
+        if (worker) await clearExpiredBlock(worker);
+        res.json({ role: 'worker', worker, block: blockPayload(worker?.block) });
         break;
       }
       case 'admin': {
         const admin = await Admin.findById(req.user.id);
-        res.json({ role: 'admin', admin });
+        if (!admin) {
+          res.status(401).json({ message: 'Admin not found' });
+          return;
+        }
+        const superAdmin = admin.role === 'super_admin' || admin.role === 'superadmin' || isSuperAdminEmail(admin.email);
+        if (!superAdmin && admin.isActive === false) {
+          res.status(403).json({ message: 'Your staff account has been disabled' });
+          return;
+        }
+        res.json({
+          role: 'admin',
+          admin: {
+            _id: admin._id,
+            id: admin._id,
+            name: admin.name,
+            email: admin.email,
+            role: superAdmin ? 'super_admin' : admin.role,
+            permissions: effectivePermissions(admin),
+            isSuperAdmin: superAdmin,
+            isActive: admin.isActive !== false,
+            lastLoginAt: admin.lastLoginAt,
+          },
+        });
         break;
       }
     }

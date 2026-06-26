@@ -2,13 +2,39 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const auth_middleware_1 = require("../middlewares/auth.middleware");
+const permission_middleware_1 = require("../middlewares/permission.middleware");
 const upload_middleware_1 = require("../middlewares/upload.middleware");
 const idempotency_middleware_1 = require("../middlewares/idempotency.middleware");
+const staff_controller_1 = require("../controllers/staff.controller");
 const admin_controller_1 = require("../controllers/admin.controller");
 const incentiveAdmin_controller_1 = require("../controllers/incentiveAdmin.controller");
 const router = (0, express_1.Router)();
 const mutationGuard = (0, idempotency_middleware_1.idempotencyGuard)(20000);
 router.use(auth_middleware_1.protect, (0, auth_middleware_1.authorize)('admin'));
+// ─── Staff Management (Super Admin only) ───
+router.get('/staff/meta', permission_middleware_1.requireSuperAdmin, staff_controller_1.getStaffMeta);
+router.get('/staff/activity', permission_middleware_1.requireSuperAdmin, staff_controller_1.getStaffActivity);
+router.get('/staff', permission_middleware_1.requireSuperAdmin, staff_controller_1.listStaff);
+router.post('/staff', permission_middleware_1.requireSuperAdmin, mutationGuard, staff_controller_1.createStaff);
+router.put('/staff/:id', permission_middleware_1.requireSuperAdmin, mutationGuard, staff_controller_1.updateStaff);
+router.delete('/staff/:id', permission_middleware_1.requireSuperAdmin, staff_controller_1.deleteStaff);
+// ─── Per-section permission gates (super admin always passes) ───
+router.use('/dashboard', (0, permission_middleware_1.requirePermission)('dashboard'));
+router.use('/ekyc', (0, permission_middleware_1.requirePermission)('kyc'));
+router.use('/withdrawals', (0, permission_middleware_1.requirePermission)('withdrawals'));
+router.use('/categories', (0, permission_middleware_1.requirePermission)('categories'));
+router.use('/banners', (0, permission_middleware_1.requirePermission)('banners'));
+router.use('/customers', (0, permission_middleware_1.requirePermission)('customers'));
+router.use('/help-tickets', (0, permission_middleware_1.requirePermission)('support_customer', 'support_worker'));
+router.use('/refunds', (0, permission_middleware_1.requirePermission)('refunds'));
+router.use('/chatbot-qa', (0, permission_middleware_1.requirePermission)('chatbot'));
+router.use('/workers', (0, permission_middleware_1.requirePermission)('workers'));
+router.use('/coupons', (0, permission_middleware_1.requirePermission)('coupons'));
+router.use('/coupon-redemptions', (0, permission_middleware_1.requirePermission)('coupons', 'analytics'));
+router.use('/promotions', (0, permission_middleware_1.requirePermission)('promotions'));
+router.use('/reward-milestones', (0, permission_middleware_1.requirePermission)('incentives'));
+router.use('/reward-claims', (0, permission_middleware_1.requirePermission)('reward_claims'));
+router.use('/incentive-analytics', (0, permission_middleware_1.requirePermission)('analytics', 'incentives'));
 // Dashboard
 router.get('/dashboard', admin_controller_1.getDashboard);
 router.get('/bootstrap-status', admin_controller_1.getAdminBootstrapStatus);
@@ -36,13 +62,8 @@ router.post('/banners', mutationGuard, upload_middleware_1.uploadSingle, admin_c
 router.post('/banners/reorder', mutationGuard, admin_controller_1.reorderBanners);
 router.put('/banners/:id', mutationGuard, upload_middleware_1.uploadSingle, admin_controller_1.updateBanner);
 router.delete('/banners/:id', mutationGuard, admin_controller_1.deleteBanner);
-// Customers
+// Customers (gated by the /customers path-permission above)
 router.get('/customers', admin_controller_1.getCustomers);
-// Commissions
-router.get('/commissions', admin_controller_1.getCommissions);
-// Worker Dues
-router.get('/worker-dues', admin_controller_1.getWorkerDues);
-router.post('/worker-dues/:workerId/notify', mutationGuard, admin_controller_1.notifyWorkerDues);
 // Help Tickets
 router.get('/help-tickets', admin_controller_1.getHelpTickets);
 router.post('/help-tickets/:id/resolve', mutationGuard, admin_controller_1.resolveHelpTicket);
@@ -56,11 +77,23 @@ router.get('/chatbot-qa', admin_controller_1.getChatbotQA);
 router.post('/chatbot-qa', mutationGuard, admin_controller_1.createChatbotQA);
 router.put('/chatbot-qa/:id', mutationGuard, admin_controller_1.updateChatbotQA);
 router.delete('/chatbot-qa/:id', mutationGuard, admin_controller_1.deleteChatbotQA);
-// Cash payments
-router.get('/cash-payments', admin_controller_1.getCashPayments);
-// Workers
+// Workers (gated by the /workers path-permission above)
 router.get('/workers', admin_controller_1.getAllWorkers);
 router.get('/workers/:id', admin_controller_1.getWorkerDetail);
+// ─── Cancellation moderation (customer-side and worker-side permissions) ───
+router.get('/moderation/flags', (0, permission_middleware_1.requirePermission)('moderation_customer', 'moderation_worker'), admin_controller_1.getCancellationFlags);
+router.post('/moderation/customer/:id/block', (0, permission_middleware_1.requirePermission)('moderation_customer'), mutationGuard, admin_controller_1.blockCustomer);
+router.post('/moderation/customer/:id/unblock', (0, permission_middleware_1.requirePermission)('moderation_customer'), mutationGuard, admin_controller_1.unblockCustomer);
+router.post('/moderation/worker/:id/block', (0, permission_middleware_1.requirePermission)('moderation_worker'), mutationGuard, admin_controller_1.blockWorkerAccount);
+router.post('/moderation/worker/:id/unblock', (0, permission_middleware_1.requirePermission)('moderation_worker'), mutationGuard, admin_controller_1.unblockWorkerAccount);
+// ─── Admin push / broadcast notifications (per-audience permission) ───
+const requireNotifyPerm = (req, res, next) => (0, permission_middleware_1.requirePermission)(req.params.audience === 'worker' ? 'notify_worker' : 'notify_customer')(req, res, next);
+router.get('/push/:audience/recipients', requireNotifyPerm, admin_controller_1.searchNotificationRecipients);
+router.post('/push/:audience/broadcast', requireNotifyPerm, mutationGuard, admin_controller_1.broadcastNotification);
+router.post('/push/:audience/personal', requireNotifyPerm, mutationGuard, admin_controller_1.personalNotification);
+// ─── Service-area waitlist (customer-side) ───
+router.get('/waitlist', (0, permission_middleware_1.requirePermission)('customers'), admin_controller_1.getWaitlist);
+router.post('/waitlist/:id/reached', (0, permission_middleware_1.requirePermission)('customers'), mutationGuard, admin_controller_1.markWaitlistReached);
 // ── Incentives: Coupons ──
 router.get('/coupons', incentiveAdmin_controller_1.adminListCoupons);
 router.post('/coupons', mutationGuard, incentiveAdmin_controller_1.adminCreateCoupon);

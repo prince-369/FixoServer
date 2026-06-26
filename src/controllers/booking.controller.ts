@@ -282,14 +282,7 @@ const finalizeOnlineBookingPayment = async (
 
     notifyUser(booking.assignedWorker.toString(), 'booking_status_updated', bookingStatusPayload);
     notifyUser(customerId, 'booking_status_updated', bookingStatusPayload);
-    await sendNotification({
-      recipientId: booking.assignedWorker.toString(),
-      recipientModel: 'Worker',
-      type: 'payment_success',
-      title: 'Payment Received (Online)',
-      message: 'Online payment completed. You can proceed to the location.',
-      data: { bookingId: booking._id },
-    });
+    // No persistent notification to worker for payment — they already know via realtime status update.
   }
 
   // Record coupon redemption once payment is confirmed (idempotent on booking).
@@ -506,6 +499,7 @@ export const acceptBid = async (req: Request, res: Response): Promise<void> => {
     );
 
     booking.status = 'worker_accepted';
+    // (other-worker notifications are sent below, after the booking is saved)
     booking.acceptedBid = bid._id as any;
     booking.assignedWorker = bid.worker._id as any;
     booking.amount = bid.agreedAmount ?? bid.priceOffered;
@@ -539,6 +533,24 @@ export const acceptBid = async (req: Request, res: Response): Promise<void> => {
       message: `Your bid of ₹${bid.priceOffered} was accepted by the customer.`,
       data: { bookingId: booking._id },
     });
+
+    // Notify the OTHER workers who bid that the job went to someone else, so it
+    // disappears from their available list in real-time.
+    try {
+      const otherBids = await WorkBid.find({ booking: booking._id, _id: { $ne: bidId } }).select('worker');
+      const notified = new Set<string>();
+      for (const ob of otherBids) {
+        const wid = ob.worker.toString();
+        if (wid === workerId || notified.has(wid)) continue;
+        notified.add(wid);
+        notifyUser(wid, 'booking_status_updated', {
+          bookingId: booking._id,
+          status: 'worker_accepted',
+          taken: true,
+          message: 'The customer selected another worker for this job.',
+        });
+      }
+    } catch { /* non-blocking */ }
 
     res.json({
       message: 'Bid accepted. Waiting for worker approval.',
@@ -628,7 +640,7 @@ export const initiatePayment = async (req: Request, res: Response): Promise<void
     booking.paymentMethod = method;
 
     if (method === 'cash') {
-      booking.cashSurcharge = 100;
+      booking.cashSurcharge = 0;
       // Cash is collected at completion, so keep it pending for now.
       booking.paymentStatus = 'pending';
       booking.status = 'payment_done';
@@ -649,21 +661,14 @@ export const initiatePayment = async (req: Request, res: Response): Promise<void
 
         notifyUser(booking.assignedWorker.toString(), 'booking_status_updated', bookingStatusPayload);
         notifyUser(customerId, 'booking_status_updated', bookingStatusPayload);
-        await sendNotification({
-          recipientId: booking.assignedWorker.toString(),
-          recipientModel: 'Worker',
-          type: 'payment_success',
-          title: 'Cash Payment Selected',
-          message: 'Customer chose cash payment. Collect payment after completing the service.',
-          data: { bookingId: booking._id },
-        });
+        // No persistent notification to worker for payment — they already know via realtime status update.
       }
 
       res.json({
-        message: `Cash payment selected. Total: ₹${booking.amount + 100} (includes ₹100 service fee). Payment will be marked paid after service completion. Your PIN: ${booking.completionPin}`,
+        message: `Cash payment selected. Total: ₹${booking.amount}. Payment will be marked paid after service completion. Your PIN: ${booking.completionPin}`,
         booking,
         pin: booking.completionPin,
-        totalAmount: booking.amount + 100,
+        totalAmount: booking.amount,
       });
       return;
     }

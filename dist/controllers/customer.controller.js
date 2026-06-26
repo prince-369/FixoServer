@@ -36,10 +36,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.escalateHelpTicket = exports.appendHelpTicketMessage = exports.getHelpTicketDetail = exports.getHelpTickets = exports.createHelpTicket = exports.getChatbotQA = exports.deleteNotification = exports.markAllNotificationsRead = exports.markNotificationRead = exports.getNotifications = exports.submitReview = exports.submitRefundDetails = exports.cancelBooking = exports.getTransactions = exports.revealCompletionCode = exports.getBookingDetail = exports.getBookings = exports.getBanners = exports.getCategoryDetail = exports.getCategories = exports.confirmDeactivateAccount = exports.sendDeactivateAccountOtp = exports.deleteAccount = exports.updateProfile = exports.getProfile = void 0;
+exports.escalateHelpTicket = exports.appendHelpTicketMessage = exports.getHelpTicketDetail = exports.getHelpTickets = exports.createHelpTicket = exports.getChatbotQA = exports.deleteNotification = exports.markAllNotificationsRead = exports.markNotificationRead = exports.getNotifications = exports.submitReview = exports.submitRefundDetails = exports.cancelBooking = exports.getTransactions = exports.revealCompletionCode = exports.getBookingDetail = exports.getBookings = exports.getBanners = exports.getCategoryDetail = exports.joinWaitlist = exports.getServiceAvailability = exports.getCategories = exports.confirmDeactivateAccount = exports.sendDeactivateAccountOtp = exports.deleteAccount = exports.updateProfile = exports.getProfile = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const User_1 = __importDefault(require("../models/User"));
+const Worker_1 = __importDefault(require("../models/Worker"));
+const Waitlist_1 = __importDefault(require("../models/Waitlist"));
 const Booking_1 = __importDefault(require("../models/Booking"));
+const WorkBid_1 = __importDefault(require("../models/WorkBid"));
 const Transaction_1 = __importDefault(require("../models/Transaction"));
 const Category_1 = __importDefault(require("../models/Category"));
 const Banner_1 = __importDefault(require("../models/Banner"));
@@ -248,6 +251,66 @@ const getCategories = async (_req, res) => {
     }
 };
 exports.getCategories = getCategories;
+const SERVICE_RADIUS_METERS = 10000;
+const EARTH_RADIUS_METERS = 6378137;
+// ─── Service availability at a location (any live worker within ~10km) ───
+const getServiceAvailability = async (req, res) => {
+    try {
+        const lat = Number(req.query.lat);
+        const lng = Number(req.query.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            res.status(400).json({ message: 'Valid lat and lng are required' });
+            return;
+        }
+        const within = { $geoWithin: { $centerSphere: [[lng, lat], SERVICE_RADIUS_METERS / EARTH_RADIUS_METERS] } };
+        const count = await Worker_1.default.countDocuments({
+            accountStatus: 'live',
+            isActive: true,
+            $or: [{ currentLocation: within }, { location: within }],
+        });
+        res.json({ available: count > 0, workerCount: count });
+    }
+    catch (error) {
+        console.error('Service availability error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.getServiceAvailability = getServiceAvailability;
+// ─── Join the waitlist for a location we don't yet serve ───
+const joinWaitlist = async (req, res) => {
+    try {
+        const lat = Number(req.body?.latitude);
+        const lng = Number(req.body?.longitude);
+        const address = typeof req.body?.address === 'string' ? req.body.address.trim() : '';
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            res.status(400).json({ message: 'Valid location is required' });
+            return;
+        }
+        // Avoid stacking duplicate pending requests for nearly the same spot.
+        const dupe = await Waitlist_1.default.findOne({
+            user: req.user.id,
+            status: 'pending',
+            location: { $geoWithin: { $centerSphere: [[lng, lat], 500 / EARTH_RADIUS_METERS] } },
+        });
+        if (dupe) {
+            res.json({ message: 'You are already on the waitlist for this area' });
+            return;
+        }
+        await Waitlist_1.default.create({ user: req.user.id, location: { type: 'Point', coordinates: [lng, lat], address }, status: 'pending' });
+        (0, socket_1.sendAdminNotification)({
+            type: 'waitlist_request',
+            title: 'New Service Area Request',
+            message: `A customer requested Fixo at: ${address || `${lat.toFixed(4)}, ${lng.toFixed(4)}`}`,
+            data: {},
+        }).catch(() => { });
+        res.status(201).json({ message: 'Added to waitlist' });
+    }
+    catch (error) {
+        console.error('Join waitlist error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.joinWaitlist = joinWaitlist;
 // ─── Get Category Detail ───
 const getCategoryDetail = async (req, res) => {
     try {
@@ -342,7 +405,19 @@ const getBookingDetail = async (req, res) => {
             res.status(404).json({ message: 'Booking not found' });
             return;
         }
-        res.json({ booking });
+        // Check if the assigned worker is currently busy on another active job.
+        // This helps the customer know the worker is occupied and won't see live location for another job.
+        let workerBusy = false;
+        if (booking.assignedWorker && ['worker_accepted', 'worker_approved', 'payment_done', 'in_progress'].includes(booking.status)) {
+            const workerId = typeof booking.assignedWorker === 'object' ? booking.assignedWorker._id : booking.assignedWorker;
+            const otherActiveJob = await Booking_1.default.findOne({
+                assignedWorker: workerId,
+                status: { $in: ['worker_approved', 'payment_done', 'in_progress'] },
+                _id: { $ne: booking._id },
+            });
+            workerBusy = Boolean(otherActiveJob);
+        }
+        res.json({ booking, workerBusy });
     }
     catch (error) {
         console.error('Get booking detail error:', error);
@@ -382,14 +457,7 @@ const revealCompletionCode = async (req, res) => {
         };
         if (booking.assignedWorker) {
             (0, socket_1.notifyUser)(booking.assignedWorker.toString(), 'booking_status_updated', payload);
-            await (0, socket_1.sendNotification)({
-                recipientId: booking.assignedWorker.toString(),
-                recipientModel: 'Worker',
-                type: 'completion_code_revealed',
-                title: 'Completion Code Revealed',
-                message: 'Customer has revealed the completion code. Proceed only after confirming work is fully done.',
-                data: { bookingId: booking._id },
-            });
+            // No persistent notification to worker for code reveal — realtime event updates the UI.
         }
         (0, socket_1.notifyUser)(req.user.id, 'booking_status_updated', payload);
         res.json({
@@ -475,6 +543,25 @@ const cancelBooking = async (req, res) => {
                 status: 'completed',
             }, { $set: { status: 'failed' } });
         }
+        // Notify every worker who bid on this booking so it disappears from their
+        // available list in real-time (and they know it was cancelled).
+        try {
+            const bidders = await WorkBid_1.default.find({ booking: booking._id }).select('worker');
+            const notified = new Set();
+            for (const b of bidders) {
+                const wid = b.worker.toString();
+                if (notified.has(wid))
+                    continue;
+                notified.add(wid);
+                (0, socket_1.notifyUser)(wid, 'booking_status_updated', {
+                    bookingId: booking._id,
+                    status: 'cancelled',
+                    cancelledBy: 'customer',
+                    reason: booking.cancellation.reason,
+                });
+            }
+        }
+        catch { /* non-blocking */ }
         // Notify assigned worker if any
         if (booking.assignedWorker) {
             (0, socket_1.notifyUser)(booking.assignedWorker.toString(), 'booking_status_updated', {
@@ -573,6 +660,25 @@ const submitReview = async (req, res) => {
                 worker.rating = { average: Math.round(newAvg * 10) / 10, count: newCount };
                 await worker.save();
             }
+            // Notify worker about the rating they received
+            const starEmoji = rating >= 4 ? '⭐' : rating >= 3 ? '👍' : '📝';
+            await (0, socket_1.sendNotification)({
+                recipientId: booking.assignedWorker.toString(),
+                recipientModel: 'Worker',
+                type: 'review_received',
+                title: `${starEmoji} New Rating: ${rating}/5`,
+                message: feedback
+                    ? `Customer rated you ${rating}/5 — "${feedback}"`
+                    : `Customer rated you ${rating}/5 for your service.`,
+                data: { bookingId: booking._id },
+            });
+            (0, socket_1.notifyUser)(booking.assignedWorker.toString(), 'notification_event', {
+                type: 'review_received',
+                title: `${starEmoji} New Rating: ${rating}/5`,
+                message: feedback
+                    ? `Customer rated you ${rating}/5 — "${feedback}"`
+                    : `Customer rated you ${rating}/5 for your service.`,
+            });
         }
         res.json({ message: 'Review submitted', review: booking.review });
     }

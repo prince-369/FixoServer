@@ -12,6 +12,7 @@ const RewardMilestone_1 = __importDefault(require("../models/RewardMilestone"));
 const RewardClaim_1 = __importDefault(require("../models/RewardClaim"));
 const Transaction_1 = __importDefault(require("../models/Transaction"));
 const socket_1 = require("../socket");
+const adminActivity_1 = require("../utils/adminActivity");
 const incentive_service_1 = require("../services/incentive.service");
 const generateTID_1 = require("../utils/generateTID");
 // ═══════════════════════════════════════════════════════════
@@ -63,6 +64,7 @@ const adminCreateCoupon = async (req, res) => {
             targetType: 'CouponCampaign', targetId: coupon._id,
             meta: { code: coupon.code },
         });
+        await (0, adminActivity_1.logAdminActivity)(req, { action: 'coupon.create', category: 'coupons', targetType: 'coupon', targetId: String(coupon._id) });
         res.status(201).json({ coupon });
     }
     catch (error) {
@@ -147,20 +149,17 @@ const adminListPromotions = async (_req, res) => {
 exports.adminListPromotions = adminListPromotions;
 const adminCreatePromotion = async (req, res) => {
     try {
-        const { title, description, type, commissionRate, zeroCommissionScope, firstOrdersCount, bonusTiers, appliesToAllWorkers, targetWorkers, startsAt, endsAt, durationDays, budgetLimit, } = req.body;
+        const { title, description, type, bonusTiers, appliesToAllWorkers, targetWorkers, startsAt, endsAt, durationDays, budgetLimit, } = req.body;
         if (!title || !type) {
             res.status(400).json({ message: 'title and type are required' });
             return;
         }
-        if (!['reduced_commission', 'zero_commission', 'bonus_earning'].includes(type)) {
-            res.status(400).json({ message: 'Invalid promotion type' });
+        // Platform is free — only bonus-earning promotions are supported.
+        if (type !== 'bonus_earning') {
+            res.status(400).json({ message: 'Only bonus_earning promotions are supported' });
             return;
         }
-        if (type === 'reduced_commission' && (commissionRate == null || commissionRate < 0 || commissionRate > 1)) {
-            res.status(400).json({ message: 'commissionRate (0–1) is required for reduced_commission' });
-            return;
-        }
-        if (type === 'bonus_earning' && (!Array.isArray(bonusTiers) || bonusTiers.length === 0)) {
+        if (!Array.isArray(bonusTiers) || bonusTiers.length === 0) {
             res.status(400).json({ message: 'bonusTiers are required for bonus_earning' });
             return;
         }
@@ -170,10 +169,7 @@ const adminCreatePromotion = async (req, res) => {
         }
         const promotion = await WorkerPromotion_1.default.create({
             title, description, type,
-            commissionRate: type === 'reduced_commission' ? Number(commissionRate) : undefined,
-            zeroCommissionScope: type === 'zero_commission' ? zeroCommissionScope : undefined,
-            firstOrdersCount: type === 'zero_commission' ? firstOrdersCount : undefined,
-            bonusTiers: type === 'bonus_earning' ? bonusTiers : undefined,
+            bonusTiers,
             appliesToAllWorkers: appliesToAllWorkers !== false,
             targetWorkers: Array.isArray(targetWorkers) ? targetWorkers : [],
             startsAt: startsAt ? new Date(startsAt) : new Date(),
@@ -187,6 +183,7 @@ const adminCreatePromotion = async (req, res) => {
             targetType: 'WorkerPromotion', targetId: promotion._id,
             meta: { type },
         });
+        await (0, adminActivity_1.logAdminActivity)(req, { action: 'promotion.create', category: 'promotions', targetType: 'promotion', targetId: String(promotion._id) });
         res.status(201).json({ promotion });
     }
     catch (error) {
@@ -197,7 +194,7 @@ const adminCreatePromotion = async (req, res) => {
 exports.adminCreatePromotion = adminCreatePromotion;
 const adminUpdatePromotion = async (req, res) => {
     try {
-        const allowed = ['title', 'description', 'commissionRate', 'zeroCommissionScope', 'firstOrdersCount',
+        const allowed = ['title', 'description',
             'bonusTiers', 'appliesToAllWorkers', 'targetWorkers', 'startsAt', 'endsAt', 'budgetLimit'];
         const update = {};
         for (const key of allowed) {
@@ -457,7 +454,7 @@ exports.adminListCouponRedemptions = adminListCouponRedemptions;
 // ═══════════════════════════════════════════════════════════
 const adminIncentiveAnalytics = async (_req, res) => {
     try {
-        const [couponAgg, rewardClaimsAgg, bonusAgg, commissionSavingAgg, workerParticipation, activeCoupons, activePromotions,] = await Promise.all([
+        const [couponAgg, rewardClaimsAgg, bonusAgg, workerParticipation, activeCoupons, activePromotions,] = await Promise.all([
             CouponRedemption_1.default.aggregate([
                 { $group: { _id: null, count: { $sum: 1 }, totalDiscount: { $sum: '$discountAmount' } } },
             ]),
@@ -468,10 +465,6 @@ const adminIncentiveAnalytics = async (_req, res) => {
                 { $match: { kind: 'bonus' } },
                 { $group: { _id: null, count: { $sum: 1 }, total: { $sum: '$bonusAmount' } } },
             ]),
-            PromotionRedemption_1.default.aggregate([
-                { $match: { kind: 'commission_saving' } },
-                { $group: { _id: null, total: { $sum: '$commissionSaved' } } },
-            ]),
             PromotionRedemption_1.default.distinct('worker'),
             CouponCampaign_1.default.countDocuments({ isActive: true, status: 'active' }),
             WorkerPromotion_1.default.countDocuments({ isActive: true, status: 'active' }),
@@ -479,7 +472,6 @@ const adminIncentiveAnalytics = async (_req, res) => {
         const couponsUsed = couponAgg[0]?.count || 0;
         const couponDiscountTotal = couponAgg[0]?.totalDiscount || 0;
         const bonusPaidTotal = bonusAgg[0]?.total || 0;
-        const commissionSavingTotal = commissionSavingAgg[0]?.total || 0;
         const rewardsByStatus = {};
         let rewardsPaidTotal = 0;
         for (const r of rewardClaimsAgg) {
@@ -487,13 +479,12 @@ const adminIncentiveAnalytics = async (_req, res) => {
             if (r._id === 'paid')
                 rewardsPaidTotal = r.total;
         }
-        const totalIncentiveCost = couponDiscountTotal + rewardsPaidTotal + bonusPaidTotal + commissionSavingTotal;
+        const totalIncentiveCost = couponDiscountTotal + rewardsPaidTotal + bonusPaidTotal;
         res.json({
             coupons: { used: couponsUsed, discountTotal: couponDiscountTotal, activeCount: activeCoupons },
             rewards: { byStatus: rewardsByStatus, paidTotal: rewardsPaidTotal },
             workerPromotions: {
                 bonusPaidTotal,
-                commissionSavingTotal,
                 participatingWorkers: workerParticipation.length,
                 activeCount: activePromotions,
             },

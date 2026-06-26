@@ -8,6 +8,7 @@ import RewardMilestone from '../models/RewardMilestone';
 import RewardClaim from '../models/RewardClaim';
 import Transaction from '../models/Transaction';
 import { sendNotification } from '../socket';
+import { logAdminActivity } from '../utils/adminActivity';
 import { audit } from '../services/incentive.service';
 import { generateTID } from '../utils/generateTID';
 
@@ -68,6 +69,7 @@ export const adminCreateCoupon = async (req: Request, res: Response): Promise<vo
       meta: { code: coupon.code },
     });
 
+    await logAdminActivity(req, { action: 'coupon.create', category: 'coupons', targetType: 'coupon', targetId: String(coupon._id) });
     res.status(201).json({ coupon });
   } catch (error) {
     console.error('adminCreateCoupon error:', error);
@@ -152,7 +154,7 @@ export const adminListPromotions = async (_req: Request, res: Response): Promise
 export const adminCreatePromotion = async (req: Request, res: Response): Promise<void> => {
   try {
     const {
-      title, description, type, commissionRate, zeroCommissionScope, firstOrdersCount,
+      title, description, type,
       bonusTiers, appliesToAllWorkers, targetWorkers, startsAt, endsAt, durationDays, budgetLimit,
     } = req.body;
 
@@ -160,15 +162,12 @@ export const adminCreatePromotion = async (req: Request, res: Response): Promise
       res.status(400).json({ message: 'title and type are required' });
       return;
     }
-    if (!['reduced_commission', 'zero_commission', 'bonus_earning'].includes(type)) {
-      res.status(400).json({ message: 'Invalid promotion type' });
+    // Platform is free — only bonus-earning promotions are supported.
+    if (type !== 'bonus_earning') {
+      res.status(400).json({ message: 'Only bonus_earning promotions are supported' });
       return;
     }
-    if (type === 'reduced_commission' && (commissionRate == null || commissionRate < 0 || commissionRate > 1)) {
-      res.status(400).json({ message: 'commissionRate (0–1) is required for reduced_commission' });
-      return;
-    }
-    if (type === 'bonus_earning' && (!Array.isArray(bonusTiers) || bonusTiers.length === 0)) {
+    if (!Array.isArray(bonusTiers) || bonusTiers.length === 0) {
       res.status(400).json({ message: 'bonusTiers are required for bonus_earning' });
       return;
     }
@@ -180,10 +179,7 @@ export const adminCreatePromotion = async (req: Request, res: Response): Promise
 
     const promotion = await WorkerPromotion.create({
       title, description, type,
-      commissionRate: type === 'reduced_commission' ? Number(commissionRate) : undefined,
-      zeroCommissionScope: type === 'zero_commission' ? zeroCommissionScope : undefined,
-      firstOrdersCount: type === 'zero_commission' ? firstOrdersCount : undefined,
-      bonusTiers: type === 'bonus_earning' ? bonusTiers : undefined,
+      bonusTiers,
       appliesToAllWorkers: appliesToAllWorkers !== false,
       targetWorkers: Array.isArray(targetWorkers) ? targetWorkers : [],
       startsAt: startsAt ? new Date(startsAt) : new Date(),
@@ -199,6 +195,7 @@ export const adminCreatePromotion = async (req: Request, res: Response): Promise
       meta: { type },
     });
 
+    await logAdminActivity(req, { action: 'promotion.create', category: 'promotions', targetType: 'promotion', targetId: String(promotion._id) });
     res.status(201).json({ promotion });
   } catch (error) {
     console.error('adminCreatePromotion error:', error);
@@ -208,7 +205,7 @@ export const adminCreatePromotion = async (req: Request, res: Response): Promise
 
 export const adminUpdatePromotion = async (req: Request, res: Response): Promise<void> => {
   try {
-    const allowed = ['title', 'description', 'commissionRate', 'zeroCommissionScope', 'firstOrdersCount',
+    const allowed = ['title', 'description',
       'bonusTiers', 'appliesToAllWorkers', 'targetWorkers', 'startsAt', 'endsAt', 'budgetLimit'];
     const update: Record<string, unknown> = {};
     for (const key of allowed) {
@@ -483,7 +480,6 @@ export const adminIncentiveAnalytics = async (_req: Request, res: Response): Pro
       couponAgg,
       rewardClaimsAgg,
       bonusAgg,
-      commissionSavingAgg,
       workerParticipation,
       activeCoupons,
       activePromotions,
@@ -498,10 +494,6 @@ export const adminIncentiveAnalytics = async (_req: Request, res: Response): Pro
         { $match: { kind: 'bonus' } },
         { $group: { _id: null, count: { $sum: 1 }, total: { $sum: '$bonusAmount' } } },
       ]),
-      PromotionRedemption.aggregate([
-        { $match: { kind: 'commission_saving' } },
-        { $group: { _id: null, total: { $sum: '$commissionSaved' } } },
-      ]),
       PromotionRedemption.distinct('worker'),
       CouponCampaign.countDocuments({ isActive: true, status: 'active' }),
       WorkerPromotion.countDocuments({ isActive: true, status: 'active' }),
@@ -510,7 +502,6 @@ export const adminIncentiveAnalytics = async (_req: Request, res: Response): Pro
     const couponsUsed = couponAgg[0]?.count || 0;
     const couponDiscountTotal = couponAgg[0]?.totalDiscount || 0;
     const bonusPaidTotal = bonusAgg[0]?.total || 0;
-    const commissionSavingTotal = commissionSavingAgg[0]?.total || 0;
 
     const rewardsByStatus: Record<string, { count: number; total: number }> = {};
     let rewardsPaidTotal = 0;
@@ -520,14 +511,13 @@ export const adminIncentiveAnalytics = async (_req: Request, res: Response): Pro
     }
 
     const totalIncentiveCost =
-      couponDiscountTotal + rewardsPaidTotal + bonusPaidTotal + commissionSavingTotal;
+      couponDiscountTotal + rewardsPaidTotal + bonusPaidTotal;
 
     res.json({
       coupons: { used: couponsUsed, discountTotal: couponDiscountTotal, activeCount: activeCoupons },
       rewards: { byStatus: rewardsByStatus, paidTotal: rewardsPaidTotal },
       workerPromotions: {
         bonusPaidTotal,
-        commissionSavingTotal,
         participatingWorkers: workerParticipation.length,
         activeCount: activePromotions,
       },

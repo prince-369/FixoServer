@@ -11,15 +11,9 @@ import { uploadBufferToCloudinary } from '../services/cloudinary.service';
 import { generateTID } from '../utils/generateTID';
 import { generateTicketNumber } from '../services/ticketNumber.service';
 import { removeBookingVoiceNote } from '../services/bookingVoice.service';
-import { createDuesPaymentOrder, verifyPayment } from '../services/payment.service';
+import { verifyPayment } from '../services/payment.service';
 import env from '../config/env';
 import { notifyUser, notifyBookingRoom, notifyRole, sendNotification, sendAdminNotification } from '../socket';
-import {
-  resolveActiveWorkerCommissionRate,
-  notifyUnlockedBonusTiers,
-  recordCommissionSaving,
-  DEFAULT_COMMISSION_RATE,
-} from '../services/incentive.service';
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const WORKER_SEARCH_RADIUS_METERS = 10_000;
@@ -326,6 +320,28 @@ export const updateLocation = async (req: Request, res: Response): Promise<void>
   }
 };
 
+// ─── Update LIVE/current location (dynamic job-matching radius) ───
+// Does NOT change the static signup `location`. Called periodically by the
+// worker app/web so the 10km radius follows the worker as they move.
+export const updateCurrentLocation = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const lat = Number(req.body?.latitude);
+    const lng = Number(req.body?.longitude);
+    const address = typeof req.body?.address === 'string' ? req.body.address : '';
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      res.status(400).json({ message: 'Valid latitude and longitude are required' });
+      return;
+    }
+    await Worker.findByIdAndUpdate(req.user!.id, {
+      currentLocation: { type: 'Point', coordinates: [lng, lat], address, updatedAt: new Date() },
+    });
+    res.json({ message: 'Live location updated' });
+  } catch (error) {
+    console.error('Update current location error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 // ─── Dashboard Stats ───
 export const getDashboard = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -493,10 +509,8 @@ export const getDashboard = async (req: Request, res: Response): Promise<void> =
       stats: {
         totalWorkDone: worker.totalWorkDone,
         totalEarnings: worker.totalEarnings,
-        totalCommissionPaid: worker.totalCommissionPaid,
         rating: worker.rating,
         balance: worker.balance,
-        dues: worker.dues,
         isActive: worker.isActive,
         cashTotal,
         onlineTotal,
@@ -522,6 +536,57 @@ export const getDashboard = async (req: Request, res: Response): Promise<void> =
   }
 };
 
+// ─── Get Reviews / Ratings ───
+export const getReviews = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const worker = await Worker.findById(req.user!.id);
+    if (!worker) {
+      res.status(404).json({ message: 'Worker not found' });
+      return;
+    }
+
+    const reviewedBookings = await Booking.find({
+      assignedWorker: req.user!.id,
+      status: 'completed',
+      'review.rating': { $exists: true, $ne: null },
+    })
+      .populate('customer', 'fullName profileImage')
+      .populate('category', 'name slug image')
+      .sort({ updatedAt: -1 });
+
+    const reviews = reviewedBookings
+      .filter((b) => b.review && b.review.rating)
+      .map((b) => {
+        const customer = b.customer && typeof b.customer === 'object' && '_id' in (b.customer as any)
+          ? { fullName: (b.customer as any).fullName || 'Customer', profileImage: (b.customer as any).profileImage || '' }
+          : null;
+        const category = b.category && typeof b.category === 'object' && '_id' in (b.category as any)
+          ? { name: (b.category as any).name || 'Service', slug: (b.category as any).slug || '' }
+          : null;
+
+        return {
+          _id: b._id,
+          rating: b.review!.rating,
+          feedback: b.review!.feedback || '',
+          createdAt: b.review!.createdAt || b.updatedAt,
+          customer,
+          category,
+          amount: b.amount || 0,
+          workDescription: b.workDescription || '',
+        };
+      });
+
+    res.json({
+      rating: worker.rating,
+      totalReviews: reviews.length,
+      reviews,
+    });
+  } catch (error) {
+    console.error('Get reviews error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 // ─── Get Work Requests ───
 export const getWorkRequests = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -534,7 +599,7 @@ export const getWorkRequests = async (req: Request, res: Response): Promise<void
     // 1) Available bookings — in worker's categories + 10km radius
     // Show finding_workers jobs within the same stale-window used by cleanup.
     const findingWorkersSince = new Date(Date.now() - env.JOB_STALE_BOOKING_MINUTES * 60 * 1000);
-    const workerCoordinates = toCoordinateTuple(worker.location?.coordinates);
+    const workerCoordinates = toCoordinateTuple(worker.currentLocation?.coordinates) || toCoordinateTuple(worker.location?.coordinates);
     const hasCategories = Array.isArray(worker.categories) && worker.categories.length > 0;
 
     let availableBookings: any[] = [];
@@ -620,7 +685,7 @@ export const getWorkRequestDetail = async (req: Request, res: Response): Promise
         : String(booking.category || '');
     const isCategoryMatch = bookingCategoryId ? workerCategorySet.has(bookingCategoryId) : false;
 
-    const workerCoordinates = toCoordinateTuple(worker.location?.coordinates);
+    const workerCoordinates = toCoordinateTuple(worker.currentLocation?.coordinates) || toCoordinateTuple(worker.location?.coordinates);
     const bookingCoordinates = toCoordinateTuple(booking.customerLocation?.coordinates);
     const isWithinRadius =
       Boolean(workerCoordinates && bookingCoordinates) &&
@@ -835,6 +900,22 @@ export const approveBooking = async (req: Request, res: Response): Promise<void>
       return;
     }
 
+    // Check if worker already has an active job (approved/paid/in-progress).
+    // A worker can only work on one job at a time.
+    const activeJob = await Booking.findOne({
+      assignedWorker: req.user!.id,
+      status: { $in: ['worker_approved', 'payment_done', 'in_progress'] },
+      _id: { $ne: booking._id },
+    });
+
+    if (activeJob) {
+      res.status(409).json({
+        message: 'You already have an active job in progress. Complete it first before approving another.',
+        activeBookingId: activeJob._id,
+      });
+      return;
+    }
+
     booking.status = 'worker_approved';
     await booking.save();
 
@@ -1025,18 +1106,6 @@ export const sendMessage = async (req: Request, res: Response): Promise<void> =>
   }
 };
 
-// ─── Dues Policy Helpers ───
-const DUES_GRACE_PERIOD_DAYS = 10;
-
-// Check if dues are overdue without auto-deducting (read-only check)
-const isDuesOverdue = (worker: any): boolean => {
-  if (worker.dues > 0 && worker.duesSince) {
-    const daysSinceDues = Math.floor((Date.now() - new Date(worker.duesSince).getTime()) / (1000 * 60 * 60 * 24));
-    return daysSinceDues >= DUES_GRACE_PERIOD_DAYS;
-  }
-  return false;
-};
-
 // ─── Worker requests customer completion code ───
 export const requestCompletionCode = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -1142,67 +1211,19 @@ export const completeWork = async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    let commission = 0;
-    let workerEarning = 0;
-
+    // FREE platform — no commission, no dues. Worker keeps 100%.
+    const workerEarning = booking.amount;
     if (booking.paymentMethod === 'online') {
-      // Online: default 20% commission, worker gets the rest.
-      // A worker promotion (reduced/zero commission) may lower the rate for this job.
-      // resolveActiveWorkerCommissionRate returns DEFAULT_COMMISSION_RATE when no
-      // campaign applies, so behaviour is identical to before in the common case.
-      let effectiveRate = DEFAULT_COMMISSION_RATE;
-      let appliedPromotion = null;
-      try {
-        const resolved = await resolveActiveWorkerCommissionRate(worker, worker.totalWorkDone);
-        effectiveRate = resolved.rate;
-        appliedPromotion = resolved.promotion;
-      } catch {
-        effectiveRate = DEFAULT_COMMISSION_RATE;
-      }
-
-      const amountInPaise = Math.round(booking.amount * 100);
-      const commissionInPaise = Math.round(amountInPaise * effectiveRate);
-      const workerEarningInPaise = amountInPaise - commissionInPaise;
-
-      commission = commissionInPaise / 100;
-      workerEarning = workerEarningInPaise / 100;
       worker.balance += workerEarning;
-
-      // Track commission savings for analytics (no-op when rate is default).
-      if (appliedPromotion && effectiveRate < DEFAULT_COMMISSION_RATE) {
-        const fullCommission = Math.round(amountInPaise * DEFAULT_COMMISSION_RATE) / 100;
-        void recordCommissionSaving({
-          promotion: appliedPromotion,
-          worker,
-          booking: booking._id,
-          appliedRate: effectiveRate,
-          fullCommission,
-          actualCommission: commission,
-        });
-      }
-    } else {
-      // Cash: NO commission — worker keeps 100% of bid amount in hand
-      // ₹100 surcharge IS the platform fee (added to dues)
-      workerEarning = booking.amount;
-      commission = 0;
-      // Track when dues started accumulating
-      if (worker.dues === 0) {
-        worker.duesSince = new Date();
-      }
-      worker.dues += 100;
     }
+    // Cash: worker already collected in hand, nothing to add to balance.
 
     worker.totalWorkDone += 1;
     worker.totalEarnings += workerEarning;
-    worker.totalCommissionPaid += commission;
     await worker.save();
 
-    // Bonus promotions are claim-based: if this job unlocked a bonus tier,
-    // notify the worker so they can claim it from the Offers page.
-    void notifyUnlockedBonusTiers(worker);
-
     if (isCashBooking) {
-      const cashPaymentAmount = booking.amount + (booking.cashSurcharge || 100);
+      const cashPaymentAmount = booking.amount;
       const existingCashPayment = await Transaction.findOne({
         booking: booking._id,
         type: 'booking_payment',
@@ -1241,20 +1262,6 @@ export const completeWork = async (req: Request, res: Response): Promise<void> =
       status: 'completed',
     });
 
-    // Commission transaction (only for online — cash has no commission)
-    if (commission > 0) {
-      await Transaction.create({
-        tid: generateTID(),
-        booking: booking._id,
-        user: booking.customer,
-        worker: worker._id,
-        type: 'commission',
-        amount: commission,
-        method: booking.paymentMethod!,
-        status: 'completed',
-      });
-    }
-
     // Real-time: Notify customer that work is completed
     const customerId = booking.customer.toString();
     const completionPayload = {
@@ -1277,7 +1284,6 @@ export const completeWork = async (req: Request, res: Response): Promise<void> =
     res.json({
       message: 'Work completed successfully!',
       earning: workerEarning,
-      commission,
       newBalance: worker.balance,
     });
   } catch (error) {
@@ -1297,9 +1303,7 @@ export const getFunds = async (req: Request, res: Response): Promise<void> => {
 
     res.json({
       balance: worker.balance,
-      dues: worker.dues,
       totalEarnings: worker.totalEarnings,
-      totalCommissionPaid: worker.totalCommissionPaid,
       bankDetails: worker.bankDetails,
     });
   } catch (error) {
@@ -1313,7 +1317,7 @@ export const getEarningsHistory = async (req: Request, res: Response): Promise<v
   try {
     const transactions = await Transaction.find({
       worker: req.user!.id,
-      type: { $in: ['worker_earning', 'commission'] },
+      type: 'worker_earning',
     })
       .populate('booking', 'workDescription')
       .sort({ createdAt: -1 });
@@ -1338,7 +1342,7 @@ export const getWalletTransactions = async (req: Request, res: Response): Promis
     const transactions = await Transaction.find({ worker: req.user!.id, type: { $ne: 'booking_payment' } })
       .populate({
         path: 'booking',
-        select: 'workDescription category amount cashSurcharge paymentMethod customer',
+        select: 'workDescription category amount paymentMethod customer',
         populate: [
           { path: 'category', select: 'name' },
           { path: 'customer', select: 'fullName' },
@@ -1357,35 +1361,16 @@ export const getWalletTransactions = async (req: Request, res: Response): Promis
           _id: '$type',
           total: { $sum: '$amount' },
           count: { $sum: 1 },
-          cashAmount: { $sum: { $cond: [{ $eq: ['$method', 'cash'] }, '$amount', 0] } },
-          onlineAmount: { $sum: { $cond: [{ $eq: ['$method', 'online'] }, '$amount', 0] } },
         },
       },
     ]);
 
     const earningsSummary = summary.find((s) => s._id === 'worker_earning');
-    const commissionSummary = summary.find((s) => s._id === 'commission');
-
-    // Check dues status
-    const hasPendingDues = worker.dues > 0;
-    const isOverdue = isDuesOverdue(worker);
-    const duesDaysRemaining = worker.dues > 0 && worker.duesSince
-      ? Math.max(0, DUES_GRACE_PERIOD_DAYS - Math.floor((Date.now() - new Date(worker.duesSince).getTime()) / (1000 * 60 * 60 * 24)))
-      : null;
 
     res.json({
       balance: worker.balance,
-      dues: worker.dues,
-      duesSince: worker.duesSince,
-      duesDaysRemaining,
-      duesOverdue: isOverdue,
-      withdrawalDisabled: hasPendingDues,
       totalEarnings: worker.totalEarnings,
-      totalCommissionPaid: worker.totalCommissionPaid,
-      cashEarnings: earningsSummary?.cashAmount || 0,
-      onlineEarnings: earningsSummary?.onlineAmount || 0,
       totalJobs: earningsSummary?.count || 0,
-      commissionRate: '20%',
       transactions,
       withdrawals,
     });
@@ -1434,15 +1419,6 @@ export const requestWithdrawal = async (req: Request, res: Response): Promise<vo
       return;
     }
 
-    if (worker.dues > 0) {
-      res.status(403).json({
-        message: `Please clear your dues of ₹${worker.dues} first. Withdrawals are locked until dues are paid.`,
-        withdrawalDisabled: true,
-        dues: worker.dues,
-      });
-      return;
-    }
-
     if (amount > worker.balance) {
       res.status(400).json({ message: 'Insufficient balance' });
       return;
@@ -1467,7 +1443,6 @@ export const requestWithdrawal = async (req: Request, res: Response): Promise<vo
       status: 'pending',
       withdrawal,
       balance: worker.balance,
-      dues: worker.dues,
     });
     notifyRole('admin', 'withdrawal_update', {
       withdrawalId: withdrawal._id,
@@ -1503,118 +1478,6 @@ export const getWithdrawals = async (req: Request, res: Response): Promise<void>
     res.json({ withdrawals });
   } catch (error) {
     console.error('Get withdrawals error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-
-// ─── Pay Dues ───
-export const payDues = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const worker = await Worker.findById(req.user!.id);
-    if (!worker || worker.dues <= 0) {
-      res.status(400).json({ message: 'No dues to pay' });
-      return;
-    }
-
-    const order = await createDuesPaymentOrder(worker.dues, worker._id.toString());
-
-    res.json({
-      razorpayOrderId: order.id,
-      amount: worker.dues * 100, // in paise for Razorpay
-      displayAmount: worker.dues,
-      currency: 'INR',
-    });
-  } catch (error) {
-    console.error('Pay dues error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-
-// ─── Pay Dues from Wallet (full/partial) ───
-export const payDuesFromWallet = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const worker = await Worker.findById(req.user!.id);
-    if (!worker || worker.dues <= 0) {
-      res.status(400).json({ message: 'No dues to pay' });
-      return;
-    }
-
-    if (worker.balance <= 0) {
-      res.status(400).json({ message: 'Insufficient wallet balance to pay dues' });
-      return;
-    }
-
-    const deductedAmount = Math.min(worker.balance, worker.dues);
-    worker.balance -= deductedAmount;
-    worker.dues -= deductedAmount;
-
-    if (worker.dues <= 0) {
-      worker.dues = 0;
-      worker.duesSince = null;
-    }
-
-    await worker.save();
-
-    await Transaction.create({
-      tid: generateTID(),
-      worker: worker._id,
-      type: 'dues_wallet_deduct',
-      amount: deductedAmount,
-      method: 'online',
-      status: 'completed',
-    });
-
-    res.json({
-      message: worker.dues === 0
-        ? `Dues fully cleared by deducting ₹${deductedAmount} from wallet.`
-        : `₹${deductedAmount} deducted from wallet. ₹${worker.dues} dues still pending.`,
-      deductedAmount,
-      dues: worker.dues,
-      balance: worker.balance,
-      duesCleared: worker.dues === 0,
-    });
-  } catch (error) {
-    console.error('Pay dues from wallet error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-
-// ─── Verify Dues Payment ───
-export const verifyDuesPayment = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
-
-    const isValid = verifyPayment(razorpay_order_id, razorpay_payment_id, razorpay_signature);
-    if (!isValid) {
-      res.status(400).json({ message: 'Payment verification failed' });
-      return;
-    }
-
-    const worker = await Worker.findById(req.user!.id);
-    if (!worker) {
-      res.status(404).json({ message: 'Worker not found' });
-      return;
-    }
-
-    const paidAmount = worker.dues;
-    worker.dues = 0;
-    worker.duesSince = null; // Clear the dues timer
-    await worker.save();
-
-    await Transaction.create({
-      tid: generateTID(),
-      worker: worker._id,
-      type: 'dues_deposit',
-      amount: paidAmount,
-      method: 'online',
-      razorpayPaymentId: razorpay_payment_id,
-      razorpayOrderId: razorpay_order_id,
-      status: 'completed',
-    });
-
-    res.json({ message: 'Dues paid successfully', dues: 0 });
-  } catch (error) {
-    console.error('Verify dues payment error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };

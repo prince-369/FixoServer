@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
+const User_1 = require("./User");
 const workerSchema = new mongoose_1.Schema({
     fullName: { type: String, required: true, trim: true },
     phone: { type: String, required: true, unique: true, trim: true },
@@ -60,6 +61,12 @@ const workerSchema = new mongoose_1.Schema({
         coordinates: { type: [Number], default: [0, 0] },
         address: { type: String, default: '' },
     },
+    currentLocation: {
+        type: { type: String, enum: ['Point'], default: 'Point' },
+        coordinates: { type: [Number], default: undefined },
+        address: { type: String, default: '' },
+        updatedAt: { type: Date, default: null },
+    },
     categories: [{ type: mongoose_1.Schema.Types.ObjectId, ref: 'Category' }],
     bio: { type: String, default: '', maxlength: 1000 },
     regularPhone: { type: String, default: '' },
@@ -67,8 +74,6 @@ const workerSchema = new mongoose_1.Schema({
     profileImage: { type: String, default: '' },
     isActive: { type: Boolean, default: false },
     balance: { type: Number, default: 0 },
-    dues: { type: Number, default: 0 },
-    duesSince: { type: Date, default: null },
     bankDetails: {
         holderName: { type: String },
         bankName: { type: String },
@@ -81,9 +86,10 @@ const workerSchema = new mongoose_1.Schema({
     },
     totalWorkDone: { type: Number, default: 0 },
     totalEarnings: { type: Number, default: 0 },
-    totalCommissionPaid: { type: Number, default: 0 },
+    block: { type: User_1.blockSchemaDefinition, default: () => ({}) },
 }, { timestamps: true });
 workerSchema.index({ location: '2dsphere' });
+workerSchema.index({ currentLocation: '2dsphere' });
 workerSchema.index({ phone: 1 });
 workerSchema.index({ googleId: 1 });
 workerSchema.index({ accountStatus: 1 });

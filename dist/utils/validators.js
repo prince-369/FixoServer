@@ -28,8 +28,8 @@ exports.loginValidation = [
     (0, express_validator_1.body)('password').notEmpty().withMessage('Password is required'),
 ];
 exports.workerLoginValidation = [
-    (0, express_validator_1.body)('phone').trim().notEmpty().withMessage('Phone number is required')
-        .matches(/^[6-9]\d{9}$/).withMessage('Valid 10-digit Indian phone number required'),
+    (0, express_validator_1.body)('identifier').optional().trim(),
+    (0, express_validator_1.body)('phone').optional().trim(),
     (0, express_validator_1.body)('password').notEmpty().withMessage('Password is required'),
 ];
 exports.forgotPasswordValidation = [

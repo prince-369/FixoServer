@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.recordCouponRedemption = exports.validateAndPriceCoupon = exports.claimWorkerBonusTier = exports.notifyUnlockedBonusTiers = exports.recordCommissionSaving = exports.resolveActiveWorkerCommissionRate = exports.getCustomerEligibleCount = exports.audit = exports.DEFAULT_COMMISSION_RATE = void 0;
+exports.recordCouponRedemption = exports.validateAndPriceCoupon = exports.claimWorkerBonusTier = exports.notifyUnlockedBonusTiers = exports.getCustomerEligibleCount = exports.audit = void 0;
 const Booking_1 = __importDefault(require("../models/Booking"));
 const Transaction_1 = __importDefault(require("../models/Transaction"));
 const CouponCampaign_1 = __importDefault(require("../models/CouponCampaign"));
@@ -13,7 +13,6 @@ const PromotionRedemption_1 = __importDefault(require("../models/PromotionRedemp
 const IncentiveAuditLog_1 = __importDefault(require("../models/IncentiveAuditLog"));
 const generateTID_1 = require("../utils/generateTID");
 const socket_1 = require("../socket");
-exports.DEFAULT_COMMISSION_RATE = 0.20;
 // ───────────────────────────────────────────────────────────
 // Audit
 // ───────────────────────────────────────────────────────────
@@ -62,91 +61,6 @@ const isWithinBudget = (promo, addAmount) => {
         return true;
     return promo.spentBudget + addAmount <= promo.budgetLimit;
 };
-// ───────────────────────────────────────────────────────────
-// Resolve the effective commission rate for a worker right now.
-// Returns DEFAULT_COMMISSION_RATE when no promotion applies, so the
-// existing behaviour is byte-for-byte identical without campaigns.
-// `completedJobsBefore` = worker.totalWorkDone BEFORE this job is counted.
-// ───────────────────────────────────────────────────────────
-const resolveActiveWorkerCommissionRate = async (worker, completedJobsBefore) => {
-    try {
-        const now = new Date();
-        const promos = await WorkerPromotion_1.default.find({
-            type: { $in: ['reduced_commission', 'zero_commission'] },
-            isActive: true,
-            status: 'active',
-            startsAt: { $lte: now },
-            $or: [{ endsAt: null }, { endsAt: { $gte: now } }],
-        });
-        let bestRate = exports.DEFAULT_COMMISSION_RATE;
-        let bestPromo = null;
-        for (const promo of promos) {
-            if (!promotionAppliesToWorker(promo, worker))
-                continue;
-            let candidateRate = exports.DEFAULT_COMMISSION_RATE;
-            if (promo.type === 'zero_commission') {
-                if (promo.zeroCommissionScope === 'first_orders') {
-                    if (completedJobsBefore < (promo.firstOrdersCount ?? 0)) {
-                        candidateRate = 0;
-                    }
-                    else {
-                        continue; // worker has exhausted their free-order window
-                    }
-                }
-                else {
-                    // date_range scope — already filtered to within window above
-                    candidateRate = 0;
-                }
-            }
-            else if (promo.type === 'reduced_commission') {
-                candidateRate = promo.commissionRate ?? exports.DEFAULT_COMMISSION_RATE;
-            }
-            if (candidateRate < bestRate) {
-                bestRate = candidateRate;
-                bestPromo = promo;
-            }
-        }
-        return { rate: bestRate, promotion: bestPromo };
-    }
-    catch (error) {
-        console.error('resolveActiveWorkerCommissionRate error:', error);
-        return { rate: exports.DEFAULT_COMMISSION_RATE, promotion: null };
-    }
-};
-exports.resolveActiveWorkerCommissionRate = resolveActiveWorkerCommissionRate;
-// ───────────────────────────────────────────────────────────
-// Record commission savings from a promotion (for analytics).
-// ───────────────────────────────────────────────────────────
-const recordCommissionSaving = async (params) => {
-    try {
-        const saved = Math.max(0, params.fullCommission - params.actualCommission);
-        if (saved <= 0)
-            return;
-        await PromotionRedemption_1.default.create({
-            promotion: params.promotion._id,
-            worker: params.worker._id,
-            kind: 'commission_saving',
-            booking: params.booking,
-            commissionSaved: saved,
-            appliedRate: params.appliedRate,
-        });
-        params.promotion.spentBudget += saved;
-        await params.promotion.save();
-        await (0, exports.audit)({
-            action: 'commission_saving_applied',
-            actorId: params.worker._id,
-            actorModel: 'Worker',
-            targetType: 'WorkerPromotion',
-            targetId: params.promotion._id,
-            amount: saved,
-            meta: { bookingId: String(params.booking), appliedRate: params.appliedRate },
-        });
-    }
-    catch (error) {
-        console.error('recordCommissionSaving error:', error);
-    }
-};
-exports.recordCommissionSaving = recordCommissionSaving;
 // ───────────────────────────────────────────────────────────
 // Bonus tiers are CLAIM-BASED: the worker presses "Claim" on the
 // Offers page. After a job completes, this notifies the worker if

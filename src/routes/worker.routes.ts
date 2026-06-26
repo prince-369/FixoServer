@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { protect, authorize } from '../middlewares/auth.middleware';
+import { blockGuard } from '../middlewares/block.middleware';
 import { uploadAadhaar, uploadSingle } from '../middlewares/upload.middleware';
 import { handleValidationErrors } from '../middlewares/error.middleware';
 import { idempotencyGuard } from '../middlewares/idempotency.middleware';
@@ -11,7 +12,9 @@ import {
   completeProfile,
   toggleActive,
   updateLocation,
+  updateCurrentLocation,
   getDashboard,
+  getReviews,
   getWorkRequests,
   getWorkRequestDetail,
   submitBid,
@@ -28,9 +31,6 @@ import {
   saveBankDetails,
   requestWithdrawal,
   getWithdrawals,
-  payDues,
-  payDuesFromWallet,
-  verifyDuesPayment,
   getNotifications,
   markNotificationRead,
   markAllNotificationsRead,
@@ -48,6 +48,7 @@ const router = Router();
 const mutationGuard = idempotencyGuard(15_000);
 
 router.use(protect, authorize('worker'));
+router.use(blockGuard);
 
 router.get('/profile', getProfile);
 router.put('/profile', uploadSingle, updateProfile);
@@ -55,8 +56,10 @@ router.post('/ekyc/re-request', mutationGuard, uploadAadhaar, reRequestEKYC);
 router.post('/complete-profile', uploadSingle, completeProfile);
 router.put('/toggle-active', toggleActive);
 router.put('/location', updateLocation);
+router.put('/current-location', updateCurrentLocation);
 
 router.get('/dashboard', getDashboard);
+router.get('/reviews', getReviews);
 router.get('/work-requests', getWorkRequests);
 router.get('/work-requests/:id', getWorkRequestDetail);
 router.post('/work-requests/:bookingId/bid', bidValidation, handleValidationErrors, mutationGuard, submitBid);
@@ -76,9 +79,7 @@ router.put('/bank-details', bankDetailsValidation, handleValidationErrors, saveB
 router.post('/withdraw', withdrawalValidation, handleValidationErrors, mutationGuard, requestWithdrawal);
 router.get('/withdrawals', getWithdrawals);
 
-router.post('/dues/pay', mutationGuard, payDues);
-router.post('/dues/pay-wallet', mutationGuard, payDuesFromWallet);
-router.post('/dues/verify', mutationGuard, verifyDuesPayment);
+
 
 // Promotions & Incentives
 router.get('/promotions', getWorkerPromotions);

@@ -1,4 +1,5 @@
 import mongoose, { Document } from 'mongoose';
+import { type IBlockInfo } from './User';
 export type WorkerAccountStatus = 'test' | 'ekyc_pending' | 'ekyc_done' | 'approved' | 'rejected' | 'live';
 export interface IBankDetails {
     holderName: string;
@@ -28,6 +29,12 @@ export interface IWorker extends Document {
         coordinates: number[];
         address: string;
     };
+    currentLocation?: {
+        type: string;
+        coordinates: number[];
+        address?: string;
+        updatedAt?: Date;
+    };
     categories: mongoose.Types.ObjectId[];
     bio: string;
     regularPhone: string;
@@ -35,8 +42,6 @@ export interface IWorker extends Document {
     profileImage: string;
     isActive: boolean;
     balance: number;
-    dues: number;
-    duesSince?: Date | null;
     bankDetails?: IBankDetails;
     rating: {
         average: number;
@@ -44,7 +49,7 @@ export interface IWorker extends Document {
     };
     totalWorkDone: number;
     totalEarnings: number;
-    totalCommissionPaid: number;
+    block?: IBlockInfo;
     createdAt: Date;
     updatedAt: Date;
 }

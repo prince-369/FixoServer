@@ -295,15 +295,14 @@ const getWorkerPromotions = async (req, res) => {
             startsAt: { $lte: now },
             $or: [{ endsAt: null }, { endsAt: { $gte: now } }],
         }).sort({ createdAt: -1 });
-        const applicable = promos.filter((p) => p.appliesToAllWorkers || p.targetWorkers.some((id) => id.toString() === String(worker._id)));
+        // Only bonus-earning promotions remain — platform is free (no commission).
+        const applicable = promos.filter((p) => p.type === 'bonus_earning' &&
+            (p.appliesToAllWorkers || p.targetWorkers.some((id) => id.toString() === String(worker._id))));
         // Bonus claim records for this worker
         const redemptions = await PromotionRedemption_1.default.find({ worker: worker._id });
         const claimedTiers = new Set(redemptions
             .filter((r) => r.kind === 'bonus')
             .map((r) => `${String(r.promotion)}:${r.milestoneJobs}`));
-        const commissionSaved = redemptions
-            .filter((r) => r.kind === 'commission_saving')
-            .reduce((sum, r) => sum + (r.commissionSaved || 0), 0);
         const bonusEarned = redemptions
             .filter((r) => r.kind === 'bonus')
             .reduce((sum, r) => sum + (r.bonusAmount || 0), 0);
@@ -316,40 +315,24 @@ const getWorkerPromotions = async (req, res) => {
                 startsAt: p.startsAt,
                 endsAt: p.endsAt,
             };
-            if (p.type === 'bonus_earning') {
-                const tiers = (p.bonusTiers || []).map((t) => {
-                    const claimed = claimedTiers.has(`${String(p._id)}:${t.jobsRequired}`);
-                    const achieved = worker.totalWorkDone >= t.jobsRequired;
-                    return {
-                        jobsRequired: t.jobsRequired,
-                        bonusAmount: t.bonusAmount,
-                        progress: Math.min(worker.totalWorkDone, t.jobsRequired),
-                        progressPercent: Math.min(100, Math.round((worker.totalWorkDone / t.jobsRequired) * 100)),
-                        claimed,
-                        claimable: achieved && !claimed,
-                    };
-                });
-                return { ...base, bonusTiers: tiers };
-            }
-            if (p.type === 'reduced_commission') {
-                return { ...base, commissionRate: p.commissionRate, defaultRate: incentive_service_1.DEFAULT_COMMISSION_RATE };
-            }
-            // zero_commission
-            return {
-                ...base,
-                zeroCommissionScope: p.zeroCommissionScope,
-                firstOrdersCount: p.firstOrdersCount,
-                ordersUsed: Math.min(worker.totalWorkDone, p.firstOrdersCount || 0),
-            };
+            const tiers = (p.bonusTiers || []).map((t) => {
+                const claimed = claimedTiers.has(`${String(p._id)}:${t.jobsRequired}`);
+                const achieved = worker.totalWorkDone >= t.jobsRequired;
+                return {
+                    jobsRequired: t.jobsRequired,
+                    bonusAmount: t.bonusAmount,
+                    progress: Math.min(worker.totalWorkDone, t.jobsRequired),
+                    progressPercent: Math.min(100, Math.round((worker.totalWorkDone / t.jobsRequired) * 100)),
+                    claimed,
+                    claimable: achieved && !claimed,
+                };
+            });
+            return { ...base, bonusTiers: tiers };
         });
-        const { rate: currentRate } = await (0, incentive_service_1.resolveActiveWorkerCommissionRate)(worker, worker.totalWorkDone);
         res.json({
             promotions: promotionViews,
             summary: {
                 totalWorkDone: worker.totalWorkDone,
-                currentCommissionRate: currentRate,
-                defaultCommissionRate: incentive_service_1.DEFAULT_COMMISSION_RATE,
-                commissionSavedTotal: commissionSaved,
                 bonusEarnedTotal: bonusEarned,
             },
         });

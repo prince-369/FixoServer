@@ -1,8 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
-export type WorkerPromotionType = 'reduced_commission' | 'zero_commission' | 'bonus_earning';
+export type WorkerPromotionType = 'bonus_earning';
 export type WorkerPromotionStatus = 'active' | 'paused';
-export type ZeroCommissionScope = 'first_orders' | 'date_range';
 
 export interface IBonusTier {
   jobsRequired: number;
@@ -13,13 +12,6 @@ export interface IWorkerPromotion extends Document {
   title: string;
   description?: string;
   type: WorkerPromotionType;
-
-  // reduced_commission
-  commissionRate?: number;          // e.g. 0.10 (10%)
-
-  // zero_commission
-  zeroCommissionScope?: ZeroCommissionScope;
-  firstOrdersCount?: number;        // for 'first_orders' scope
 
   // bonus_earning
   bonusTiers?: IBonusTier[];
@@ -50,12 +42,9 @@ const workerPromotionSchema = new Schema<IWorkerPromotion>(
     description: { type: String, default: '' },
     type: {
       type: String,
-      enum: ['reduced_commission', 'zero_commission', 'bonus_earning'],
+      enum: ['bonus_earning'],
       required: true,
     },
-    commissionRate: { type: Number, min: 0, max: 1 },
-    zeroCommissionScope: { type: String, enum: ['first_orders', 'date_range'] },
-    firstOrdersCount: { type: Number, min: 1 },
     bonusTiers: [{
       jobsRequired: { type: Number, required: true, min: 1 },
       bonusAmount: { type: Number, required: true, min: 0 },

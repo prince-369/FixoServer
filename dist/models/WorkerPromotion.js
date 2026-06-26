@@ -39,12 +39,9 @@ const workerPromotionSchema = new mongoose_1.Schema({
     description: { type: String, default: '' },
     type: {
         type: String,
-        enum: ['reduced_commission', 'zero_commission', 'bonus_earning'],
+        enum: ['bonus_earning'],
         required: true,
     },
-    commissionRate: { type: Number, min: 0, max: 1 },
-    zeroCommissionScope: { type: String, enum: ['first_orders', 'date_range'] },
-    firstOrdersCount: { type: Number, min: 1 },
     bonusTiers: [{
             jobsRequired: { type: Number, required: true, min: 1 },
             bonusAmount: { type: Number, required: true, min: 0 },

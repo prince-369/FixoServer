@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
-export type PromotionRedemptionKind = 'commission_saving' | 'bonus';
+export type PromotionRedemptionKind = 'bonus';
 
 export interface IPromotionRedemption extends Document {
   promotion: mongoose.Types.ObjectId;
@@ -11,11 +11,6 @@ export interface IPromotionRedemption extends Document {
   milestoneJobs?: number;
   bonusAmount?: number;
 
-  // commission savings (per booking)
-  booking?: mongoose.Types.ObjectId;
-  commissionSaved?: number;
-  appliedRate?: number;
-
   createdAt: Date;
   updatedAt: Date;
 }
@@ -24,12 +19,9 @@ const promotionRedemptionSchema = new Schema<IPromotionRedemption>(
   {
     promotion: { type: Schema.Types.ObjectId, ref: 'WorkerPromotion', required: true },
     worker: { type: Schema.Types.ObjectId, ref: 'Worker', required: true },
-    kind: { type: String, enum: ['commission_saving', 'bonus'], required: true },
+    kind: { type: String, enum: ['bonus'], required: true },
     milestoneJobs: { type: Number },
     bonusAmount: { type: Number },
-    booking: { type: Schema.Types.ObjectId, ref: 'Booking' },
-    commissionSaved: { type: Number },
-    appliedRate: { type: Number },
   },
   { timestamps: true }
 );

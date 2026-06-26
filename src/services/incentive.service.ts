@@ -10,8 +10,6 @@ import { IWorker } from '../models/Worker';
 import { generateTID } from '../utils/generateTID';
 import { sendNotification } from '../socket';
 
-export const DEFAULT_COMMISSION_RATE = 0.20;
-
 // ───────────────────────────────────────────────────────────
 // Audit
 // ───────────────────────────────────────────────────────────
@@ -68,103 +66,6 @@ const promotionAppliesToWorker = (promo: IWorkerPromotion, worker: IWorker): boo
 const isWithinBudget = (promo: IWorkerPromotion, addAmount: number): boolean => {
   if (promo.budgetLimit == null) return true;
   return promo.spentBudget + addAmount <= promo.budgetLimit;
-};
-
-// ───────────────────────────────────────────────────────────
-// Resolve the effective commission rate for a worker right now.
-// Returns DEFAULT_COMMISSION_RATE when no promotion applies, so the
-// existing behaviour is byte-for-byte identical without campaigns.
-// `completedJobsBefore` = worker.totalWorkDone BEFORE this job is counted.
-// ───────────────────────────────────────────────────────────
-export const resolveActiveWorkerCommissionRate = async (
-  worker: IWorker,
-  completedJobsBefore: number
-): Promise<{ rate: number; promotion: IWorkerPromotion | null }> => {
-  try {
-    const now = new Date();
-    const promos = await WorkerPromotion.find({
-      type: { $in: ['reduced_commission', 'zero_commission'] },
-      isActive: true,
-      status: 'active',
-      startsAt: { $lte: now },
-      $or: [{ endsAt: null }, { endsAt: { $gte: now } }],
-    });
-
-    let bestRate = DEFAULT_COMMISSION_RATE;
-    let bestPromo: IWorkerPromotion | null = null;
-
-    for (const promo of promos) {
-      if (!promotionAppliesToWorker(promo, worker)) continue;
-
-      let candidateRate = DEFAULT_COMMISSION_RATE;
-
-      if (promo.type === 'zero_commission') {
-        if (promo.zeroCommissionScope === 'first_orders') {
-          if (completedJobsBefore < (promo.firstOrdersCount ?? 0)) {
-            candidateRate = 0;
-          } else {
-            continue; // worker has exhausted their free-order window
-          }
-        } else {
-          // date_range scope — already filtered to within window above
-          candidateRate = 0;
-        }
-      } else if (promo.type === 'reduced_commission') {
-        candidateRate = promo.commissionRate ?? DEFAULT_COMMISSION_RATE;
-      }
-
-      if (candidateRate < bestRate) {
-        bestRate = candidateRate;
-        bestPromo = promo;
-      }
-    }
-
-    return { rate: bestRate, promotion: bestPromo };
-  } catch (error) {
-    console.error('resolveActiveWorkerCommissionRate error:', error);
-    return { rate: DEFAULT_COMMISSION_RATE, promotion: null };
-  }
-};
-
-// ───────────────────────────────────────────────────────────
-// Record commission savings from a promotion (for analytics).
-// ───────────────────────────────────────────────────────────
-export const recordCommissionSaving = async (params: {
-  promotion: IWorkerPromotion;
-  worker: IWorker;
-  booking: mongoose.Types.ObjectId | string;
-  appliedRate: number;
-  fullCommission: number;
-  actualCommission: number;
-}): Promise<void> => {
-  try {
-    const saved = Math.max(0, params.fullCommission - params.actualCommission);
-    if (saved <= 0) return;
-
-    await PromotionRedemption.create({
-      promotion: params.promotion._id,
-      worker: params.worker._id,
-      kind: 'commission_saving',
-      booking: params.booking,
-      commissionSaved: saved,
-      appliedRate: params.appliedRate,
-    });
-
-    params.promotion.spentBudget += saved;
-    await params.promotion.save();
-
-    await audit({
-      action: 'commission_saving_applied',
-      actorId: params.worker._id as mongoose.Types.ObjectId,
-      actorModel: 'Worker',
-      targetType: 'WorkerPromotion',
-      targetId: params.promotion._id as mongoose.Types.ObjectId,
-      amount: saved,
-      meta: { bookingId: String(params.booking), appliedRate: params.appliedRate },
-    });
-  } catch (error) {
-    console.error('recordCommissionSaving error:', error);
-  }
 };
 
 // ───────────────────────────────────────────────────────────

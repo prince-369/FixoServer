@@ -36,7 +36,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getWorkerDetail = exports.getAllWorkers = exports.getCashPayments = exports.deleteChatbotQA = exports.updateChatbotQA = exports.createChatbotQA = exports.getChatbotQA = exports.deleteAdminNotification = exports.markAllAdminNotificationsRead = exports.markAdminNotificationRead = exports.getAdminNotifications = exports.rejectRefund = exports.processRefund = exports.getRefunds = exports.notifyWorkerDues = exports.replyHelpTicket = exports.resolveHelpTicket = exports.getHelpTickets = exports.getWorkerDues = exports.getCommissions = exports.getCustomers = exports.reorderBanners = exports.updateBanner = exports.deleteBanner = exports.createBanner = exports.getBanners = exports.deleteCategory = exports.updateCategoryDetails = exports.updateCategory = exports.createCategory = exports.getCategories = exports.declineWithdrawal = exports.completeWithdrawal = exports.getWithdrawals = exports.saveEkycCapture = exports.rejectWorker = exports.approveWorker = exports.updateVideoKycResult = exports.getWorkerEKYCDetails = exports.getPendingEKYC = exports.getAdminBootstrapStatus = exports.getPendingAdminBadges = exports.getDashboard = exports.clearDashboardCache = void 0;
+exports.markWaitlistReached = exports.getWaitlist = exports.personalNotification = exports.broadcastNotification = exports.broadcastToAudience = exports.getCancellationFlags = exports.unblockWorkerAccount = exports.blockWorkerAccount = exports.unblockCustomer = exports.blockCustomer = exports.getWorkerDetail = exports.getAllWorkers = exports.deleteChatbotQA = exports.updateChatbotQA = exports.createChatbotQA = exports.getChatbotQA = exports.deleteAdminNotification = exports.markAllAdminNotificationsRead = exports.markAdminNotificationRead = exports.getAdminNotifications = exports.rejectRefund = exports.processRefund = exports.getRefunds = exports.replyHelpTicket = exports.resolveHelpTicket = exports.getHelpTickets = exports.getCustomers = exports.reorderBanners = exports.updateBanner = exports.deleteBanner = exports.createBanner = exports.getBanners = exports.deleteCategory = exports.updateCategoryDetails = exports.updateCategory = exports.createCategory = exports.getCategories = exports.declineWithdrawal = exports.completeWithdrawal = exports.getWithdrawals = exports.saveEkycCapture = exports.rejectWorker = exports.approveWorker = exports.updateVideoKycResult = exports.getWorkerEKYCDetails = exports.getPendingEKYC = exports.getAdminBootstrapStatus = exports.getPendingAdminBadges = exports.getDashboard = exports.clearDashboardCache = void 0;
+exports.searchNotificationRecipients = void 0;
 const Worker_1 = __importDefault(require("../models/Worker"));
 const User_1 = __importDefault(require("../models/User"));
 const Booking_1 = __importDefault(require("../models/Booking"));
@@ -48,6 +49,13 @@ const HelpTicket_1 = __importDefault(require("../models/HelpTicket"));
 const RewardClaim_1 = __importDefault(require("../models/RewardClaim"));
 const ChatbotQA_1 = __importDefault(require("../models/ChatbotQA"));
 const socket_1 = require("../socket");
+const adminActivity_1 = require("../utils/adminActivity");
+const userBlock_1 = require("../utils/userBlock");
+const MobilePushToken_1 = __importDefault(require("../models/MobilePushToken"));
+const PushSubscription_1 = __importDefault(require("../models/PushSubscription"));
+const Waitlist_1 = __importDefault(require("../models/Waitlist"));
+const mobilePush_service_1 = require("../services/mobilePush.service");
+const webPush_service_1 = require("../services/webPush.service");
 const Notification_1 = __importDefault(require("../models/Notification"));
 const cloudinary_service_1 = require("../services/cloudinary.service");
 const adminBootstrap_service_1 = require("../services/adminBootstrap.service");
@@ -79,52 +87,10 @@ const getDashboard = async (_req, res) => {
             Booking_1.default.countDocuments({ status: 'cancelled' }),
             Booking_1.default.countDocuments({ status: 'in_progress' }),
         ]);
-        // Commission earnings
-        const commissionStats = await Transaction_1.default.aggregate([
-            { $match: { type: 'commission', status: 'completed' } },
-            { $group: { _id: null, total: { $sum: '$amount' } } },
-        ]);
-        // Monthly profit (last 30 days)
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        const monthlyProfit = await Transaction_1.default.aggregate([
-            {
-                $match: {
-                    type: { $in: ['commission', 'dues_deposit', 'dues_auto_deduct', 'dues_wallet_deduct'] },
-                    status: 'completed',
-                    createdAt: { $gte: thirtyDaysAgo },
-                },
-            },
-            { $group: { _id: null, total: { $sum: '$amount' } } },
-        ]);
-        // Total dues outstanding
-        const duesStats = await Worker_1.default.aggregate([
-            { $match: { dues: { $gt: 0 } } },
-            { $group: { _id: null, totalDues: { $sum: '$dues' }, count: { $sum: 1 } } },
-        ]);
-        // --- Chart Data: Last 7 days revenue (daily breakdown) ---
+        // --- Chart Data: Last 7 days bookings (daily) ---
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
         sevenDaysAgo.setHours(0, 0, 0, 0);
-        const dailyRevenue = await Transaction_1.default.aggregate([
-            {
-                $match: {
-                    type: { $in: ['commission', 'dues_deposit', 'dues_auto_deduct', 'dues_wallet_deduct'] },
-                    status: 'completed',
-                    createdAt: { $gte: sevenDaysAgo },
-                },
-            },
-            {
-                $group: {
-                    _id: {
-                        date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
-                        type: '$type',
-                    },
-                    total: { $sum: '$amount' },
-                },
-            },
-        ]);
-        // --- Chart Data: Last 7 days bookings (daily) ---
         const dailyBookings = await Booking_1.default.aggregate([
             { $match: { createdAt: { $gte: sevenDaysAgo } } },
             {
@@ -137,24 +103,13 @@ const getDashboard = async (_req, res) => {
                 },
             },
         ]);
-        // Build last 7 days arrays
-        const revenueChart = [];
+        // Build last 7 days bookings array
         const bookingsChart = [];
         for (let i = 6; i >= 0; i--) {
             const d = new Date();
             d.setDate(d.getDate() - i);
             const dateStr = d.toISOString().split('T')[0];
             const dayLabel = d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric' });
-            let commission = 0, dues = 0;
-            for (const r of dailyRevenue) {
-                if (r._id.date === dateStr) {
-                    if (r._id.type === 'commission')
-                        commission = r.total;
-                    else
-                        dues += r.total;
-                }
-            }
-            revenueChart.push({ date: dayLabel, commission, dues, total: commission + dues });
             let completed = 0, cancelled = 0, other = 0;
             for (const b of dailyBookings) {
                 if (b._id.date === dateStr) {
@@ -168,21 +123,6 @@ const getDashboard = async (_req, res) => {
             }
             bookingsChart.push({ date: dayLabel, completed, cancelled, other, total: completed + cancelled + other });
         }
-        // --- Donut: Revenue breakdown ---
-        const revenueBreakdown = await Transaction_1.default.aggregate([
-            { $match: { type: { $in: ['commission', 'dues_deposit', 'dues_auto_deduct', 'dues_wallet_deduct'] }, status: 'completed' } },
-            { $group: { _id: '$type', total: { $sum: '$amount' } } },
-        ]);
-        const revenueDonut = revenueBreakdown.map((r) => ({
-            name: r._id === 'commission'
-                ? 'Online Commission'
-                : r._id === 'dues_deposit'
-                    ? 'Dues (Razorpay)'
-                    : r._id === 'dues_wallet_deduct'
-                        ? 'Dues (Wallet)'
-                        : 'Dues (Auto-Deduct)',
-            value: r.total,
-        }));
         // --- Donut: Booking status distribution ---
         const bookingStatusAgg = await Booking_1.default.aggregate([
             { $group: { _id: '$status', count: { $sum: 1 } } },
@@ -241,13 +181,7 @@ const getDashboard = async (_req, res) => {
             totalCompleted,
             totalCancelled,
             totalInProgress,
-            totalCommissionEarnings: commissionStats[0]?.total || 0,
-            monthlyProfit: monthlyProfit[0]?.total || 0,
-            totalDuesOutstanding: duesStats[0]?.totalDues || 0,
-            workersWithDues: duesStats[0]?.count || 0,
-            revenueChart,
             bookingsChart,
-            revenueDonut,
             bookingStatusDonut,
             paymentMethodDonut,
             workerStatusDonut,
@@ -415,6 +349,7 @@ const approveWorker = async (req, res) => {
             worker,
         });
         (0, exports.clearDashboardCache)();
+        await (0, adminActivity_1.logAdminActivity)(req, { action: 'kyc.approve', category: 'kyc', targetType: 'worker', targetId: String(worker._id) });
         res.json({ message: 'Worker approved', worker });
     }
     catch (error) {
@@ -444,6 +379,7 @@ const rejectWorker = async (req, res) => {
             reason,
         });
         (0, exports.clearDashboardCache)();
+        await (0, adminActivity_1.logAdminActivity)(req, { action: 'kyc.reject', category: 'kyc', targetType: 'worker', targetId: String(worker._id) });
         res.json({ message: 'Worker rejected', worker });
     }
     catch (error) {
@@ -521,6 +457,7 @@ const completeWithdrawal = async (req, res) => {
             withdrawal,
         });
         (0, exports.clearDashboardCache)();
+        await (0, adminActivity_1.logAdminActivity)(req, { action: 'withdrawal.complete', category: 'withdrawals', targetType: 'withdrawal', targetId: String(withdrawal._id), amount: withdrawal.amount });
         res.json({ message: 'Withdrawal completed', withdrawal });
     }
     catch (error) {
@@ -557,6 +494,7 @@ const declineWithdrawal = async (req, res) => {
             reason,
             withdrawal,
         });
+        await (0, adminActivity_1.logAdminActivity)(req, { action: 'withdrawal.decline', category: 'withdrawals', targetType: 'withdrawal', targetId: String(withdrawal._id), amount: withdrawal.amount });
         res.json({ message: 'Withdrawal declined, amount refunded to worker', withdrawal });
     }
     catch (error) {
@@ -589,6 +527,11 @@ const createCategory = async (req, res) => {
         (0, socket_1.notifyRole)('customer', 'service_updated', { action: 'created', category });
         (0, socket_1.notifyRole)('worker', 'service_updated', { action: 'created', category });
         (0, socket_1.notifyRole)('admin', 'service_updated', { action: 'created', category });
+        // Auto-announce the new service to every customer and worker
+        // (in-app notification + live banner + push).
+        const data = { categoryId: String(category._id) };
+        void (0, exports.broadcastToAudience)('customer', 'New Service Available! 🎉', `You can now get "${category.name}" done on Fixo. Book this service now!`, data, 'service_added').catch(() => { });
+        void (0, exports.broadcastToAudience)('worker', 'New Service Added! 🛠️', `You can now take "${category.name}" jobs. Update your skills in Settings if you offer this service.`, data, 'service_added').catch(() => { });
         res.status(201).json({ message: 'Category created', category });
     }
     catch (error) {
@@ -1018,124 +961,6 @@ const getCustomers = async (req, res) => {
     }
 };
 exports.getCustomers = getCustomers;
-// ─── Commission Details ───
-const getCommissions = async (_req, res) => {
-    try {
-        // Detailed per-transaction commission list with customer + worker + booking info
-        const commissions = await Transaction_1.default.find({ type: 'commission', status: 'completed' })
-            .populate('worker', 'fullName phone profileImage')
-            .populate({
-            path: 'booking',
-            select: 'workDescription category amount paymentMethod customer',
-            populate: [
-                { path: 'category', select: 'name' },
-                { path: 'customer', select: 'fullName phone' },
-            ],
-        })
-            .sort({ createdAt: -1 });
-        const totalCommission = commissions.reduce((sum, c) => sum + c.amount, 0);
-        // Per-worker breakdown
-        const perWorker = await Transaction_1.default.aggregate([
-            { $match: { type: 'commission', status: 'completed' } },
-            {
-                $group: {
-                    _id: '$worker',
-                    total: { $sum: '$amount' },
-                    count: { $sum: 1 },
-                },
-            },
-            {
-                $lookup: {
-                    from: 'workers',
-                    localField: '_id',
-                    foreignField: '_id',
-                    as: 'worker',
-                },
-            },
-            { $unwind: '$worker' },
-            { $sort: { total: -1 } },
-        ]);
-        // Dues income (paid dues deposits — platform revenue from cash surcharges)
-        const duesIncome = await Transaction_1.default.aggregate([
-            { $match: { type: { $in: ['dues_deposit', 'dues_auto_deduct', 'dues_wallet_deduct'] }, status: 'completed' } },
-            { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } },
-        ]);
-        // Total revenue = online commissions + cash dues collected
-        const totalDuesCollected = duesIncome[0]?.total || 0;
-        res.json({
-            commissions,
-            totalCommission,
-            totalDuesCollected,
-            totalRevenue: totalCommission + totalDuesCollected,
-            perWorker,
-            commissionRate: '20%',
-        });
-    }
-    catch (error) {
-        console.error('Get commissions error:', error);
-        res.status(500).json({ message: 'Server error' });
-    }
-};
-exports.getCommissions = getCommissions;
-// ─── Worker Dues ───
-const getWorkerDues = async (_req, res) => {
-    try {
-        // Workers with outstanding dues — include duesSince for overdue calculation
-        const workersWithDues = await Worker_1.default.find({ dues: { $gt: 0 } })
-            .select('fullName phone dues duesSince profileImage balance')
-            .sort({ dues: -1 });
-        const collectedByWorker = await Transaction_1.default.aggregate([
-            { $match: { type: { $in: ['dues_deposit', 'dues_auto_deduct', 'dues_wallet_deduct'] }, status: 'completed' } },
-            { $group: { _id: '$worker', totalCollected: { $sum: '$amount' } } },
-        ]);
-        const collectedMap = new Map(collectedByWorker
-            .filter((row) => row?._id)
-            .map((row) => [String(row._id), row.totalCollected || 0]));
-        // Enrich with overdue status
-        const enrichedDues = workersWithDues.map((w) => {
-            const obj = w.toObject();
-            const daysSinceDues = w.duesSince
-                ? Math.floor((Date.now() - new Date(w.duesSince).getTime()) / (1000 * 60 * 60 * 24))
-                : 0;
-            return {
-                ...obj,
-                duesPending: obj.dues || 0,
-                duesCollectedTotal: collectedMap.get(String(obj._id)) || 0,
-                daysSinceDues,
-                isOverdue: daysSinceDues >= 10,
-                withdrawalDisabled: obj.dues > 0,
-            };
-        });
-        // Paid dues history (Razorpay payments + auto-deductions)
-        const workersPaidDues = await Transaction_1.default.find({
-            type: { $in: ['dues_deposit', 'dues_auto_deduct', 'dues_wallet_deduct'] },
-            status: 'completed',
-        })
-            .populate('worker', 'fullName phone profileImage')
-            .sort({ createdAt: -1 })
-            .limit(100);
-        // Summary stats
-        const totalOutstanding = workersWithDues.reduce((s, w) => s + (w.dues || 0), 0);
-        const totalCollected = await Transaction_1.default.aggregate([
-            { $match: { type: { $in: ['dues_deposit', 'dues_auto_deduct', 'dues_wallet_deduct'] }, status: 'completed' } },
-            { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } },
-        ]);
-        const overdueCount = enrichedDues.filter((d) => d.isOverdue).length;
-        res.json({
-            workersWithDues: enrichedDues,
-            workersPaidDues,
-            totalOutstanding,
-            totalCollected: totalCollected[0]?.total || 0,
-            totalPayments: totalCollected[0]?.count || 0,
-            overdueCount,
-        });
-    }
-    catch (error) {
-        console.error('Get worker dues error:', error);
-        res.status(500).json({ message: 'Server error' });
-    }
-};
-exports.getWorkerDues = getWorkerDues;
 // ─── Help Tickets ───
 const getHelpTickets = async (req, res) => {
     try {
@@ -1266,6 +1091,7 @@ const resolveHelpTicket = async (req, res) => {
                 });
             }
         }
+        await (0, adminActivity_1.logAdminActivity)(req, { action: 'ticket.resolve', category: 'support', targetType: 'ticket', targetId: String(ticket?._id || ''), meta: { userModel: ticket?.userModel } });
         res.json({ message: 'Ticket resolved', ticket });
     }
     catch (error) {
@@ -1314,30 +1140,6 @@ const replyHelpTicket = async (req, res) => {
     }
 };
 exports.replyHelpTicket = replyHelpTicket;
-// ─── Notify Worker About Dues ───
-const notifyWorkerDues = async (req, res) => {
-    try {
-        const worker = await Worker_1.default.findById(req.params.workerId);
-        if (!worker || worker.dues <= 0) {
-            res.status(404).json({ message: 'Worker not found or no dues pending' });
-            return;
-        }
-        await (0, socket_1.sendNotification)({
-            recipientId: worker._id.toString(),
-            recipientModel: 'Worker',
-            type: 'dues_reminder',
-            title: 'Dues Payment Reminder',
-            message: `You have ₹${worker.dues} in pending cash surcharge dues. Please pay at your earliest convenience.`,
-            data: { dues: worker.dues },
-        });
-        res.json({ message: 'Dues notification sent to worker' });
-    }
-    catch (error) {
-        console.error('Notify worker dues error:', error);
-        res.status(500).json({ message: 'Server error' });
-    }
-};
-exports.notifyWorkerDues = notifyWorkerDues;
 // ─── Get Pending Refunds ───
 const getRefunds = async (_req, res) => {
     try {
@@ -1415,6 +1217,7 @@ const processRefund = async (req, res) => {
             data: { bookingId: booking._id },
         });
         (0, exports.clearDashboardCache)();
+        await (0, adminActivity_1.logAdminActivity)(req, { action: 'refund.process', category: 'refunds', targetType: 'booking', targetId: String(booking._id), amount: booking.amount });
         res.json({ message: 'Refund processed', booking });
     }
     catch (error) {
@@ -1456,6 +1259,7 @@ const rejectRefund = async (req, res) => {
             message: `Your refund request has been rejected. Reason: ${reason}`,
             data: { bookingId: booking._id },
         });
+        await (0, adminActivity_1.logAdminActivity)(req, { action: 'refund.reject', category: 'refunds', targetType: 'booking', targetId: String(booking._id) });
         res.json({ message: 'Refund rejected', booking });
     }
     catch (error) {
@@ -1549,24 +1353,6 @@ const deleteChatbotQA = async (req, res) => {
     }
 };
 exports.deleteChatbotQA = deleteChatbotQA;
-// ─── Cash Payments by Customers ───
-const getCashPayments = async (_req, res) => {
-    try {
-        const cashBookings = await Booking_1.default.find({
-            paymentMethod: 'cash',
-            status: 'completed',
-        })
-            .populate('customer', 'fullName phone')
-            .populate('assignedWorker', 'fullName phone dues')
-            .sort({ updatedAt: -1 });
-        res.json({ cashBookings });
-    }
-    catch (error) {
-        console.error('Get cash payments error:', error);
-        res.status(500).json({ message: 'Server error' });
-    }
-};
-exports.getCashPayments = getCashPayments;
 // ─── Workers List ───
 const getAllWorkers = async (req, res) => {
     try {
@@ -1582,7 +1368,7 @@ const getAllWorkers = async (req, res) => {
             ];
         }
         const workers = await Worker_1.default.find(filter)
-            .select('fullName phone profileImage accountStatus isActive categories rating totalWorkDone totalEarnings balance dues createdAt')
+            .select('fullName phone profileImage accountStatus isActive categories rating totalWorkDone totalEarnings balance block createdAt')
             .populate('categories', 'name')
             .sort({ createdAt: -1 });
         const [statTotal, statLive, statPending, statRejected] = await Promise.all([
@@ -1657,4 +1443,319 @@ const getWorkerDetail = async (req, res) => {
     }
 };
 exports.getWorkerDetail = getWorkerDetail;
+// ───────────────────────────────────────────────────────────────
+// Cancellation moderation: temporary block / unblock + flag watch
+// ───────────────────────────────────────────────────────────────
+const applyBlock = (doc, hours, reason, adminId) => {
+    if (!doc.block)
+        doc.block = {};
+    doc.block.isBlocked = true;
+    doc.block.reason = reason || 'Temporarily restricted for excessive cancellations.';
+    doc.block.blockedAt = new Date();
+    doc.block.blockedUntil = new Date(Date.now() + hours * 60 * 60 * 1000);
+    doc.block.blockedBy = adminId;
+    doc.block.blockCount = (doc.block.blockCount || 0) + 1;
+};
+const clearBlock = (doc) => {
+    if (!doc.block)
+        doc.block = {};
+    doc.block.isBlocked = false;
+    doc.block.reason = '';
+    doc.block.blockedAt = null;
+    doc.block.blockedUntil = null;
+    doc.block.blockedBy = null;
+};
+const blockCustomer = async (req, res) => {
+    try {
+        const hours = Number(req.body?.hours);
+        const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+        if (!hours || hours <= 0 || hours > 720) {
+            res.status(400).json({ message: 'Provide valid block hours (1-720)' });
+            return;
+        }
+        const user = await User_1.default.findById(req.params.id);
+        if (!user) {
+            res.status(404).json({ message: 'Customer not found' });
+            return;
+        }
+        applyBlock(user, hours, reason, req.user.id);
+        await user.save();
+        (0, socket_1.notifyUser)(user._id.toString(), 'account_blocked', { block: (0, userBlock_1.blockPayload)(user.block) });
+        await (0, adminActivity_1.logAdminActivity)(req, { action: 'customer.block', category: 'moderation', targetType: 'customer', targetId: String(user._id), meta: { hours, reason } });
+        res.json({ message: `Customer blocked for ${hours} hours`, block: (0, userBlock_1.blockPayload)(user.block) });
+    }
+    catch (error) {
+        console.error('Block customer error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.blockCustomer = blockCustomer;
+const unblockCustomer = async (req, res) => {
+    try {
+        const user = await User_1.default.findById(req.params.id);
+        if (!user) {
+            res.status(404).json({ message: 'Customer not found' });
+            return;
+        }
+        clearBlock(user);
+        await user.save();
+        (0, socket_1.notifyUser)(user._id.toString(), 'account_unblocked', {});
+        await (0, adminActivity_1.logAdminActivity)(req, { action: 'customer.unblock', category: 'moderation', targetType: 'customer', targetId: String(user._id) });
+        res.json({ message: 'Customer unblocked' });
+    }
+    catch (error) {
+        console.error('Unblock customer error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.unblockCustomer = unblockCustomer;
+const blockWorkerAccount = async (req, res) => {
+    try {
+        const hours = Number(req.body?.hours);
+        const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+        if (!hours || hours <= 0 || hours > 720) {
+            res.status(400).json({ message: 'Provide valid block hours (1-720)' });
+            return;
+        }
+        const worker = await Worker_1.default.findById(req.params.id);
+        if (!worker) {
+            res.status(404).json({ message: 'Worker not found' });
+            return;
+        }
+        applyBlock(worker, hours, reason, req.user.id);
+        await worker.save();
+        (0, socket_1.notifyUser)(worker._id.toString(), 'account_blocked', { block: (0, userBlock_1.blockPayload)(worker.block) });
+        await (0, adminActivity_1.logAdminActivity)(req, { action: 'worker.block', category: 'moderation', targetType: 'worker', targetId: String(worker._id), meta: { hours, reason } });
+        res.json({ message: `Worker blocked for ${hours} hours`, block: (0, userBlock_1.blockPayload)(worker.block) });
+    }
+    catch (error) {
+        console.error('Block worker error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.blockWorkerAccount = blockWorkerAccount;
+const unblockWorkerAccount = async (req, res) => {
+    try {
+        const worker = await Worker_1.default.findById(req.params.id);
+        if (!worker) {
+            res.status(404).json({ message: 'Worker not found' });
+            return;
+        }
+        clearBlock(worker);
+        await worker.save();
+        (0, socket_1.notifyUser)(worker._id.toString(), 'account_unblocked', {});
+        await (0, adminActivity_1.logAdminActivity)(req, { action: 'worker.unblock', category: 'moderation', targetType: 'worker', targetId: String(worker._id) });
+        res.json({ message: 'Worker unblocked' });
+    }
+    catch (error) {
+        console.error('Unblock worker error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.unblockWorkerAccount = unblockWorkerAccount;
+// Customers / workers with many recent cancellations (default: >= 3 in 24h).
+const getCancellationFlags = async (req, res) => {
+    try {
+        const hours = Math.min(168, Math.max(1, Number(req.query.hours) || 24));
+        const min = Math.max(2, Number(req.query.min) || 3);
+        const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+        const [custAgg, workAgg] = await Promise.all([
+            Booking_1.default.aggregate([
+                { $match: { 'cancellation.cancelledBy': 'customer', 'cancellation.cancelledAt': { $gte: since } } },
+                { $group: { _id: '$customer', count: { $sum: 1 }, lastAt: { $max: '$cancellation.cancelledAt' } } },
+                { $match: { count: { $gte: min } } },
+                { $sort: { count: -1 } },
+            ]),
+            Booking_1.default.aggregate([
+                { $match: { 'cancellation.cancelledBy': 'worker', 'cancellation.cancelledAt': { $gte: since } } },
+                { $group: { _id: '$assignedWorker', count: { $sum: 1 }, lastAt: { $max: '$cancellation.cancelledAt' } } },
+                { $match: { count: { $gte: min } } },
+                { $sort: { count: -1 } },
+            ]),
+        ]);
+        const custIds = custAgg.map((c) => c._id).filter(Boolean);
+        const workIds = workAgg.map((w) => w._id).filter(Boolean);
+        const [users, workers] = await Promise.all([
+            User_1.default.find({ _id: { $in: custIds } }).select('fullName phone email profileImage block'),
+            Worker_1.default.find({ _id: { $in: workIds } }).select('fullName phone email profileImage block'),
+        ]);
+        const uMap = new Map(users.map((u) => [String(u._id), u]));
+        const wMap = new Map(workers.map((w) => [String(w._id), w]));
+        const customers = custAgg
+            .map((c) => {
+            const u = uMap.get(String(c._id));
+            return u ? { _id: u._id, fullName: u.fullName, phone: u.phone, email: u.email, profileImage: u.profileImage, cancelCount: c.count, lastAt: c.lastAt, block: (0, userBlock_1.blockPayload)(u.block) } : null;
+        })
+            .filter(Boolean);
+        const flaggedWorkers = workAgg
+            .map((w) => {
+            const d = wMap.get(String(w._id));
+            return d ? { _id: d._id, fullName: d.fullName, phone: d.phone, email: d.email, profileImage: d.profileImage, cancelCount: w.count, lastAt: w.lastAt, block: (0, userBlock_1.blockPayload)(d.block) } : null;
+        })
+            .filter(Boolean);
+        res.json({ window: { hours, min }, customers, workers: flaggedWorkers });
+    }
+    catch (error) {
+        console.error('Get cancellation flags error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.getCancellationFlags = getCancellationFlags;
+// ───────────────────────────────────────────────────────────────
+// Admin push / broadcast notifications (Swiggy/Zomato style)
+// ───────────────────────────────────────────────────────────────
+const resolveAudience = (raw) => raw === 'worker'
+    ? { Model: Worker_1.default, recipientModel: 'Worker', role: 'worker' }
+    : { Model: User_1.default, recipientModel: 'User', role: 'customer' };
+// Best-effort push fan-out to everyone who has a registered device/browser.
+const broadcastPushToTokenHolders = async (recipientModel, title, message, data) => {
+    try {
+        const [mobileIds, webIds] = await Promise.all([
+            MobilePushToken_1.default.find({ recipientModel, isActive: true }).distinct('recipient'),
+            PushSubscription_1.default.find({ recipientModel }).distinct('recipient'),
+        ]);
+        const unique = new Set([...mobileIds.map(String), ...webIds.map(String)]);
+        const now = new Date();
+        for (const recipientId of unique) {
+            const payload = { recipientId, recipientModel, notificationId: 'broadcast', type: 'admin_broadcast', title, message, data, createdAt: now };
+            await Promise.allSettled([(0, mobilePush_service_1.sendMobilePushNotification)(payload), (0, webPush_service_1.sendWebPushNotification)(payload)]);
+        }
+    }
+    catch (error) {
+        console.error('Broadcast push fan-out error:', error);
+    }
+};
+// Core broadcast: in-app (bulk) + live socket + background push fan-out.
+// Returns how many recipients received the in-app notification.
+const broadcastToAudience = async (audience, title, message, data = {}, type = 'admin_broadcast') => {
+    const { Model, recipientModel, role } = resolveAudience(audience);
+    const filter = recipientModel === 'User' ? { isActive: { $ne: false } } : {};
+    const recipients = await Model.find(filter).select('_id').lean();
+    if (recipients.length) {
+        const docs = recipients.map((r) => ({ recipient: r._id, recipientModel, type, title, message, data }));
+        await Notification_1.default.insertMany(docs, { ordered: false }).catch(() => { });
+    }
+    (0, socket_1.notifyRole)(role, 'notification_event', { type, title, message, isRead: false, createdAt: new Date(), data });
+    void broadcastPushToTokenHolders(recipientModel, title, message, data);
+    return recipients.length;
+};
+exports.broadcastToAudience = broadcastToAudience;
+// POST /admin/push/:audience/broadcast  — send to ALL customers or ALL workers
+const broadcastNotification = async (req, res) => {
+    try {
+        const audience = String(req.params.audience) === 'worker' ? 'worker' : 'customer';
+        const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+        const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+        if (!title || !message) {
+            res.status(400).json({ message: 'Title and message are required' });
+            return;
+        }
+        if (title.length > 120 || message.length > 500) {
+            res.status(400).json({ message: 'Title/message too long' });
+            return;
+        }
+        const count = await (0, exports.broadcastToAudience)(audience, title, message, { broadcast: true });
+        await (0, adminActivity_1.logAdminActivity)(req, { action: `notify.broadcast.${audience}`, category: 'notifications', meta: { count, title } });
+        res.json({ message: `Notification sent to ${count} ${audience}s`, count });
+    }
+    catch (error) {
+        console.error('Broadcast notification error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.broadcastNotification = broadcastNotification;
+// POST /admin/push/:audience/personal  — send to one selected user
+const personalNotification = async (req, res) => {
+    try {
+        const { Model, recipientModel, role } = resolveAudience(String(req.params.audience));
+        const recipientId = typeof req.body?.recipientId === 'string' ? req.body.recipientId : '';
+        const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+        const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+        if (!recipientId || !title || !message) {
+            res.status(400).json({ message: 'Recipient, title and message are required' });
+            return;
+        }
+        const exists = await Model.exists({ _id: recipientId });
+        if (!exists) {
+            res.status(404).json({ message: `${role} not found` });
+            return;
+        }
+        // sendNotification already does in-app + socket + web/mobile push.
+        await (0, socket_1.sendNotification)({ recipientId, recipientModel, type: 'admin_personal', title, message, data: { personal: true } });
+        await (0, adminActivity_1.logAdminActivity)(req, { action: `notify.personal.${role}`, category: 'notifications', targetType: role, targetId: recipientId, meta: { title } });
+        res.json({ message: 'Notification sent' });
+    }
+    catch (error) {
+        console.error('Personal notification error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.personalNotification = personalNotification;
+// GET /admin/waitlist — locations customers requested where Fixo isn't available yet
+const getWaitlist = async (req, res) => {
+    try {
+        const status = req.query.status === 'reached' ? 'reached' : 'pending';
+        const [waitlist, pendingCount, reachedCount] = await Promise.all([
+            Waitlist_1.default.find({ status }).populate('user', 'fullName phone email').sort({ createdAt: -1 }).limit(300).lean(),
+            Waitlist_1.default.countDocuments({ status: 'pending' }),
+            Waitlist_1.default.countDocuments({ status: 'reached' }),
+        ]);
+        res.json({ waitlist, stats: { pending: pendingCount, reached: reachedCount } });
+    }
+    catch (error) {
+        console.error('Get waitlist error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.getWaitlist = getWaitlist;
+const markWaitlistReached = async (req, res) => {
+    try {
+        const entry = await Waitlist_1.default.findByIdAndUpdate(req.params.id, { status: 'reached' }, { new: true });
+        if (!entry) {
+            res.status(404).json({ message: 'Entry not found' });
+            return;
+        }
+        (0, socket_1.notifyUser)(entry.user.toString(), 'notification_event', {
+            type: 'service_added',
+            title: 'Great news! 🎉',
+            message: 'Fixo is now available in your requested area. You can book a service now!',
+            isRead: false, createdAt: new Date(), data: {},
+        });
+        await (0, socket_1.sendNotification)({
+            recipientId: entry.user.toString(), recipientModel: 'User', type: 'service_added',
+            title: 'Great news! 🎉', message: 'Fixo is now available in your requested area. You can book a service now!',
+        });
+        await (0, adminActivity_1.logAdminActivity)(req, { action: 'waitlist.reached', category: 'general', targetType: 'waitlist', targetId: String(entry._id) });
+        res.json({ message: 'Marked as reached & customer notified' });
+    }
+    catch (error) {
+        console.error('Mark waitlist reached error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.markWaitlistReached = markWaitlistReached;
+// GET /admin/push/:audience/recipients?q=  — search users for the personal picker
+const searchNotificationRecipients = async (req, res) => {
+    try {
+        const { Model } = resolveAudience(String(req.params.audience));
+        const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+        const filter = q
+            ? { $or: [
+                    { fullName: { $regex: q, $options: 'i' } },
+                    { phone: { $regex: q, $options: 'i' } },
+                    { email: { $regex: q, $options: 'i' } },
+                ] }
+            : {};
+        const recipients = await Model.find(filter)
+            .select('fullName phone email profileImage')
+            .sort({ createdAt: -1 })
+            .limit(20);
+        res.json({ recipients });
+    }
+    catch (error) {
+        console.error('Search recipients error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.searchNotificationRecipients = searchNotificationRecipients;
 //# sourceMappingURL=admin.controller.js.map

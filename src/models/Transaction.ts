@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
-export type TransactionType = 'booking_payment' | 'worker_earning' | 'refund' | 'withdrawal' | 'commission' | 'dues_deposit' | 'dues_auto_deduct' | 'dues_wallet_deduct' | 'reward_payout' | 'worker_bonus';
+export type TransactionType = 'booking_payment' | 'worker_earning' | 'refund' | 'withdrawal' | 'reward_payout' | 'worker_bonus';
 export type TransactionMethod = 'online' | 'cash';
 export type TransactionStatus = 'pending' | 'completed' | 'failed';
 
@@ -26,7 +26,7 @@ const transactionSchema = new Schema<ITransaction>(
     worker: { type: Schema.Types.ObjectId, ref: 'Worker' },
     type: {
       type: String,
-      enum: ['booking_payment', 'worker_earning', 'refund', 'withdrawal', 'commission', 'dues_deposit', 'dues_auto_deduct', 'dues_wallet_deduct', 'reward_payout', 'worker_bonus'],
+      enum: ['booking_payment', 'worker_earning', 'refund', 'withdrawal', 'reward_payout', 'worker_bonus'],
       required: true,
     },
     amount: { type: Number, required: true },

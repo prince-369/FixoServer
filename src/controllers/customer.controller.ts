@@ -1,7 +1,10 @@
 import { Request, Response } from 'express';
 import crypto from 'crypto';
 import User from '../models/User';
+import Worker from '../models/Worker';
+import Waitlist from '../models/Waitlist';
 import Booking from '../models/Booking';
+import WorkBid from '../models/WorkBid';
 import Transaction from '../models/Transaction';
 import Category from '../models/Category';
 import Banner from '../models/Banner';
@@ -242,6 +245,67 @@ export const getCategories = async (_req: Request, res: Response): Promise<void>
   }
 };
 
+const SERVICE_RADIUS_METERS = 10_000;
+const EARTH_RADIUS_METERS = 6_378_137;
+
+// ─── Service availability at a location (any live worker within ~10km) ───
+export const getServiceAvailability = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      res.status(400).json({ message: 'Valid lat and lng are required' });
+      return;
+    }
+    const within = { $geoWithin: { $centerSphere: [[lng, lat], SERVICE_RADIUS_METERS / EARTH_RADIUS_METERS] } };
+    const count = await Worker.countDocuments({
+      accountStatus: 'live',
+      isActive: true,
+      $or: [{ currentLocation: within }, { location: within }],
+    });
+    res.json({ available: count > 0, workerCount: count });
+  } catch (error) {
+    console.error('Service availability error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─── Join the waitlist for a location we don't yet serve ───
+export const joinWaitlist = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const lat = Number(req.body?.latitude);
+    const lng = Number(req.body?.longitude);
+    const address = typeof req.body?.address === 'string' ? req.body.address.trim() : '';
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      res.status(400).json({ message: 'Valid location is required' });
+      return;
+    }
+    // Avoid stacking duplicate pending requests for nearly the same spot.
+    const dupe = await Waitlist.findOne({
+      user: req.user!.id,
+      status: 'pending',
+      location: { $geoWithin: { $centerSphere: [[lng, lat], 500 / EARTH_RADIUS_METERS] } },
+    });
+    if (dupe) {
+      res.json({ message: 'You are already on the waitlist for this area' });
+      return;
+    }
+    await Waitlist.create({ user: req.user!.id, location: { type: 'Point', coordinates: [lng, lat], address }, status: 'pending' });
+
+    sendAdminNotification({
+      type: 'waitlist_request',
+      title: 'New Service Area Request',
+      message: `A customer requested Fixo at: ${address || `${lat.toFixed(4)}, ${lng.toFixed(4)}`}`,
+      data: {},
+    }).catch(() => {});
+
+    res.status(201).json({ message: 'Added to waitlist' });
+  } catch (error) {
+    console.error('Join waitlist error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 // ─── Get Category Detail ───
 export const getCategoryDetail = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -336,7 +400,20 @@ export const getBookingDetail = async (req: Request, res: Response): Promise<voi
       return;
     }
 
-    res.json({ booking });
+    // Check if the assigned worker is currently busy on another active job.
+    // This helps the customer know the worker is occupied and won't see live location for another job.
+    let workerBusy = false;
+    if (booking.assignedWorker && ['worker_accepted', 'worker_approved', 'payment_done', 'in_progress'].includes(booking.status)) {
+      const workerId = typeof booking.assignedWorker === 'object' ? (booking.assignedWorker as any)._id : booking.assignedWorker;
+      const otherActiveJob = await Booking.findOne({
+        assignedWorker: workerId,
+        status: { $in: ['worker_approved', 'payment_done', 'in_progress'] },
+        _id: { $ne: booking._id },
+      });
+      workerBusy = Boolean(otherActiveJob);
+    }
+
+    res.json({ booking, workerBusy });
   } catch (error) {
     console.error('Get booking detail error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -381,15 +458,7 @@ export const revealCompletionCode = async (req: Request, res: Response): Promise
 
     if (booking.assignedWorker) {
       notifyUser(booking.assignedWorker.toString(), 'booking_status_updated', payload);
-
-      await sendNotification({
-        recipientId: booking.assignedWorker.toString(),
-        recipientModel: 'Worker',
-        type: 'completion_code_revealed',
-        title: 'Completion Code Revealed',
-        message: 'Customer has revealed the completion code. Proceed only after confirming work is fully done.',
-        data: { bookingId: booking._id },
-      });
+      // No persistent notification to worker for code reveal — realtime event updates the UI.
     }
 
     notifyUser(req.user!.id, 'booking_status_updated', payload);
@@ -489,6 +558,24 @@ export const cancelBooking = async (req: Request, res: Response): Promise<void> 
         { $set: { status: 'failed' } }
       );
     }
+
+    // Notify every worker who bid on this booking so it disappears from their
+    // available list in real-time (and they know it was cancelled).
+    try {
+      const bidders = await WorkBid.find({ booking: booking._id }).select('worker');
+      const notified = new Set<string>();
+      for (const b of bidders) {
+        const wid = b.worker.toString();
+        if (notified.has(wid)) continue;
+        notified.add(wid);
+        notifyUser(wid, 'booking_status_updated', {
+          bookingId: booking._id,
+          status: 'cancelled',
+          cancelledBy: 'customer',
+          reason: booking.cancellation.reason,
+        });
+      }
+    } catch { /* non-blocking */ }
 
     // Notify assigned worker if any
     if (booking.assignedWorker) {
@@ -596,6 +683,27 @@ export const submitReview = async (req: Request, res: Response): Promise<void> =
         worker.rating = { average: Math.round(newAvg * 10) / 10, count: newCount };
         await worker.save();
       }
+
+      // Notify worker about the rating they received
+      const starEmoji = rating >= 4 ? '⭐' : rating >= 3 ? '👍' : '📝';
+      await sendNotification({
+        recipientId: booking.assignedWorker.toString(),
+        recipientModel: 'Worker',
+        type: 'review_received',
+        title: `${starEmoji} New Rating: ${rating}/5`,
+        message: feedback
+          ? `Customer rated you ${rating}/5 — "${feedback}"`
+          : `Customer rated you ${rating}/5 for your service.`,
+        data: { bookingId: booking._id },
+      });
+
+      notifyUser(booking.assignedWorker.toString(), 'notification_event', {
+        type: 'review_received',
+        title: `${starEmoji} New Rating: ${rating}/5`,
+        message: feedback
+          ? `Customer rated you ${rating}/5 — "${feedback}"`
+          : `Customer rated you ${rating}/5 for your service.`,
+      });
     }
 
     res.json({ message: 'Review submitted', review: booking.review });

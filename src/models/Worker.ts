@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document } from 'mongoose';
+import { blockSchemaDefinition, type IBlockInfo } from './User';
 
 export type WorkerAccountStatus = 'test' | 'ekyc_pending' | 'ekyc_done' | 'approved' | 'rejected' | 'live';
 
@@ -28,6 +29,14 @@ export interface IWorker extends Document {
     coordinates: number[];
     address: string;
   };
+  // Live/dynamic location for job matching — updates as the worker moves.
+  // Falls back to `location` (the static signup location) when not set.
+  currentLocation?: {
+    type: string;
+    coordinates: number[];
+    address?: string;
+    updatedAt?: Date;
+  };
   categories: mongoose.Types.ObjectId[];
   bio: string;
   regularPhone: string;
@@ -35,8 +44,6 @@ export interface IWorker extends Document {
   profileImage: string;
   isActive: boolean;
   balance: number;
-  dues: number;
-  duesSince?: Date | null;
   bankDetails?: IBankDetails;
   rating: {
     average: number;
@@ -44,7 +51,7 @@ export interface IWorker extends Document {
   };
   totalWorkDone: number;
   totalEarnings: number;
-  totalCommissionPaid: number;
+  block?: IBlockInfo;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -76,6 +83,12 @@ const workerSchema = new Schema<IWorker>(
       coordinates: { type: [Number], default: [0, 0] },
       address: { type: String, default: '' },
     },
+    currentLocation: {
+      type: { type: String, enum: ['Point'], default: 'Point' },
+      coordinates: { type: [Number], default: undefined },
+      address: { type: String, default: '' },
+      updatedAt: { type: Date, default: null },
+    },
     categories: [{ type: Schema.Types.ObjectId, ref: 'Category' }],
     bio: { type: String, default: '', maxlength: 1000 },
     regularPhone: { type: String, default: '' },
@@ -83,8 +96,6 @@ const workerSchema = new Schema<IWorker>(
     profileImage: { type: String, default: '' },
     isActive: { type: Boolean, default: false },
     balance: { type: Number, default: 0 },
-    dues: { type: Number, default: 0 },
-    duesSince: { type: Date, default: null },
     bankDetails: {
       holderName: { type: String },
       bankName: { type: String },
@@ -97,12 +108,13 @@ const workerSchema = new Schema<IWorker>(
     },
     totalWorkDone: { type: Number, default: 0 },
     totalEarnings: { type: Number, default: 0 },
-    totalCommissionPaid: { type: Number, default: 0 },
+    block: { type: blockSchemaDefinition, default: () => ({}) },
   },
   { timestamps: true }
 );
 
 workerSchema.index({ location: '2dsphere' });
+workerSchema.index({ currentLocation: '2dsphere' });
 workerSchema.index({ phone: 1 });
 workerSchema.index({ googleId: 1 });
 workerSchema.index({ accountStatus: 1 });
