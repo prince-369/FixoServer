@@ -16,7 +16,9 @@ const socket_1 = require("../socket");
 const incentive_service_1 = require("../services/incentive.service");
 const RAZORPAY_SUCCESS_EVENTS = new Set(['payment.captured', 'order.paid']);
 const WORKER_SEARCH_RADIUS_METERS = 10000;
-const WORKER_SUMMARY_RADIUS_METERS = 25000;
+// Customer availability preview uses the SAME radius as real job matching (10 km),
+// so the counts shown to the customer reflect exactly who could actually serve them.
+const WORKER_SUMMARY_RADIUS_METERS = WORKER_SEARCH_RADIUS_METERS;
 const hasValidCoordinates = (coordinates) => {
     if (!Array.isArray(coordinates) || coordinates.length !== 2)
         return false;
@@ -260,8 +262,27 @@ const reconcileBookingPaymentByOrder = async (booking, requestedOrderId) => {
 // ─── Create Booking ───
 const createBooking = async (req, res) => {
     try {
-        const { category, workDescription, latitude, longitude, address, timeSlot, voiceLanguage, voiceTranscript, voiceDurationSec } = req.body;
+        const { category, workDescription, latitude, longitude, address, timeSlot, scheduledAt: scheduledAtRaw, voiceLanguage, voiceTranscript, voiceDurationSec } = req.body;
         const normalizedDescription = String(workDescription ?? '').trim();
+        // Optional scheduled time chosen by the customer. Null = as soon as possible.
+        let scheduledAt = null;
+        if (scheduledAtRaw) {
+            const parsed = new Date(scheduledAtRaw);
+            if (Number.isNaN(parsed.getTime())) {
+                res.status(400).json({ message: 'Invalid scheduled time' });
+                return;
+            }
+            // Must be in the future (allow a small 2-min clock skew) and within 30 days.
+            if (parsed.getTime() < Date.now() - 2 * 60 * 1000) {
+                res.status(400).json({ message: 'Scheduled time must be in the future' });
+                return;
+            }
+            if (parsed.getTime() > Date.now() + 30 * 24 * 60 * 60 * 1000) {
+                res.status(400).json({ message: 'Scheduled time cannot be more than 30 days away' });
+                return;
+            }
+            scheduledAt = parsed;
+        }
         let voiceNote;
         if (req.file) {
             const uploadedVoice = await (0, cloudinary_service_1.uploadAudioBufferToCloudinary)(req.file.buffer, 'booking-voice');
@@ -299,6 +320,8 @@ const createBooking = async (req, res) => {
                 address,
             },
             timeSlot: timeSlot || 'anytime',
+            scheduledAt,
+            scheduleNotified: false,
             status: 'finding_workers',
         });
         // Find matching active workers within 10km.

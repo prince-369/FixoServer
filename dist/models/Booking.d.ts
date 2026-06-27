@@ -23,6 +23,8 @@ export interface IBooking extends Document {
         address: string;
     };
     timeSlot?: BookingTimeSlot;
+    scheduledAt?: Date | null;
+    scheduleNotified?: boolean;
     status: BookingStatus;
     acceptedBid?: mongoose.Types.ObjectId;
     assignedWorker?: mongoose.Types.ObjectId;

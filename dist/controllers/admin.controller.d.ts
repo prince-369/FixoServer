@@ -50,4 +50,7 @@ export declare const personalNotification: (req: Request, res: Response) => Prom
 export declare const getWaitlist: (req: Request, res: Response) => Promise<void>;
 export declare const markWaitlistReached: (req: Request, res: Response) => Promise<void>;
 export declare const searchNotificationRecipients: (req: Request, res: Response) => Promise<void>;
+export declare const getSkillRequests: (_req: Request, res: Response) => Promise<void>;
+export declare const reviewSkill: (req: Request, res: Response) => Promise<void>;
+export declare const logSkillCallAttempt: (req: Request, res: Response) => Promise<void>;
 //# sourceMappingURL=admin.controller.d.ts.map

@@ -7,9 +7,9 @@ exports.verifyToken = exports.generateToken = exports.generateRefreshTokenString
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const crypto_1 = __importDefault(require("crypto"));
 const env_1 = __importDefault(require("../config/env"));
-// Access token — short-lived (15 minutes)
+// Access token — long-lived (matches JWT_EXPIRE from env, default 7 days)
 const generateAccessToken = (payload) => {
-    return jsonwebtoken_1.default.sign(payload, env_1.default.JWT_SECRET, { expiresIn: '15m' });
+    return jsonwebtoken_1.default.sign(payload, env_1.default.JWT_SECRET, { expiresIn: env_1.default.JWT_EXPIRE });
 };
 exports.generateAccessToken = generateAccessToken;
 // Verify access token

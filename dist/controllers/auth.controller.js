@@ -12,6 +12,7 @@ const Worker_1 = __importDefault(require("../models/Worker"));
 const Admin_1 = __importDefault(require("../models/Admin"));
 const adminPermissions_1 = require("../config/adminPermissions");
 const userBlock_1 = require("../utils/userBlock");
+const workerSkills_1 = require("../utils/workerSkills");
 const RefreshToken_1 = __importDefault(require("../models/RefreshToken"));
 const PasswordResetToken_1 = __importDefault(require("../models/PasswordResetToken"));
 const generateToken_1 = require("../utils/generateToken");
@@ -19,22 +20,24 @@ const sms_service_1 = require("../services/sms.service");
 const email_service_1 = require("../services/email.service");
 const cloudinary_service_1 = require("../services/cloudinary.service");
 const env_1 = __importDefault(require("../config/env"));
-const REFRESH_TOKEN_DAYS = 7;
+const REFRESH_TOKEN_DAYS = 365;
 const EMAIL_RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
 const OTP_RESET_TOKEN_TTL_MS = 10 * 60 * 1000;
 const REFRESH_COOKIE_MAX_AGE_MS = REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+// Only set secure cookies when clients are actually on HTTPS (not localhost dev)
+const CLIENT_IS_HTTPS = (env_1.default.CLIENT_URL || '').startsWith('https://');
 const refreshCookieOptions = {
     httpOnly: true,
-    secure: IS_PRODUCTION,
-    sameSite: IS_PRODUCTION ? 'none' : 'lax',
+    secure: IS_PRODUCTION && CLIENT_IS_HTTPS,
+    sameSite: (IS_PRODUCTION && CLIENT_IS_HTTPS) ? 'none' : 'lax',
     maxAge: REFRESH_COOKIE_MAX_AGE_MS,
     path: '/',
 };
 const refreshCookieClearOptions = {
     httpOnly: true,
-    secure: IS_PRODUCTION,
-    sameSite: IS_PRODUCTION ? 'none' : 'lax',
+    secure: IS_PRODUCTION && CLIENT_IS_HTTPS,
+    sameSite: (IS_PRODUCTION && CLIENT_IS_HTTPS) ? 'none' : 'lax',
     path: '/',
 };
 // Strong password regex: min 8 chars, 1 uppercase, 1 lowercase, 1 digit, 1 special char
@@ -518,6 +521,15 @@ const registerWorkerWithGoogle = async (req, res) => {
             return;
         }
         const generatedPasswordHash = await bcryptjs_1.default.hash(generateGooglePlaceholderPassword(), 12);
+        const gSkillsInput = (0, workerSkills_1.parseSkillsInput)(req.body?.skills);
+        if (!gSkillsInput.some((s) => s.confirmed)) {
+            res.status(400).json({ message: 'Select at least one skill you can do and confirm it.' });
+            return;
+        }
+        const gSkills = gSkillsInput.map((s) => ({
+            category: s.categoryId, experienceYears: s.experienceYears, confirmed: s.confirmed,
+            status: 'pending_kyc', experienceBumpsUsed: 0, callAttempts: 0, requestedAt: new Date(),
+        }));
         const worker = await Worker_1.default.create({
             fullName,
             phone,
@@ -528,6 +540,7 @@ const registerWorkerWithGoogle = async (req, res) => {
             aadhaarFront: frontUpload.url,
             aadhaarBack: backUpload.url,
             accountStatus: 'test',
+            skills: gSkills,
         });
         const accessToken = await issueTokens(res, worker._id.toString(), 'worker');
         res.status(201).json({
@@ -562,6 +575,21 @@ const registerWorker = async (req, res) => {
             res.status(400).json({ message: 'Phone number already registered' });
             return;
         }
+        // Skills chosen at registration (each with experience + confirmation).
+        const skillsInput = (0, workerSkills_1.parseSkillsInput)(req.body?.skills);
+        if (!skillsInput.some((s) => s.confirmed)) {
+            res.status(400).json({ message: 'Select at least one skill you can do and confirm it.' });
+            return;
+        }
+        const skills = skillsInput.map((s) => ({
+            category: s.categoryId,
+            experienceYears: s.experienceYears,
+            confirmed: s.confirmed,
+            status: 'pending_kyc',
+            experienceBumpsUsed: 0,
+            callAttempts: 0,
+            requestedAt: new Date(),
+        }));
         // Upload Aadhaar images to Cloudinary
         const [frontUpload, backUpload] = await Promise.all([
             (0, cloudinary_service_1.uploadBufferToCloudinary)(files.aadhaarFront[0].buffer, 'aadhaar'),
@@ -576,6 +604,7 @@ const registerWorker = async (req, res) => {
             aadhaarFront: frontUpload.url,
             aadhaarBack: backUpload.url,
             accountStatus: 'test',
+            skills,
         });
         const accessToken = await issueTokens(res, worker._id.toString(), 'worker');
         res.status(201).json({

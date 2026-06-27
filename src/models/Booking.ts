@@ -34,6 +34,10 @@ export interface IBooking extends Document {
     address: string;
   };
   timeSlot?: BookingTimeSlot;
+  // Customer-chosen time to get the work done. Null = as soon as possible.
+  // The worker cannot start ("Approve & Go") before this time.
+  scheduledAt?: Date | null;
+  scheduleNotified?: boolean;
   status: BookingStatus;
   acceptedBid?: mongoose.Types.ObjectId;
   assignedWorker?: mongoose.Types.ObjectId;
@@ -97,6 +101,8 @@ const bookingSchema = new Schema<IBooking>(
       enum: ['anytime', 'morning', 'afternoon', 'evening'],
       default: 'anytime',
     },
+    scheduledAt: { type: Date, default: null },
+    scheduleNotified: { type: Boolean, default: false },
     status: {
       type: String,
       enum: ['finding_workers', 'bids_received', 'worker_accepted', 'worker_approved', 'payment_done', 'in_progress', 'completed', 'cancelled'],
@@ -151,5 +157,6 @@ bookingSchema.index({ assignedWorker: 1, createdAt: -1 });
 bookingSchema.index({ customerLocation: '2dsphere' });
 bookingSchema.index({ status: 1 });
 bookingSchema.index({ status: 1, createdAt: 1 });
+bookingSchema.index({ scheduleNotified: 1, scheduledAt: 1 });
 
 export default mongoose.model<IBooking>('Booking', bookingSchema);

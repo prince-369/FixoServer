@@ -20,6 +20,11 @@ router.post('/complete-profile', upload_middleware_1.uploadSingle, worker_contro
 router.put('/toggle-active', worker_controller_1.toggleActive);
 router.put('/location', worker_controller_1.updateLocation);
 router.put('/current-location', worker_controller_1.updateCurrentLocation);
+// Skill management
+router.get('/skills', worker_controller_1.getSkills);
+router.post('/skills/request', mutationGuard, worker_controller_1.requestSkill);
+router.post('/skills/:skillId/bump-experience', mutationGuard, worker_controller_1.bumpSkillExperience);
+router.post('/skills/:skillId/unselect', mutationGuard, worker_controller_1.unselectSkill);
 router.get('/dashboard', worker_controller_1.getDashboard);
 router.get('/reviews', worker_controller_1.getReviews);
 router.get('/work-requests', worker_controller_1.getWorkRequests);

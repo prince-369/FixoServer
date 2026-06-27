@@ -1,5 +1,5 @@
 import Booking from '../models/Booking';
-import { notifyUser } from '../socket';
+import { notifyUser, sendNotification } from '../socket';
 import env from '../config/env';
 import { deleteFromCloudinary } from '../services/cloudinary.service';
 
@@ -57,6 +57,70 @@ export const cancelStaleBookings = async (): Promise<number> => {
     return cancelledCount;
   } catch (error) {
     console.error('Stale booking cleanup error:', error);
+    return 0;
+  }
+};
+
+/**
+ * When a scheduled booking's chosen time arrives, notify both sides:
+ *  - the customer that their booking time is here, and
+ *  - the assigned worker that they can now head out ("Approve & Go" unlocks).
+ *
+ * Runs every cleanup tick. Each booking is notified exactly once (scheduleNotified).
+ */
+export const notifyDueScheduledBookings = async (): Promise<number> => {
+  try {
+    let notifiedCount = 0;
+
+    while (notifiedCount < 300) {
+      const booking = await Booking.findOneAndUpdate(
+        {
+          scheduledAt: { $ne: null, $lte: new Date() },
+          scheduleNotified: { $ne: true },
+          status: { $in: ['finding_workers', 'bids_received', 'worker_accepted', 'worker_approved', 'payment_done'] },
+        },
+        { $set: { scheduleNotified: true } },
+        { returnDocument: 'after', sort: { scheduledAt: 1 }, projection: { _id: 1, customer: 1, assignedWorker: 1, status: 1, scheduledAt: 1 } }
+      );
+
+      if (!booking) break;
+      notifiedCount += 1;
+
+      const bookingId = booking._id;
+      const customerId = booking.customer.toString();
+
+      // Realtime ping → both sides refresh and the worker's Approve & Go enables.
+      notifyUser(customerId, 'booking:schedule-reached', { bookingId, scheduledAt: booking.scheduledAt });
+      void sendNotification({
+        recipientId: customerId,
+        recipientModel: 'User',
+        type: 'booking_schedule_reached',
+        title: 'Scheduled time is here',
+        message: 'Your booking time has arrived. The worker can now start the job.',
+        data: { bookingId },
+      });
+
+      if (booking.assignedWorker) {
+        const workerId = booking.assignedWorker.toString();
+        notifyUser(workerId, 'booking:schedule-reached', { bookingId, scheduledAt: booking.scheduledAt });
+        void sendNotification({
+          recipientId: workerId,
+          recipientModel: 'Worker',
+          type: 'booking_schedule_reached',
+          title: 'You can start now',
+          message: 'The scheduled time has arrived. You can head out for this job now.',
+          data: { bookingId },
+        });
+      }
+    }
+
+    if (notifiedCount > 0) {
+      console.log(`Notified ${notifiedCount} scheduled booking(s) whose time arrived`);
+    }
+
+    return notifiedCount;
+  } catch (error) {
+    console.error('Scheduled booking notify error:', error);
     return 0;
   }
 };

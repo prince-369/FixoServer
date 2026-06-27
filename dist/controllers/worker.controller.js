@@ -3,9 +3,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.escalateHelpTicket = exports.appendHelpTicketMessage = exports.getHelpTicketDetail = exports.getHelpTickets = exports.createHelpTicket = exports.getChatbotQA = exports.deleteNotification = exports.markAllNotificationsRead = exports.markNotificationRead = exports.getNotifications = exports.getWithdrawals = exports.requestWithdrawal = exports.saveBankDetails = exports.getWalletTransactions = exports.getEarningsHistory = exports.getFunds = exports.completeWork = exports.requestCompletionCode = exports.sendMessage = exports.cancelBookingByWorker = exports.rejectBooking = exports.approveBooking = exports.respondToNegotiation = exports.submitBid = exports.getWorkRequestDetail = exports.getWorkRequests = exports.getReviews = exports.getDashboard = exports.updateCurrentLocation = exports.updateLocation = exports.toggleActive = exports.completeProfile = exports.reRequestEKYC = exports.updateProfile = exports.getProfile = void 0;
+exports.unselectSkill = exports.bumpSkillExperience = exports.requestSkill = exports.getSkills = exports.escalateHelpTicket = exports.appendHelpTicketMessage = exports.getHelpTicketDetail = exports.getHelpTickets = exports.createHelpTicket = exports.getChatbotQA = exports.deleteNotification = exports.markAllNotificationsRead = exports.markNotificationRead = exports.getNotifications = exports.getWithdrawals = exports.requestWithdrawal = exports.saveBankDetails = exports.getWalletTransactions = exports.getEarningsHistory = exports.getFunds = exports.completeWork = exports.requestCompletionCode = exports.sendMessage = exports.cancelBookingByWorker = exports.rejectBooking = exports.approveBooking = exports.respondToNegotiation = exports.submitBid = exports.getWorkRequestDetail = exports.getWorkRequests = exports.getReviews = exports.getDashboard = exports.updateCurrentLocation = exports.updateLocation = exports.toggleActive = exports.completeProfile = exports.reRequestEKYC = exports.updateProfile = exports.getProfile = void 0;
 const Worker_1 = __importDefault(require("../models/Worker"));
+const Category_1 = __importDefault(require("../models/Category"));
 const Booking_1 = __importDefault(require("../models/Booking"));
+const workerSkills_1 = require("../utils/workerSkills");
 const WorkBid_1 = __importDefault(require("../models/WorkBid"));
 const Transaction_1 = __importDefault(require("../models/Transaction"));
 const Withdrawal_1 = __importDefault(require("../models/Withdrawal"));
@@ -211,7 +213,7 @@ exports.reRequestEKYC = reRequestEKYC;
 // ─── Complete Profile ───
 const completeProfile = async (req, res) => {
     try {
-        const { categories, bio, regularPhone, latitude, longitude, address } = req.body;
+        const { bio, regularPhone, latitude, longitude, address } = req.body;
         const worker = await Worker_1.default.findById(req.user.id);
         if (!worker) {
             res.status(404).json({ message: 'Worker not found' });
@@ -229,12 +231,8 @@ const completeProfile = async (req, res) => {
                 address: address || '',
             };
         }
-        // Categories come as JSON string from FormData
-        if (categories) {
-            const parsed = typeof categories === 'string' ? JSON.parse(categories) : categories;
-            if (Array.isArray(parsed) && parsed.length)
-                worker.categories = parsed;
-        }
+        // Skills (and therefore categories) are chosen at registration and approved
+        // during KYC — they are not (re)submitted here.
         if (bio)
             worker.bio = bio;
         if (regularPhone)
@@ -269,6 +267,13 @@ const toggleActive = async (req, res) => {
         }
         worker.isActive = !worker.isActive;
         await worker.save();
+        // Let customers' availability previews update live when a worker goes online/offline.
+        const coords = worker.currentLocation?.coordinates || worker.location?.coordinates;
+        (0, socket_1.notifyRole)('customer', 'workers:availability-changed', {
+            workerId: worker._id.toString(),
+            isActive: worker.isActive,
+            coordinates: Array.isArray(coords) ? coords : null,
+        });
         res.json({ message: `You are now ${worker.isActive ? 'Active' : 'Inactive'}`, isActive: worker.isActive });
     }
     catch (error) {
@@ -818,6 +823,14 @@ const approveBooking = async (req, res) => {
         });
         if (!booking) {
             res.status(404).json({ message: 'Booking not found or not in correct state' });
+            return;
+        }
+        // Scheduled booking: the worker cannot start before the customer's chosen time.
+        if (booking.scheduledAt && Date.now() < new Date(booking.scheduledAt).getTime()) {
+            res.status(403).json({
+                message: 'This job is scheduled for a later time. You can start once the scheduled time arrives.',
+                scheduledAt: booking.scheduledAt,
+            });
             return;
         }
         // Check if worker already has an active job (approved/paid/in-progress).
@@ -1600,4 +1613,148 @@ const escalateHelpTicket = async (req, res) => {
     }
 };
 exports.escalateHelpTicket = escalateHelpTicket;
+// ───────────────────────────────────────────────────────────────
+// Worker skill management (post-approval)
+// ───────────────────────────────────────────────────────────────
+// GET /worker/skills — current skills + edit eligibility
+const getSkills = async (req, res) => {
+    try {
+        const worker = await Worker_1.default.findById(req.user.id).populate('skills.category', 'name image');
+        if (!worker) {
+            res.status(404).json({ message: 'Worker not found' });
+            return;
+        }
+        res.json({
+            skills: worker.skills || [],
+            accountAgeMonths: (0, workerSkills_1.accountAgeMonths)(worker.createdAt),
+            maxExperienceBumps: (0, workerSkills_1.maxExperienceBumps)(worker.createdAt),
+            canEditExperience: (0, workerSkills_1.accountAgeMonths)(worker.createdAt) >= 6,
+        });
+    }
+    catch (error) {
+        console.error('Get skills error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.getSkills = getSkills;
+// POST /worker/skills/request — add a NEW skill (goes to admin review)
+const requestSkill = async (req, res) => {
+    try {
+        const categoryId = typeof req.body?.categoryId === 'string' ? req.body.categoryId : '';
+        const experienceYears = Math.max(0, Math.min(60, Number(req.body?.experienceYears) || 0));
+        const confirmed = req.body?.confirmed === true || req.body?.confirmed === 'true';
+        if (!categoryId) {
+            res.status(400).json({ message: 'Category is required' });
+            return;
+        }
+        if (!confirmed) {
+            res.status(400).json({ message: 'Please confirm you can do this work' });
+            return;
+        }
+        const category = await Category_1.default.findById(categoryId).select('_id name');
+        if (!category) {
+            res.status(404).json({ message: 'Category not found' });
+            return;
+        }
+        const worker = await Worker_1.default.findById(req.user.id);
+        if (!worker) {
+            res.status(404).json({ message: 'Worker not found' });
+            return;
+        }
+        const existing = (worker.skills || []).find((s) => String(s.category) === categoryId);
+        if (existing && existing.status !== 'rejected') {
+            res.status(400).json({ message: existing.status === 'pending_review' ? 'This skill is already under review' : 'You already have this skill' });
+            return;
+        }
+        if (existing) {
+            // Re-applying a previously removed/rejected skill → full process again.
+            existing.experienceYears = experienceYears;
+            existing.confirmed = confirmed;
+            existing.status = 'pending_review';
+            existing.experienceBumpsUsed = 0;
+            existing.callAttempts = 0;
+            existing.rejectionReason = '';
+            existing.requestedAt = new Date();
+            existing.decidedAt = null;
+        }
+        else {
+            worker.skills = worker.skills || [];
+            worker.skills.push({
+                category: category._id, experienceYears, confirmed, status: 'pending_review',
+                experienceBumpsUsed: 0, callAttempts: 0, requestedAt: new Date(), decidedAt: null,
+            });
+        }
+        await worker.save();
+        await (0, socket_1.sendAdminNotification)({
+            type: 'skill_request',
+            title: 'Worker Skill Request',
+            message: `${worker.fullName} requested to add "${category.name}" (${experienceYears} yr exp). Verify on a call.`,
+            data: { workerId: String(worker._id) },
+        }).catch(() => { });
+        res.status(201).json({ message: 'Skill request submitted for review. Our team will verify on a call.' });
+    }
+    catch (error) {
+        console.error('Request skill error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.requestSkill = requestSkill;
+// POST /worker/skills/:skillId/bump-experience — +6 months (gated by account age)
+const bumpSkillExperience = async (req, res) => {
+    try {
+        const worker = await Worker_1.default.findById(req.user.id);
+        if (!worker) {
+            res.status(404).json({ message: 'Worker not found' });
+            return;
+        }
+        const skill = (worker.skills || []).find((s) => String(s._id) === req.params.skillId);
+        if (!skill || skill.status !== 'approved') {
+            res.status(400).json({ message: 'Skill not found or not approved' });
+            return;
+        }
+        const allowed = (0, workerSkills_1.maxExperienceBumps)(worker.createdAt);
+        if ((0, workerSkills_1.accountAgeMonths)(worker.createdAt) < 6) {
+            res.status(400).json({ message: 'Experience can be updated only after 6 months on Fixo.' });
+            return;
+        }
+        if (skill.experienceBumpsUsed >= allowed) {
+            res.status(400).json({ message: 'No experience update available yet. You can add +6 months for every 6 months on Fixo.' });
+            return;
+        }
+        skill.experienceYears = Math.round((skill.experienceYears + 0.5) * 10) / 10;
+        skill.experienceBumpsUsed += 1;
+        await worker.save();
+        res.json({ message: 'Experience updated (+6 months)', experienceYears: skill.experienceYears });
+    }
+    catch (error) {
+        console.error('Bump experience error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.bumpSkillExperience = bumpSkillExperience;
+// POST /worker/skills/:skillId/unselect — remove a skill (re-adding restarts review)
+const unselectSkill = async (req, res) => {
+    try {
+        const worker = await Worker_1.default.findById(req.user.id);
+        if (!worker) {
+            res.status(404).json({ message: 'Worker not found' });
+            return;
+        }
+        const before = (worker.skills || []).length;
+        const filtered = (worker.skills || []).filter((s) => String(s._id) !== req.params.skillId);
+        if (filtered.length === before) {
+            res.status(404).json({ message: 'Skill not found' });
+            return;
+        }
+        worker.skills = filtered;
+        (0, workerSkills_1.syncCategoriesFromSkills)(worker);
+        await worker.save();
+        res.json({ message: 'Skill removed. To add it again you will go through verification.' });
+    }
+    catch (error) {
+        console.error('Unselect skill error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.unselectSkill = unselectSkill;
 //# sourceMappingURL=worker.controller.js.map

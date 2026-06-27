@@ -37,7 +37,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.markWaitlistReached = exports.getWaitlist = exports.personalNotification = exports.broadcastNotification = exports.broadcastToAudience = exports.getCancellationFlags = exports.unblockWorkerAccount = exports.blockWorkerAccount = exports.unblockCustomer = exports.blockCustomer = exports.getWorkerDetail = exports.getAllWorkers = exports.deleteChatbotQA = exports.updateChatbotQA = exports.createChatbotQA = exports.getChatbotQA = exports.deleteAdminNotification = exports.markAllAdminNotificationsRead = exports.markAdminNotificationRead = exports.getAdminNotifications = exports.rejectRefund = exports.processRefund = exports.getRefunds = exports.replyHelpTicket = exports.resolveHelpTicket = exports.getHelpTickets = exports.getCustomers = exports.reorderBanners = exports.updateBanner = exports.deleteBanner = exports.createBanner = exports.getBanners = exports.deleteCategory = exports.updateCategoryDetails = exports.updateCategory = exports.createCategory = exports.getCategories = exports.declineWithdrawal = exports.completeWithdrawal = exports.getWithdrawals = exports.saveEkycCapture = exports.rejectWorker = exports.approveWorker = exports.updateVideoKycResult = exports.getWorkerEKYCDetails = exports.getPendingEKYC = exports.getAdminBootstrapStatus = exports.getPendingAdminBadges = exports.getDashboard = exports.clearDashboardCache = void 0;
-exports.searchNotificationRecipients = void 0;
+exports.logSkillCallAttempt = exports.reviewSkill = exports.getSkillRequests = exports.searchNotificationRecipients = void 0;
 const Worker_1 = __importDefault(require("../models/Worker"));
 const User_1 = __importDefault(require("../models/User"));
 const Booking_1 = __importDefault(require("../models/Booking"));
@@ -54,6 +54,7 @@ const userBlock_1 = require("../utils/userBlock");
 const MobilePushToken_1 = __importDefault(require("../models/MobilePushToken"));
 const PushSubscription_1 = __importDefault(require("../models/PushSubscription"));
 const Waitlist_1 = __importDefault(require("../models/Waitlist"));
+const workerSkills_1 = require("../utils/workerSkills");
 const mobilePush_service_1 = require("../services/mobilePush.service");
 const webPush_service_1 = require("../services/webPush.service");
 const Notification_1 = __importDefault(require("../models/Notification"));
@@ -240,7 +241,7 @@ exports.getAdminBootstrapStatus = getAdminBootstrapStatus;
 const getPendingEKYC = async (_req, res) => {
     try {
         const [workers, approvedCount, rejectedCount] = await Promise.all([
-            Worker_1.default.find({ accountStatus: { $in: ['test', 'ekyc_pending', 'ekyc_done'] } }).sort({ createdAt: -1 }),
+            Worker_1.default.find({ accountStatus: { $in: ['test', 'ekyc_pending', 'ekyc_done'] } }).sort({ createdAt: -1 }).populate('skills.category', 'name image'),
             Worker_1.default.countDocuments({ accountStatus: { $in: ['approved', 'live'] } }),
             Worker_1.default.countDocuments({ accountStatus: 'rejected' }),
         ]);
@@ -255,7 +256,7 @@ exports.getPendingEKYC = getPendingEKYC;
 // ─── EKYC: Get Worker Details ───
 const getWorkerEKYCDetails = async (req, res) => {
     try {
-        const worker = await Worker_1.default.findById(req.params.workerId);
+        const worker = await Worker_1.default.findById(req.params.workerId).populate('skills.category', 'name image');
         if (!worker) {
             res.status(404).json({ message: 'Worker not found' });
             return;
@@ -286,6 +287,8 @@ const updateVideoKycResult = async (req, res) => {
             worker.ekycRejectionReason = undefined;
             worker.videoKycIncompleteReason = '';
             worker.videoKycRetryAvailableAt = null;
+            worker.videoKycAwaitingResult = false;
+            worker.videoKycCallEndedAt = null;
             await worker.save();
             (0, socket_1.notifyUser)(worker._id.toString(), 'kyc_status_updated', {
                 workerId: worker._id,
@@ -308,6 +311,8 @@ const updateVideoKycResult = async (req, res) => {
         worker.ekycRejectionReason = undefined;
         worker.videoKycIncompleteReason = trimmedReason;
         worker.videoKycRetryAvailableAt = retryAvailableAt;
+        worker.videoKycAwaitingResult = false;
+        worker.videoKycCallEndedAt = null;
         await worker.save();
         (0, socket_1.notifyUser)(worker._id.toString(), 'kyc_status_updated', {
             workerId: worker._id,
@@ -331,17 +336,29 @@ exports.updateVideoKycResult = updateVideoKycResult;
 // ─── EKYC: Approve Worker ───
 const approveWorker = async (req, res) => {
     try {
-        const worker = await Worker_1.default.findByIdAndUpdate(req.params.workerId, {
-            accountStatus: 'approved',
-            isActive: true,
-            ekycRejectionReason: undefined,
-            videoKycIncompleteReason: '',
-            videoKycRetryAvailableAt: null,
-        }, { new: true });
+        const worker = await Worker_1.default.findById(req.params.workerId);
         if (!worker) {
             res.status(404).json({ message: 'Worker not found' });
             return;
         }
+        worker.accountStatus = 'approved';
+        worker.isActive = true;
+        worker.ekycRejectionReason = undefined;
+        worker.videoKycIncompleteReason = '';
+        worker.videoKycRetryAvailableAt = null;
+        worker.videoKycAwaitingResult = false;
+        worker.videoKycCallEndedAt = null;
+        // Approve the skills the worker confirmed at signup; auto-reject the rest.
+        (worker.skills || []).forEach((s) => {
+            if (s.status === 'pending_kyc') {
+                s.status = s.confirmed ? 'approved' : 'rejected';
+                s.decidedAt = new Date();
+                if (!s.confirmed)
+                    s.rejectionReason = 'Worker did not confirm this skill at signup';
+            }
+        });
+        (0, workerSkills_1.syncCategoriesFromSkills)(worker);
+        await worker.save();
         // Notify worker in real-time so their page updates instantly
         (0, socket_1.notifyUser)(worker._id.toString(), 'kyc_status_updated', {
             workerId: worker._id,
@@ -367,6 +384,8 @@ const rejectWorker = async (req, res) => {
             ekycRejectionReason: reason,
             videoKycIncompleteReason: '',
             videoKycRetryAvailableAt: null,
+            videoKycAwaitingResult: false,
+            videoKycCallEndedAt: null,
         }, { new: true });
         if (!worker) {
             res.status(404).json({ message: 'Worker not found' });
@@ -1758,4 +1777,98 @@ const searchNotificationRecipients = async (req, res) => {
     }
 };
 exports.searchNotificationRecipients = searchNotificationRecipients;
+// ───────────────────────────────────────────────────────────────
+// Worker skill review (new skill requests after approval)
+// ───────────────────────────────────────────────────────────────
+// GET /admin/skill-requests — workers with skills awaiting verification
+const getSkillRequests = async (_req, res) => {
+    try {
+        const workers = await Worker_1.default.find({ 'skills.status': 'pending_review' })
+            .select('fullName phone email profileImage skills rating accountStatus createdAt')
+            .populate('skills.category', 'name image')
+            .sort({ updatedAt: -1 })
+            .limit(200)
+            .lean();
+        res.json({ workers });
+    }
+    catch (error) {
+        console.error('Get skill requests error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.getSkillRequests = getSkillRequests;
+const notifySkillResult = (workerId, title, message) => {
+    void (0, socket_1.sendNotification)({ recipientId: workerId, recipientModel: 'Worker', type: 'skill_review', title, message }).catch(() => { });
+};
+// POST /admin/skill-requests/:workerId/:skillId/decision { decision, reason }
+const reviewSkill = async (req, res) => {
+    try {
+        const decision = req.body?.decision === 'approve' ? 'approve' : 'reject';
+        const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+        const worker = await Worker_1.default.findById(req.params.workerId);
+        if (!worker) {
+            res.status(404).json({ message: 'Worker not found' });
+            return;
+        }
+        const skill = (worker.skills || []).find((s) => String(s._id) === req.params.skillId);
+        if (!skill || skill.status !== 'pending_review') {
+            res.status(400).json({ message: 'No pending request for this skill' });
+            return;
+        }
+        const cat = await Category_1.default.findById(skill.category).select('name');
+        skill.decidedAt = new Date();
+        if (decision === 'approve') {
+            skill.status = 'approved';
+            skill.rejectionReason = '';
+            (0, workerSkills_1.syncCategoriesFromSkills)(worker);
+            await worker.save();
+            notifySkillResult(String(worker._id), 'Skill Approved ✅', `Your "${cat?.name || 'new'}" skill is approved. You can now take these jobs.`);
+        }
+        else {
+            skill.status = 'rejected';
+            skill.rejectionReason = reason || 'Could not verify this skill';
+            await worker.save();
+            notifySkillResult(String(worker._id), 'Skill Not Approved', `Your "${cat?.name || 'requested'}" skill request was rejected. ${reason ? 'Reason: ' + reason : ''}`);
+        }
+        await (0, adminActivity_1.logAdminActivity)(req, { action: `skill.${decision}`, category: 'skill_review', targetType: 'worker', targetId: String(worker._id), meta: { category: cat?.name } });
+        res.json({ message: decision === 'approve' ? 'Skill approved' : 'Skill rejected' });
+    }
+    catch (error) {
+        console.error('Review skill error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.reviewSkill = reviewSkill;
+// POST /admin/skill-requests/:workerId/:skillId/call-attempt — log a call try (auto-reject at 3)
+const logSkillCallAttempt = async (req, res) => {
+    try {
+        const worker = await Worker_1.default.findById(req.params.workerId);
+        if (!worker) {
+            res.status(404).json({ message: 'Worker not found' });
+            return;
+        }
+        const skill = (worker.skills || []).find((s) => String(s._id) === req.params.skillId);
+        if (!skill || skill.status !== 'pending_review') {
+            res.status(400).json({ message: 'No pending request' });
+            return;
+        }
+        skill.callAttempts = (skill.callAttempts || 0) + 1;
+        let autoRejected = false;
+        if (skill.callAttempts >= 3) {
+            skill.status = 'rejected';
+            skill.rejectionReason = 'Could not connect on call after 3 attempts';
+            skill.decidedAt = new Date();
+            autoRejected = true;
+            const cat = await Category_1.default.findById(skill.category).select('name');
+            notifySkillResult(String(worker._id), 'Skill Not Approved', `We could not reach you to verify "${cat?.name || 'your requested skill'}". Please request again when reachable.`);
+        }
+        await worker.save();
+        res.json({ message: autoRejected ? 'Auto-rejected after 3 attempts' : 'Call attempt logged', callAttempts: skill.callAttempts, autoRejected });
+    }
+    catch (error) {
+        console.error('Skill call attempt error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.logSkillCallAttempt = logSkillCallAttempt;
 //# sourceMappingURL=admin.controller.js.map

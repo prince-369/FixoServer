@@ -52,6 +52,9 @@ import {
   searchNotificationRecipients,
   getWaitlist,
   markWaitlistReached,
+  getSkillRequests,
+  reviewSkill,
+  logSkillCallAttempt,
   getAdminNotifications,
   markAdminNotificationRead,
   markAllAdminNotificationsRead,
@@ -181,6 +184,11 @@ router.post('/push/:audience/personal', requireNotifyPerm, mutationGuard, person
 // ─── Service-area waitlist (customer-side) ───
 router.get('/waitlist', requirePermission('customers'), getWaitlist);
 router.post('/waitlist/:id/reached', requirePermission('customers'), mutationGuard, markWaitlistReached);
+
+// ─── Worker skill review (worker-side) ───
+router.get('/skill-requests', requirePermission('skill_review'), getSkillRequests);
+router.post('/skill-requests/:workerId/:skillId/decision', requirePermission('skill_review'), mutationGuard, reviewSkill);
+router.post('/skill-requests/:workerId/:skillId/call-attempt', requirePermission('skill_review'), mutationGuard, logSkillCallAttempt);
 
 // ── Incentives: Coupons ──
 router.get('/coupons', adminListCoupons);

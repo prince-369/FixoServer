@@ -94,6 +94,10 @@ router.post('/push/:audience/personal', requireNotifyPerm, mutationGuard, admin_
 // ─── Service-area waitlist (customer-side) ───
 router.get('/waitlist', (0, permission_middleware_1.requirePermission)('customers'), admin_controller_1.getWaitlist);
 router.post('/waitlist/:id/reached', (0, permission_middleware_1.requirePermission)('customers'), mutationGuard, admin_controller_1.markWaitlistReached);
+// ─── Worker skill review (worker-side) ───
+router.get('/skill-requests', (0, permission_middleware_1.requirePermission)('skill_review'), admin_controller_1.getSkillRequests);
+router.post('/skill-requests/:workerId/:skillId/decision', (0, permission_middleware_1.requirePermission)('skill_review'), mutationGuard, admin_controller_1.reviewSkill);
+router.post('/skill-requests/:workerId/:skillId/call-attempt', (0, permission_middleware_1.requirePermission)('skill_review'), mutationGuard, admin_controller_1.logSkillCallAttempt);
 // ── Incentives: Coupons ──
 router.get('/coupons', incentiveAdmin_controller_1.adminListCoupons);
 router.post('/coupons', mutationGuard, incentiveAdmin_controller_1.adminCreateCoupon);

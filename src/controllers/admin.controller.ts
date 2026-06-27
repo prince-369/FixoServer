@@ -15,6 +15,7 @@ import { blockPayload } from '../utils/userBlock';
 import MobilePushToken from '../models/MobilePushToken';
 import PushSubscription from '../models/PushSubscription';
 import Waitlist from '../models/Waitlist';
+import { syncCategoriesFromSkills } from '../utils/workerSkills';
 import { sendMobilePushNotification } from '../services/mobilePush.service';
 import { sendWebPushNotification } from '../services/webPush.service';
 import Notification from '../models/Notification';
@@ -223,7 +224,7 @@ export const getAdminBootstrapStatus = async (_req: Request, res: Response): Pro
 export const getPendingEKYC = async (_req: Request, res: Response): Promise<void> => {
   try {
     const [workers, approvedCount, rejectedCount] = await Promise.all([
-      Worker.find({ accountStatus: { $in: ['test', 'ekyc_pending', 'ekyc_done'] } }).sort({ createdAt: -1 }),
+      Worker.find({ accountStatus: { $in: ['test', 'ekyc_pending', 'ekyc_done'] } }).sort({ createdAt: -1 }).populate('skills.category', 'name image'),
       Worker.countDocuments({ accountStatus: { $in: ['approved', 'live'] } }),
       Worker.countDocuments({ accountStatus: 'rejected' }),
     ]);
@@ -238,7 +239,7 @@ export const getPendingEKYC = async (_req: Request, res: Response): Promise<void
 // ─── EKYC: Get Worker Details ───
 export const getWorkerEKYCDetails = async (req: Request, res: Response): Promise<void> => {
   try {
-    const worker = await Worker.findById(req.params.workerId);
+    const worker = await Worker.findById(req.params.workerId).populate('skills.category', 'name image');
     if (!worker) {
       res.status(404).json({ message: 'Worker not found' });
       return;
@@ -271,6 +272,8 @@ export const updateVideoKycResult = async (req: Request, res: Response): Promise
       worker.ekycRejectionReason = undefined;
       worker.videoKycIncompleteReason = '';
       worker.videoKycRetryAvailableAt = null;
+      worker.videoKycAwaitingResult = false;
+      worker.videoKycCallEndedAt = null;
 
       await worker.save();
 
@@ -299,6 +302,8 @@ export const updateVideoKycResult = async (req: Request, res: Response): Promise
     worker.ekycRejectionReason = undefined;
     worker.videoKycIncompleteReason = trimmedReason;
     worker.videoKycRetryAvailableAt = retryAvailableAt;
+    worker.videoKycAwaitingResult = false;
+    worker.videoKycCallEndedAt = null;
 
     await worker.save();
 
@@ -324,22 +329,30 @@ export const updateVideoKycResult = async (req: Request, res: Response): Promise
 // ─── EKYC: Approve Worker ───
 export const approveWorker = async (req: Request, res: Response): Promise<void> => {
   try {
-    const worker = await Worker.findByIdAndUpdate(
-      req.params.workerId,
-      {
-        accountStatus: 'approved',
-        isActive: true,
-        ekycRejectionReason: undefined,
-        videoKycIncompleteReason: '',
-        videoKycRetryAvailableAt: null,
-      },
-      { new: true }
-    );
-
+    const worker = await Worker.findById(req.params.workerId);
     if (!worker) {
       res.status(404).json({ message: 'Worker not found' });
       return;
     }
+
+    worker.accountStatus = 'approved';
+    worker.isActive = true;
+    worker.ekycRejectionReason = undefined;
+    worker.videoKycIncompleteReason = '';
+    worker.videoKycRetryAvailableAt = null;
+    worker.videoKycAwaitingResult = false;
+    worker.videoKycCallEndedAt = null;
+
+    // Approve the skills the worker confirmed at signup; auto-reject the rest.
+    (worker.skills || []).forEach((s) => {
+      if (s.status === 'pending_kyc') {
+        s.status = s.confirmed ? 'approved' : 'rejected';
+        s.decidedAt = new Date();
+        if (!s.confirmed) s.rejectionReason = 'Worker did not confirm this skill at signup';
+      }
+    });
+    syncCategoriesFromSkills(worker);
+    await worker.save();
 
     // Notify worker in real-time so their page updates instantly
     notifyUser(worker._id.toString(), 'kyc_status_updated', {
@@ -368,6 +381,8 @@ export const rejectWorker = async (req: Request, res: Response): Promise<void> =
         ekycRejectionReason: reason,
         videoKycIncompleteReason: '',
         videoKycRetryAvailableAt: null,
+        videoKycAwaitingResult: false,
+        videoKycCallEndedAt: null,
       },
       { new: true }
     );
@@ -1847,6 +1862,88 @@ export const searchNotificationRecipients = async (req: Request, res: Response):
     res.json({ recipients });
   } catch (error) {
     console.error('Search recipients error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ───────────────────────────────────────────────────────────────
+// Worker skill review (new skill requests after approval)
+// ───────────────────────────────────────────────────────────────
+
+// GET /admin/skill-requests — workers with skills awaiting verification
+export const getSkillRequests = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const workers = await Worker.find({ 'skills.status': 'pending_review' })
+      .select('fullName phone email profileImage skills rating accountStatus createdAt')
+      .populate('skills.category', 'name image')
+      .sort({ updatedAt: -1 })
+      .limit(200)
+      .lean();
+    res.json({ workers });
+  } catch (error) {
+    console.error('Get skill requests error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+const notifySkillResult = (workerId: string, title: string, message: string) => {
+  void sendNotification({ recipientId: workerId, recipientModel: 'Worker', type: 'skill_review', title, message }).catch(() => {});
+};
+
+// POST /admin/skill-requests/:workerId/:skillId/decision { decision, reason }
+export const reviewSkill = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const decision = req.body?.decision === 'approve' ? 'approve' : 'reject';
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+    const worker = await Worker.findById(req.params.workerId);
+    if (!worker) { res.status(404).json({ message: 'Worker not found' }); return; }
+    const skill = (worker.skills || []).find((s) => String((s as any)._id) === req.params.skillId);
+    if (!skill || skill.status !== 'pending_review') { res.status(400).json({ message: 'No pending request for this skill' }); return; }
+
+    const cat = await Category.findById(skill.category).select('name');
+    skill.decidedAt = new Date();
+    if (decision === 'approve') {
+      skill.status = 'approved';
+      skill.rejectionReason = '';
+      syncCategoriesFromSkills(worker);
+      await worker.save();
+      notifySkillResult(String(worker._id), 'Skill Approved ✅', `Your "${cat?.name || 'new'}" skill is approved. You can now take these jobs.`);
+    } else {
+      skill.status = 'rejected';
+      skill.rejectionReason = reason || 'Could not verify this skill';
+      await worker.save();
+      notifySkillResult(String(worker._id), 'Skill Not Approved', `Your "${cat?.name || 'requested'}" skill request was rejected. ${reason ? 'Reason: ' + reason : ''}`);
+    }
+    await logAdminActivity(req, { action: `skill.${decision}`, category: 'skill_review', targetType: 'worker', targetId: String(worker._id), meta: { category: cat?.name } });
+    res.json({ message: decision === 'approve' ? 'Skill approved' : 'Skill rejected' });
+  } catch (error) {
+    console.error('Review skill error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// POST /admin/skill-requests/:workerId/:skillId/call-attempt — log a call try (auto-reject at 3)
+export const logSkillCallAttempt = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const worker = await Worker.findById(req.params.workerId);
+    if (!worker) { res.status(404).json({ message: 'Worker not found' }); return; }
+    const skill = (worker.skills || []).find((s) => String((s as any)._id) === req.params.skillId);
+    if (!skill || skill.status !== 'pending_review') { res.status(400).json({ message: 'No pending request' }); return; }
+
+    skill.callAttempts = (skill.callAttempts || 0) + 1;
+    let autoRejected = false;
+    if (skill.callAttempts >= 3) {
+      skill.status = 'rejected';
+      skill.rejectionReason = 'Could not connect on call after 3 attempts';
+      skill.decidedAt = new Date();
+      autoRejected = true;
+      const cat = await Category.findById(skill.category).select('name');
+      notifySkillResult(String(worker._id), 'Skill Not Approved', `We could not reach you to verify "${cat?.name || 'your requested skill'}". Please request again when reachable.`);
+    }
+    await worker.save();
+    res.json({ message: autoRejected ? 'Auto-rejected after 3 attempts' : 'Call attempt logged', callAttempts: skill.callAttempts, autoRejected });
+  } catch (error) {
+    console.error('Skill call attempt error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };

@@ -13,6 +13,10 @@ import {
   toggleActive,
   updateLocation,
   updateCurrentLocation,
+  getSkills,
+  requestSkill,
+  bumpSkillExperience,
+  unselectSkill,
   getDashboard,
   getReviews,
   getWorkRequests,
@@ -57,6 +61,12 @@ router.post('/complete-profile', uploadSingle, completeProfile);
 router.put('/toggle-active', toggleActive);
 router.put('/location', updateLocation);
 router.put('/current-location', updateCurrentLocation);
+
+// Skill management
+router.get('/skills', getSkills);
+router.post('/skills/request', mutationGuard, requestSkill);
+router.post('/skills/:skillId/bump-experience', mutationGuard, bumpSkillExperience);
+router.post('/skills/:skillId/unselect', mutationGuard, unselectSkill);
 
 router.get('/dashboard', getDashboard);
 router.get('/reviews', getReviews);

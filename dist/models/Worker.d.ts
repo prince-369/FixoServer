@@ -7,6 +7,18 @@ export interface IBankDetails {
     accountNumber: string;
     ifscCode: string;
 }
+export type WorkerSkillStatus = 'pending_kyc' | 'approved' | 'pending_review' | 'rejected';
+export interface IWorkerSkill {
+    category: mongoose.Types.ObjectId;
+    experienceYears: number;
+    confirmed: boolean;
+    status: WorkerSkillStatus;
+    experienceBumpsUsed: number;
+    rejectionReason?: string;
+    callAttempts: number;
+    requestedAt?: Date;
+    decidedAt?: Date | null;
+}
 export interface IWorker extends Document {
     fullName: string;
     phone: string;
@@ -19,6 +31,8 @@ export interface IWorker extends Document {
     ekycRejectionReason?: string;
     videoKycIncompleteReason?: string;
     videoKycRetryAvailableAt?: Date | null;
+    videoKycAwaitingResult?: boolean;
+    videoKycCallEndedAt?: Date | null;
     ekycCaptures: {
         url: string;
         capturedAt: Date;
@@ -36,6 +50,7 @@ export interface IWorker extends Document {
         updatedAt?: Date;
     };
     categories: mongoose.Types.ObjectId[];
+    skills?: IWorkerSkill[];
     bio: string;
     regularPhone: string;
     extraPhones: string[];

@@ -7,9 +7,9 @@ interface TokenPayload {
   role: 'customer' | 'worker' | 'admin';
 }
 
-// Access token — short-lived (15 minutes)
+// Access token — long-lived (matches JWT_EXPIRE from env, default 7 days)
 export const generateAccessToken = (payload: TokenPayload): string => {
-  return jwt.sign(payload, env.JWT_SECRET, { expiresIn: '15m' });
+  return jwt.sign(payload, env.JWT_SECRET, { expiresIn: env.JWT_EXPIRE as SignOptions['expiresIn'] });
 };
 
 // Verify access token

@@ -10,6 +10,20 @@ export interface IBankDetails {
   ifscCode: string;
 }
 
+export type WorkerSkillStatus = 'pending_kyc' | 'approved' | 'pending_review' | 'rejected';
+
+export interface IWorkerSkill {
+  category: mongoose.Types.ObjectId;
+  experienceYears: number;
+  confirmed: boolean; // worker clicked "Yes, I can do this work"
+  status: WorkerSkillStatus;
+  experienceBumpsUsed: number; // each bump = +6 months, gated by account age
+  rejectionReason?: string;
+  callAttempts: number; // admin call attempts during skill review
+  requestedAt?: Date;
+  decidedAt?: Date | null;
+}
+
 export interface IWorker extends Document {
   fullName: string;
   phone: string;
@@ -22,6 +36,10 @@ export interface IWorker extends Document {
   ekycRejectionReason?: string;
   videoKycIncompleteReason?: string;
   videoKycRetryAvailableAt?: Date | null;
+  // After a live video-KYC call ends, the admin must mark it completed/incomplete.
+  // This flag survives admin page reloads/drops so the decision is never lost.
+  videoKycAwaitingResult?: boolean;
+  videoKycCallEndedAt?: Date | null;
   ekycCaptures: { url: string; capturedAt: Date }[];
   profileCompleted: boolean;
   location: {
@@ -38,6 +56,7 @@ export interface IWorker extends Document {
     updatedAt?: Date;
   };
   categories: mongoose.Types.ObjectId[];
+  skills?: IWorkerSkill[];
   bio: string;
   regularPhone: string;
   extraPhones: string[];
@@ -73,6 +92,8 @@ const workerSchema = new Schema<IWorker>(
     ekycRejectionReason: { type: String },
     videoKycIncompleteReason: { type: String, default: '' },
     videoKycRetryAvailableAt: { type: Date, default: null },
+    videoKycAwaitingResult: { type: Boolean, default: false },
+    videoKycCallEndedAt: { type: Date, default: null },
     ekycCaptures: [{
       url: { type: String, required: true },
       capturedAt: { type: Date, default: Date.now },
@@ -90,6 +111,17 @@ const workerSchema = new Schema<IWorker>(
       updatedAt: { type: Date, default: null },
     },
     categories: [{ type: Schema.Types.ObjectId, ref: 'Category' }],
+    skills: [{
+      category: { type: Schema.Types.ObjectId, ref: 'Category', required: true },
+      experienceYears: { type: Number, default: 0 },
+      confirmed: { type: Boolean, default: false },
+      status: { type: String, enum: ['pending_kyc', 'approved', 'pending_review', 'rejected'], default: 'pending_kyc' },
+      experienceBumpsUsed: { type: Number, default: 0 },
+      rejectionReason: { type: String, default: '' },
+      callAttempts: { type: Number, default: 0 },
+      requestedAt: { type: Date, default: Date.now },
+      decidedAt: { type: Date, default: null },
+    }],
     bio: { type: String, default: '', maxlength: 1000 },
     regularPhone: { type: String, default: '' },
     extraPhones: [{ type: String }],

@@ -7,6 +7,14 @@
  */
 export declare const cancelStaleBookings: () => Promise<number>;
 /**
+ * When a scheduled booking's chosen time arrives, notify both sides:
+ *  - the customer that their booking time is here, and
+ *  - the assigned worker that they can now head out ("Approve & Go" unlocks).
+ *
+ * Runs every cleanup tick. Each booking is notified exactly once (scheduleNotified).
+ */
+export declare const notifyDueScheduledBookings: () => Promise<number>;
+/**
  * Deletes booking voice-note media for bookings that are already completed/cancelled.
  * This ensures media storage does not grow indefinitely.
  */

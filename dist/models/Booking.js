@@ -57,6 +57,8 @@ const bookingSchema = new mongoose_1.Schema({
         enum: ['anytime', 'morning', 'afternoon', 'evening'],
         default: 'anytime',
     },
+    scheduledAt: { type: Date, default: null },
+    scheduleNotified: { type: Boolean, default: false },
     status: {
         type: String,
         enum: ['finding_workers', 'bids_received', 'worker_accepted', 'worker_approved', 'payment_done', 'in_progress', 'completed', 'cancelled'],
@@ -108,5 +110,6 @@ bookingSchema.index({ assignedWorker: 1, createdAt: -1 });
 bookingSchema.index({ customerLocation: '2dsphere' });
 bookingSchema.index({ status: 1 });
 bookingSchema.index({ status: 1, createdAt: 1 });
+bookingSchema.index({ scheduleNotified: 1, scheduledAt: 1 });
 exports.default = mongoose_1.default.model('Booking', bookingSchema);
 //# sourceMappingURL=Booking.js.map

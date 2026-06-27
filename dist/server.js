@@ -29,6 +29,7 @@ const start = async () => {
     cleanupTimer = setInterval(() => {
         void (0, bookingCleanup_1.cancelStaleBookings)();
         void (0, bookingCleanup_1.cleanupClosedBookingVoiceNotes)();
+        void (0, bookingCleanup_1.notifyDueScheduledBookings)();
     }, env_1.default.JOB_CLEANUP_INTERVAL_MS);
     cleanupTimer.unref();
     server.listen(env_1.default.PORT, () => {

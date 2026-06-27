@@ -75,6 +75,10 @@ type VideoKycRetryState = {
 };
 
 // Track active eKYC video call rooms
+// How long a live eKYC call survives after a participant drops (network blip / app kill / accidental close).
+// If they rejoin within this window, the SAME call resumes automatically — no restart.
+const EKYC_GRACE_MS = 120 * 1000;
+
 const ekycRooms = new Map<string, {
   workerId: string;
   adminId?: string;
@@ -87,7 +91,25 @@ const ekycRooms = new Map<string, {
   iceCandidates: { from: string; candidate: any }[];
   readySockets: Set<string>;
   timeoutId?: ReturnType<typeof setTimeout>;
+  // Reconnect grace state
+  interrupted?: boolean;
+  graceTimeoutId?: ReturnType<typeof setTimeout>;
 }>();
+
+// After a live video-KYC call ends, flag the worker so the admin's "was the call OK?"
+// (completed / incomplete) decision survives a page reload, network drop or app close.
+// The flag is cleared once the admin marks completed/incomplete or approves/rejects.
+const markVideoKycAwaitingResult = async (workerId: string) => {
+  try {
+    await Worker.updateOne(
+      { _id: workerId, accountStatus: { $in: ['test', 'ekyc_pending'] } },
+      { $set: { videoKycAwaitingResult: true, videoKycCallEndedAt: new Date() } },
+    );
+    console.log(`[eKYC] Worker ${workerId} flagged awaiting video-KYC result`);
+  } catch (e) {
+    console.error('[eKYC] Failed to flag awaiting result:', e);
+  }
+};
 
 // Helper: delete eKYC notifications for a worker from all admins
 const deleteEkycNotifications = async (workerId: string) => {
@@ -274,6 +296,25 @@ export const initializeSocket = (server: HTTPServer): SocketIOServer => {
             });
           }
         }
+      }
+
+      // Resume an INTERRUPTED eKYC call after reconnect/relaunch.
+      // If this user (worker or admin) belongs to a call that dropped and is still
+      // inside the grace window, tell them to jump straight back into the same room.
+      for (const [roomId, room] of ekycRooms.entries()) {
+        if (!room.interrupted) continue;
+        const isWorker = role === 'worker' && room.workerId === userId;
+        const isAdmin = role === 'admin' && room.adminId === userId;
+        if (!isWorker && !isAdmin) continue;
+        socket.emit('ekyc:resume-available', {
+          roomId,
+          role,
+          workerId: room.workerId,
+          adminId: room.adminId,
+          workerName: room.workerName,
+          workerPhone: room.workerPhone,
+        });
+        console.log(`[eKYC] resume-available sent to ${role} ${userId} for room ${roomId}`);
       }
     };
 
@@ -525,6 +566,21 @@ export const initializeSocket = (server: HTTPServer): SocketIOServer => {
       const room = ekycRooms.get(roomId);
       if (!room) { console.log(`[eKYC] video-ready: room ${roomId} not found`); return; }
 
+      // A participant came back during the grace window → resume this call.
+      // Clear the grace timer, wipe the stale WebRTC handshake, and ask BOTH sides
+      // to re-run a clean negotiation so the live call continues from where it left off.
+      if (room.interrupted) {
+        if (room.graceTimeoutId) { clearTimeout(room.graceTimeoutId); room.graceTimeoutId = undefined; }
+        room.interrupted = false;
+        room.offer = undefined;
+        room.answer = undefined;
+        room.iceCandidates = [];
+        room.readySockets.clear();
+        io.to(roomId).emit('ekyc:reconnect-now', { roomId });
+        io.to('role:admin').emit('ekyc:reconnect-now', { roomId });
+        console.log(`[eKYC] Reconnect during grace → fresh handshake for room ${roomId}`);
+      }
+
       room.readySockets.add(socket.id);
       console.log(`[eKYC] video-ready from ${socket.id}, room ${roomId}, readySockets: ${room.readySockets.size}`);
 
@@ -595,13 +651,35 @@ export const initializeSocket = (server: HTTPServer): SocketIOServer => {
       const room = ekycRooms.get(roomId);
       if (room) {
         if (room.timeoutId) { clearTimeout(room.timeoutId); room.timeoutId = undefined; }
+        if (room.graceTimeoutId) { clearTimeout(room.graceTimeoutId); room.graceTimeoutId = undefined; }
         deleteEkycNotifications(room.workerId);
+        // A real call happened (admin had joined) → admin must now decide completed/incomplete.
+        if (room.adminId) void markVideoKycAwaitingResult(room.workerId);
       }
+      io.to('role:admin').emit('ekyc:call-ended', { roomId, workerId: room?.workerId, reason: reason || 'manual-end-call' });
       io.to(roomId).emit('ekyc:call-ended', { roomId, workerId: room?.workerId, reason: reason || 'manual-end-call' });
       ekycRooms.delete(roomId);
       setActiveEkycRooms(ekycRooms.size);
       io.in(roomId).socketsLeave(roomId);
       console.log(`[eKYC] Call ended: ${roomId}, reason: ${reason || 'manual-end-call'}`);
+    });
+
+    // A client's peer connection failed but the socket is still alive (e.g. NAT rebind).
+    // Force a clean re-handshake on both sides without ending the call.
+    socket.on('ekyc:request-reconnect', ({ roomId }: { roomId: string }) => {
+      if (typeof roomId !== 'string' || !roomId.trim()) return;
+      const room = ekycRooms.get(roomId);
+      if (!room) { socket.emit('ekyc:call-ended', { roomId, reason: 'expired' }); return; }
+      recordSocketEvent('ekyc:request-reconnect');
+      socket.join(roomId);
+      if (room.graceTimeoutId) { clearTimeout(room.graceTimeoutId); room.graceTimeoutId = undefined; }
+      room.interrupted = false;
+      room.offer = undefined;
+      room.answer = undefined;
+      room.iceCandidates = [];
+      room.readySockets.clear();
+      io.to(roomId).emit('ekyc:reconnect-now', { roomId });
+      console.log(`[eKYC] Client-requested reconnect → fresh handshake for room ${roomId}`);
     });
 
     // Admin commands worker to switch camera (front/back)
@@ -682,19 +760,49 @@ export const initializeSocket = (server: HTTPServer): SocketIOServer => {
           const workerStillPresent = isUserPresentInRoom(room.workerId, roomId);
           const adminStillPresent = room.adminId ? isUserPresentInRoom(room.adminId, roomId) : false;
 
-          // End room when a required participant is no longer present in this room.
-          const shouldEndRoom = !workerStillPresent || (Boolean(room.adminId) && !adminStillPresent);
-          if (!shouldEndRoom) continue;
+          // A required participant is no longer present in this room.
+          const someoneLeft = !workerStillPresent || (Boolean(room.adminId) && !adminStillPresent);
+          if (!someoneLeft) continue;
 
-          if (room.timeoutId) {
-            clearTimeout(room.timeoutId);
+          // Before the admin has joined, there is no live call yet — keep the old
+          // behaviour (the 2-min create-room timeout handles an unanswered call).
+          if (!room.adminId) {
+            if (room.timeoutId) clearTimeout(room.timeoutId);
+            io.to(roomId).emit('ekyc:call-ended', { roomId, workerId: room.workerId, reason: 'participant-disconnected' });
+            io.in(roomId).socketsLeave(roomId);
+            void deleteEkycNotifications(room.workerId);
+            ekycRooms.delete(roomId);
+            setActiveEkycRooms(ekycRooms.size);
+            console.log(`[eKYC] Room cleaned (admin not joined yet): ${roomId}`);
+            continue;
           }
-          io.to(roomId).emit('ekyc:call-ended', { roomId, workerId: room.workerId, reason: 'participant-disconnected' });
-          io.in(roomId).socketsLeave(roomId);
-          void deleteEkycNotifications(room.workerId);
-          ekycRooms.delete(roomId);
-          setActiveEkycRooms(ekycRooms.size);
-          console.log(`[eKYC] Room cleaned after participant disconnect: ${roomId}`);
+
+          // Live call dropped → DON'T end. Hold the room for a grace window so the
+          // dropped side can rejoin the SAME call (network blip / app kill / accidental close).
+          if (room.interrupted) continue; // already counting down
+
+          room.interrupted = true;
+          const side: 'worker' | 'admin' = !workerStillPresent ? 'worker' : 'admin';
+          const payload = { roomId, side, graceSeconds: EKYC_GRACE_MS / 1000 };
+          io.to(roomId).emit('ekyc:participant-interrupted', payload);
+          io.to('role:admin').emit('ekyc:participant-interrupted', payload);
+
+          if (room.graceTimeoutId) clearTimeout(room.graceTimeoutId);
+          room.graceTimeoutId = setTimeout(() => {
+            const r = ekycRooms.get(roomId);
+            if (!r || !r.interrupted) return; // resumed in time
+            io.to(roomId).emit('ekyc:call-ended', { roomId, workerId: r.workerId, reason: 'grace-expired' });
+            io.to('role:admin').emit('ekyc:call-ended', { roomId, workerId: r.workerId, reason: 'grace-expired' });
+            io.in(roomId).socketsLeave(roomId);
+            void deleteEkycNotifications(r.workerId);
+            // The call had connected (admin joined) but ended on a drop → admin still decides.
+            if (r.adminId) void markVideoKycAwaitingResult(r.workerId);
+            ekycRooms.delete(roomId);
+            setActiveEkycRooms(ekycRooms.size);
+            console.log(`[eKYC] Grace expired (${EKYC_GRACE_MS / 1000}s), call ended: ${roomId}`);
+          }, EKYC_GRACE_MS);
+
+          console.log(`[eKYC] ${side} dropped — ${EKYC_GRACE_MS / 1000}s grace started, room held: ${roomId}`);
         }
       }
       connectedUsers.delete(socket.id);

@@ -49,6 +49,7 @@ export const PERMISSIONS: PermissionDef[] = [
   { key: 'incentives', label: 'Incentive Stats', scope: 'worker', route: '/admin/incentives' },
   { key: 'moderation_worker', label: 'Cancellation Watch (Workers)', scope: 'worker', route: '/admin/moderation' },
   { key: 'notify_worker', label: 'Send Notifications (Workers)', scope: 'worker', route: '/admin/push' },
+  { key: 'skill_review', label: 'Worker Skill Review', scope: 'worker', route: '/admin/skill-requests' },
 
   // Super-admin only
   { key: 'staff', label: 'Staff Management', scope: 'platform', route: '/admin/staff' },
@@ -93,7 +94,7 @@ export const ROLES: RoleDef[] = [
     role: 'operations_manager',
     label: 'Operations Manager',
     description: 'Monitors the platform — bookings, customers, workers, support.',
-    defaults: ['dashboard', 'analytics', 'bookings', 'customers', 'workers', 'support_customer', 'support_worker', 'moderation_customer', 'moderation_worker'],
+    defaults: ['dashboard', 'analytics', 'bookings', 'customers', 'workers', 'support_customer', 'support_worker', 'moderation_customer', 'moderation_worker', 'skill_review'],
   },
   {
     role: 'customer_support',
@@ -111,7 +112,7 @@ export const ROLES: RoleDef[] = [
     role: 'kyc_officer',
     label: 'KYC Verification Officer',
     description: 'Reviews Aadhaar / PAN / selfie / video KYC and approves or rejects.',
-    defaults: ['kyc', 'workers'],
+    defaults: ['kyc', 'workers', 'skill_review'],
   },
   {
     role: 'finance_manager',
