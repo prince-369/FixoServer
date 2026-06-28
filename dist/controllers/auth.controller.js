@@ -36,10 +36,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.logout = exports.refresh = exports.setPasswordForOAuthUser = exports.sendPasswordSetupOtp = exports.getMe = exports.resetPassword = exports.verifyOTPHandler = exports.forgotPassword = exports.loginAdmin = exports.loginWorker = exports.registerWorker = exports.registerWorkerWithGoogle = exports.googleAuthWorker = exports.loginCustomer = exports.completeGoogleRegistration = exports.googleAuthCustomer = exports.registerCustomer = void 0;
+exports.verifyVideoKycToken = exports.logout = exports.refresh = exports.setPasswordForOAuthUser = exports.sendPasswordSetupOtp = exports.getMe = exports.resetPassword = exports.verifyOTPHandler = exports.forgotPassword = exports.loginAdmin = exports.loginWorker = exports.registerWorker = exports.registerWorkerWithGoogle = exports.googleAuthWorker = exports.loginCustomer = exports.completeGoogleRegistration = exports.googleAuthCustomer = exports.registerCustomer = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const crypto_1 = __importDefault(require("crypto"));
 const axios_1 = __importDefault(require("axios"));
+const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const User_1 = __importDefault(require("../models/User"));
 const Worker_1 = __importDefault(require("../models/Worker"));
 const Admin_1 = __importDefault(require("../models/Admin"));
@@ -190,7 +191,7 @@ const consumeResetToken = async (rawToken) => {
 };
 const sendEmailResetLink = async (email, userId, role) => {
     const { rawToken, tokenHash } = await createResetToken(userId, role, EMAIL_RESET_TOKEN_TTL_MS);
-    const sent = await (0, email_service_1.sendPasswordResetEmail)(email, rawToken);
+    const sent = await (0, email_service_1.sendPasswordResetEmail)(email, rawToken, role);
     if (!sent) {
         await PasswordResetToken_1.default.deleteOne({ tokenHash });
         return false;
@@ -1119,4 +1120,35 @@ const logout = async (req, res) => {
     }
 };
 exports.logout = logout;
+// ─── Verify Video KYC Token (public endpoint — browser page uses this without auth header) ───
+const verifyVideoKycToken = async (req, res) => {
+    try {
+        const tokenParam = req.params.token;
+        if (!tokenParam || typeof tokenParam !== 'string') {
+            res.status(400).json({ message: 'Token required' });
+            return;
+        }
+        const decoded = jsonwebtoken_1.default.verify(tokenParam, env_1.default.JWT_SECRET);
+        if (decoded.purpose !== 'video-kyc') {
+            res.status(401).json({ message: 'Invalid token' });
+            return;
+        }
+        const worker = await Worker_1.default.findById(decoded.id).select('fullName phone accountStatus videoKycRetryAvailableAt');
+        if (!worker) {
+            res.status(404).json({ message: 'Worker not found' });
+            return;
+        }
+        res.json({
+            valid: true,
+            workerId: worker._id,
+            fullName: worker.fullName,
+            phone: worker.phone,
+            accountStatus: worker.accountStatus,
+        });
+    }
+    catch {
+        res.status(401).json({ message: 'Token expired or invalid' });
+    }
+};
+exports.verifyVideoKycToken = verifyVideoKycToken;
 //# sourceMappingURL=auth.controller.js.map

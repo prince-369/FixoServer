@@ -11,9 +11,11 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-export const sendPasswordResetEmail = async (email: string, resetToken: string): Promise<boolean> => {
+export const sendPasswordResetEmail = async (email: string, resetToken: string, role?: string): Promise<boolean> => {
   try {
-    const resetUrl = `${env.CLIENT_URL}/reset-password?token=${resetToken}`;
+    // Use correct frontend URL based on role
+    const baseUrl = role === 'worker' ? env.WORKER_CLIENT_URL : env.CLIENT_URL;
+    const resetUrl = `${baseUrl}/reset-password?token=${resetToken}`;
 
     if (!env.SMTP_USER) {
       console.log(`[DEV] Password reset link for ${email}: ${resetUrl}`);

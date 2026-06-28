@@ -3,7 +3,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.unselectSkill = exports.bumpSkillExperience = exports.requestSkill = exports.getSkills = exports.escalateHelpTicket = exports.appendHelpTicketMessage = exports.getHelpTicketDetail = exports.getHelpTickets = exports.createHelpTicket = exports.getChatbotQA = exports.deleteNotification = exports.markAllNotificationsRead = exports.markNotificationRead = exports.getNotifications = exports.getWithdrawals = exports.requestWithdrawal = exports.saveBankDetails = exports.getWalletTransactions = exports.getEarningsHistory = exports.getFunds = exports.completeWork = exports.requestCompletionCode = exports.sendMessage = exports.cancelBookingByWorker = exports.rejectBooking = exports.approveBooking = exports.respondToNegotiation = exports.submitBid = exports.getWorkRequestDetail = exports.getWorkRequests = exports.getReviews = exports.getDashboard = exports.updateCurrentLocation = exports.updateLocation = exports.toggleActive = exports.completeProfile = exports.reRequestEKYC = exports.updateProfile = exports.getProfile = void 0;
+exports.generateVideoKycToken = exports.unselectSkill = exports.bumpSkillExperience = exports.requestSkill = exports.getSkills = exports.escalateHelpTicket = exports.appendHelpTicketMessage = exports.getHelpTicketDetail = exports.getHelpTickets = exports.createHelpTicket = exports.getChatbotQA = exports.deleteNotification = exports.markAllNotificationsRead = exports.markNotificationRead = exports.getNotifications = exports.getWithdrawals = exports.requestWithdrawal = exports.saveBankDetails = exports.getWalletTransactions = exports.getEarningsHistory = exports.getFunds = exports.completeWork = exports.requestCompletionCode = exports.sendMessage = exports.cancelBookingByWorker = exports.rejectBooking = exports.approveBooking = exports.respondToNegotiation = exports.submitBid = exports.getWorkRequestDetail = exports.getWorkRequests = exports.getReviews = exports.getDashboard = exports.updateCurrentLocation = exports.updateLocation = exports.toggleActive = exports.completeProfile = exports.reRequestEKYC = exports.updateProfile = exports.getProfile = void 0;
+const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const Worker_1 = __importDefault(require("../models/Worker"));
 const Category_1 = __importDefault(require("../models/Category"));
 const Booking_1 = __importDefault(require("../models/Booking"));
@@ -1757,4 +1758,38 @@ const unselectSkill = async (req, res) => {
     }
 };
 exports.unselectSkill = unselectSkill;
+// ─── Generate Video KYC Token (for mobile app to open browser) ───
+const generateVideoKycToken = async (req, res) => {
+    try {
+        const worker = await Worker_1.default.findById(req.user.id);
+        if (!worker) {
+            res.status(404).json({ message: 'Worker not found' });
+            return;
+        }
+        // Only allow if in ekyc_pending or test status
+        if (!['test', 'ekyc_pending'].includes(worker.accountStatus)) {
+            res.status(400).json({ message: 'Video KYC not available in current status' });
+            return;
+        }
+        // Check cooldown
+        if (worker.videoKycRetryAvailableAt && worker.videoKycRetryAvailableAt > new Date()) {
+            res.status(400).json({
+                message: 'Please wait before retrying Video KYC',
+                retryAvailableAt: worker.videoKycRetryAvailableAt,
+            });
+            return;
+        }
+        // Generate a JWT token valid for 15 minutes (enough for the call)
+        const token = jsonwebtoken_1.default.sign({ id: worker._id.toString(), purpose: 'video-kyc' }, env_1.default.JWT_SECRET, { expiresIn: '15m' });
+        // The URL should point to the worker web app's video-kyc page
+        const baseUrl = env_1.default.WORKER_CLIENT_URL || env_1.default.CLIENT_URLS.find((u) => u.includes('fixoworker')) || env_1.default.CLIENT_URLS.find((u) => u.includes(':4000')) || 'https://fixoworker.vercel.app';
+        const url = `${baseUrl}/video-kyc/${token}`;
+        res.json({ token, url });
+    }
+    catch (error) {
+        console.error('Generate video KYC token error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.generateVideoKycToken = generateVideoKycToken;
 //# sourceMappingURL=worker.controller.js.map

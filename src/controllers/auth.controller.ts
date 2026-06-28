@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import axios from 'axios';
+import jwt from 'jsonwebtoken';
 import User from '../models/User';
 import Worker from '../models/Worker';
 import Admin from '../models/Admin';
@@ -218,7 +219,7 @@ const sendEmailResetLink = async (
   role: PasswordResetRole
 ): Promise<boolean> => {
   const { rawToken, tokenHash } = await createResetToken(userId, role, EMAIL_RESET_TOKEN_TTL_MS);
-  const sent = await sendPasswordResetEmail(email, rawToken);
+  const sent = await sendPasswordResetEmail(email, rawToken, role);
 
   if (!sent) {
     await PasswordResetToken.deleteOne({ tokenHash });
@@ -1224,5 +1225,29 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
     console.error('Logout error:', error);
     res.clearCookie('refreshToken', refreshCookieClearOptions);
     res.json({ message: 'Logged out' });
+  }
+};
+
+// ─── Verify Video KYC Token (public endpoint — browser page uses this without auth header) ───
+export const verifyVideoKycToken = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const tokenParam = req.params.token;
+    if (!tokenParam || typeof tokenParam !== 'string') { res.status(400).json({ message: 'Token required' }); return; }
+
+    const decoded = jwt.verify(tokenParam, env.JWT_SECRET) as unknown as { id: string; purpose: string };
+    if (decoded.purpose !== 'video-kyc') { res.status(401).json({ message: 'Invalid token' }); return; }
+
+    const worker = await Worker.findById(decoded.id).select('fullName phone accountStatus videoKycRetryAvailableAt');
+    if (!worker) { res.status(404).json({ message: 'Worker not found' }); return; }
+
+    res.json({
+      valid: true,
+      workerId: worker._id,
+      fullName: worker.fullName,
+      phone: worker.phone,
+      accountStatus: worker.accountStatus,
+    });
+  } catch {
+    res.status(401).json({ message: 'Token expired or invalid' });
   }
 };

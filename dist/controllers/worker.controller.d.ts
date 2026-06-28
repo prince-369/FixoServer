@@ -38,4 +38,5 @@ export declare const getSkills: (req: Request, res: Response) => Promise<void>;
 export declare const requestSkill: (req: Request, res: Response) => Promise<void>;
 export declare const bumpSkillExperience: (req: Request, res: Response) => Promise<void>;
 export declare const unselectSkill: (req: Request, res: Response) => Promise<void>;
+export declare const generateVideoKycToken: (req: Request, res: Response) => Promise<void>;
 //# sourceMappingURL=worker.controller.d.ts.map

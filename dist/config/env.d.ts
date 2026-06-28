@@ -13,6 +13,7 @@ interface EnvConfig {
     JWT_EXPIRE: string;
     CLIENT_URL: string;
     CLIENT_URLS: string[];
+    WORKER_CLIENT_URL: string;
     TRUST_PROXY: boolean;
     BODY_LIMIT_MB: number;
     URL_ENCODED_LIMIT_MB: number;

@@ -16,4 +16,5 @@ export declare const sendPasswordSetupOtp: (req: Request, res: Response) => Prom
 export declare const setPasswordForOAuthUser: (req: Request, res: Response) => Promise<void>;
 export declare const refresh: (req: Request, res: Response) => Promise<void>;
 export declare const logout: (req: Request, res: Response) => Promise<void>;
+export declare const verifyVideoKycToken: (req: Request, res: Response) => Promise<void>;
 //# sourceMappingURL=auth.controller.d.ts.map

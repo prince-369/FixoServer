@@ -89,6 +89,7 @@ const env = {
     JWT_EXPIRE: process.env.JWT_EXPIRE || '7d',
     CLIENT_URL: clientUrl,
     CLIENT_URLS: parseClientOrigins(clientUrl),
+    WORKER_CLIENT_URL: process.env.WORKER_CLIENT_URL || 'https://fixoworker.vercel.app',
     TRUST_PROXY: parseBooleanEnv('TRUST_PROXY', nodeEnv === 'production'),
     BODY_LIMIT_MB: parseNumberEnv('BODY_LIMIT_MB', 2, { min: 1, max: 25 }),
     URL_ENCODED_LIMIT_MB: parseNumberEnv('URL_ENCODED_LIMIT_MB', 2, { min: 1, max: 25 }),

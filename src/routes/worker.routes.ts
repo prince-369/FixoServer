@@ -45,6 +45,7 @@ import {
   getHelpTicketDetail,
   appendHelpTicketMessage,
   escalateHelpTicket,
+  generateVideoKycToken,
 } from '../controllers/worker.controller';
 import { getWorkerPromotions, getPromotionHistory, claimPromotionBonus } from '../controllers/rewards.controller';
 
@@ -57,6 +58,7 @@ router.use(blockGuard);
 router.get('/profile', getProfile);
 router.put('/profile', uploadSingle, updateProfile);
 router.post('/ekyc/re-request', mutationGuard, uploadAadhaar, reRequestEKYC);
+router.post('/video-kyc-token', mutationGuard, generateVideoKycToken);
 router.post('/complete-profile', uploadSingle, completeProfile);
 router.put('/toggle-active', toggleActive);
 router.put('/location', updateLocation);

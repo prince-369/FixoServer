@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import jwt, { type SignOptions } from 'jsonwebtoken';
 import Worker from '../models/Worker';
 import Category from '../models/Category';
 import Booking from '../models/Booking';
@@ -1905,6 +1906,43 @@ export const unselectSkill = async (req: Request, res: Response): Promise<void> 
     res.json({ message: 'Skill removed. To add it again you will go through verification.' });
   } catch (error) {
     console.error('Unselect skill error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─── Generate Video KYC Token (for mobile app to open browser) ───
+export const generateVideoKycToken = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const worker = await Worker.findById(req.user!.id);
+    if (!worker) { res.status(404).json({ message: 'Worker not found' }); return; }
+
+    // Only allow if in ekyc_pending or test status
+    if (!['test', 'ekyc_pending'].includes(worker.accountStatus)) {
+      res.status(400).json({ message: 'Video KYC not available in current status' }); return;
+    }
+
+    // Check cooldown
+    if (worker.videoKycRetryAvailableAt && worker.videoKycRetryAvailableAt > new Date()) {
+      res.status(400).json({
+        message: 'Please wait before retrying Video KYC',
+        retryAvailableAt: worker.videoKycRetryAvailableAt,
+      }); return;
+    }
+
+    // Generate a JWT token valid for 15 minutes (enough for the call)
+    const token = jwt.sign(
+      { id: worker._id.toString(), purpose: 'video-kyc' },
+      env.JWT_SECRET,
+      { expiresIn: '15m' } as SignOptions,
+    );
+
+    // The URL should point to the worker web app's video-kyc page
+    const baseUrl = env.WORKER_CLIENT_URL || env.CLIENT_URLS.find((u) => u.includes('fixoworker')) || env.CLIENT_URLS.find((u) => u.includes(':4000')) || 'https://fixoworker.vercel.app';
+    const url = `${baseUrl}/video-kyc/${token}`;
+
+    res.json({ token, url });
+  } catch (error) {
+    console.error('Generate video KYC token error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };
