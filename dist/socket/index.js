@@ -445,6 +445,20 @@ const initializeSocket = (server) => {
                 }, 2 * 60 * 1000);
             }
         });
+        // Worker re-joins room after socket reconnect
+        socket.on('ekyc:rejoin-room', ({ roomId, workerId }) => {
+            if (!roomId || !workerId)
+                return;
+            const room = ekycRooms.get(roomId);
+            if (room && room.workerId === workerId) {
+                socket.join(roomId);
+                console.log(`[eKYC] Worker re-joined room after reconnect: ${roomId}, socket: ${socket.id}`);
+                // If admin already joined, notify the worker immediately
+                if (room.adminId) {
+                    socket.emit('ekyc:admin-joined', { adminId: room.adminId, roomId });
+                }
+            }
+        });
         // Admin joins eKYC call — clear timeout since call is answered
         socket.on('ekyc:join-room', ({ roomId, adminId }) => {
             if (typeof roomId !== 'string' || !roomId.trim())
@@ -461,6 +475,10 @@ const initializeSocket = (server) => {
                 }
                 socket.join(roomId);
                 io.to(roomId).emit('ekyc:admin-joined', { adminId, roomId });
+                // Also notify the worker's personal room in case their socket left the ekyc room during reconnect
+                if (room.workerId) {
+                    io.to(`user:${room.workerId}`).emit('ekyc:admin-joined', { adminId, roomId });
+                }
                 deleteEkycNotifications(room.workerId);
                 console.log(`[eKYC] Admin ${adminId} joined room: ${roomId}, socket: ${socket.id}`);
             }
