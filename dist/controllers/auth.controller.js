@@ -1,9 +1,42 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.logout = exports.refresh = exports.getMe = exports.resetPassword = exports.verifyOTPHandler = exports.forgotPassword = exports.loginAdmin = exports.loginWorker = exports.registerWorker = exports.registerWorkerWithGoogle = exports.googleAuthWorker = exports.loginCustomer = exports.completeGoogleRegistration = exports.googleAuthCustomer = exports.registerCustomer = void 0;
+exports.logout = exports.refresh = exports.setPasswordForOAuthUser = exports.sendPasswordSetupOtp = exports.getMe = exports.resetPassword = exports.verifyOTPHandler = exports.forgotPassword = exports.loginAdmin = exports.loginWorker = exports.registerWorker = exports.registerWorkerWithGoogle = exports.googleAuthWorker = exports.loginCustomer = exports.completeGoogleRegistration = exports.googleAuthCustomer = exports.registerCustomer = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const crypto_1 = __importDefault(require("crypto"));
 const axios_1 = __importDefault(require("axios"));
@@ -387,7 +420,13 @@ const loginCustomer = async (req, res) => {
             return;
         }
         if (!user.password) {
-            res.status(401).json({ message: 'Please login with Google' });
+            // Google OAuth account — offer to set a password
+            res.status(403).json({
+                needsPassword: true,
+                message: 'This account was created with Google. Would you like to set a password for email/phone login?',
+                email: user.email ? user.email.replace(/(.{2})(.*)(@.*)/, '$1***$3') : '',
+                userId: user._id,
+            });
             return;
         }
         const isMatch = await bcryptjs_1.default.compare(password, user.password);
@@ -637,7 +676,13 @@ const loginWorker = async (req, res) => {
             return;
         }
         if (!worker.password) {
-            res.status(401).json({ message: 'Please login with Google' });
+            // Google OAuth account — offer to set a password
+            res.status(403).json({
+                needsPassword: true,
+                message: 'This account was created with Google. Would you like to set a password for email/phone login?',
+                email: worker.email ? worker.email.replace(/(.{2})(.*)(@.*)/, '$1***$3') : '',
+                userId: worker._id,
+            });
             return;
         }
         const isMatch = await bcryptjs_1.default.compare(password, worker.password);
@@ -899,6 +944,130 @@ const getMe = async (req, res) => {
     }
 };
 exports.getMe = getMe;
+// ─── Send OTP for Password Setup (Google OAuth users) ───
+const sendPasswordSetupOtp = async (req, res) => {
+    try {
+        const { userId, role } = req.body;
+        if (!userId || !role) {
+            res.status(400).json({ message: 'userId and role are required' });
+            return;
+        }
+        let email = '';
+        let name = '';
+        if (role === 'customer') {
+            const user = await User_1.default.findById(userId);
+            if (!user) {
+                res.status(404).json({ message: 'User not found' });
+                return;
+            }
+            if (user.password) {
+                res.status(400).json({ message: 'Password already exists. Use forgot-password to reset.' });
+                return;
+            }
+            email = user.email || '';
+            name = user.fullName || '';
+        }
+        else if (role === 'worker') {
+            const worker = await Worker_1.default.findById(userId);
+            if (!worker) {
+                res.status(404).json({ message: 'Worker not found' });
+                return;
+            }
+            if (worker.password) {
+                res.status(400).json({ message: 'Password already exists. Use forgot-password to reset.' });
+                return;
+            }
+            email = worker.email || '';
+            name = worker.fullName || '';
+        }
+        else {
+            res.status(400).json({ message: 'Invalid role' });
+            return;
+        }
+        if (!email) {
+            res.status(400).json({ message: 'No email associated with this account' });
+            return;
+        }
+        const otp = (0, sms_service_1.generateOTP)();
+        await (0, sms_service_1.storeOTP)(email, otp);
+        const { sendPasswordSetupOtpEmail } = await Promise.resolve().then(() => __importStar(require('../services/email.service')));
+        await sendPasswordSetupOtpEmail(email, otp, name);
+        res.json({ message: 'OTP sent to your email', email: email.replace(/(.{2})(.*)(@.*)/, '$1***$3') });
+    }
+    catch (error) {
+        console.error('Send password setup OTP error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.sendPasswordSetupOtp = sendPasswordSetupOtp;
+// ─── Verify OTP & Set Password (Google OAuth users) ───
+const setPasswordForOAuthUser = async (req, res) => {
+    try {
+        const { userId, role, otp, password } = req.body;
+        if (!userId || !role || !otp || !password) {
+            res.status(400).json({ message: 'All fields are required' });
+            return;
+        }
+        // Validate password strength
+        if (password.length < 8) {
+            res.status(400).json({ message: 'Password must be at least 8 characters' });
+            return;
+        }
+        let email = '';
+        if (role === 'customer') {
+            const user = await User_1.default.findById(userId).select('+password');
+            if (!user) {
+                res.status(404).json({ message: 'User not found' });
+                return;
+            }
+            if (user.password) {
+                res.status(400).json({ message: 'Password already set' });
+                return;
+            }
+            email = user.email || '';
+        }
+        else if (role === 'worker') {
+            const worker = await Worker_1.default.findById(userId).select('+password');
+            if (!worker) {
+                res.status(404).json({ message: 'Worker not found' });
+                return;
+            }
+            if (worker.password) {
+                res.status(400).json({ message: 'Password already set' });
+                return;
+            }
+            email = worker.email || '';
+        }
+        else {
+            res.status(400).json({ message: 'Invalid role' });
+            return;
+        }
+        if (!email) {
+            res.status(400).json({ message: 'No email found' });
+            return;
+        }
+        // Verify OTP
+        const isValid = await (0, sms_service_1.verifyOTP)(email, otp);
+        if (!isValid) {
+            res.status(400).json({ message: 'Invalid or expired OTP' });
+            return;
+        }
+        // Hash and set password
+        const hashedPassword = await bcryptjs_1.default.hash(password, 10);
+        if (role === 'customer') {
+            await User_1.default.findByIdAndUpdate(userId, { password: hashedPassword });
+        }
+        else {
+            await Worker_1.default.findByIdAndUpdate(userId, { password: hashedPassword });
+        }
+        res.json({ message: 'Password set successfully! You can now login with email/phone and password.' });
+    }
+    catch (error) {
+        console.error('Set password error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.setPasswordForOAuthUser = setPasswordForOAuthUser;
 // ─── Refresh Token ───
 const refresh = async (req, res) => {
     try {

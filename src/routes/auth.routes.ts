@@ -15,6 +15,8 @@ import {
   getMe,
   logout,
   refresh,
+  sendPasswordSetupOtp,
+  setPasswordForOAuthUser,
 } from '../controllers/auth.controller';
 import { protect } from '../middlewares/auth.middleware';
 import { uploadAadhaar } from '../middlewares/upload.middleware';
@@ -49,6 +51,10 @@ router.post('/admin/login', loginAdmin);
 router.post('/forgot-password', forgotPasswordValidation, handleValidationErrors, forgotPassword);
 router.post('/verify-otp', verifyOTPHandler);
 router.post('/reset-password', resetPasswordValidation, handleValidationErrors, resetPassword);
+
+// Password setup for Google OAuth users
+router.post('/send-password-setup-otp', sendPasswordSetupOtp);
+router.post('/set-password', setPasswordForOAuthUser);
 
 // Common
 router.get('/me', protect, getMe);

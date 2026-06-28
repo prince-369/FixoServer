@@ -23,6 +23,9 @@ router.post('/admin/login', auth_controller_1.loginAdmin);
 router.post('/forgot-password', validators_1.forgotPasswordValidation, error_middleware_1.handleValidationErrors, auth_controller_1.forgotPassword);
 router.post('/verify-otp', auth_controller_1.verifyOTPHandler);
 router.post('/reset-password', validators_1.resetPasswordValidation, error_middleware_1.handleValidationErrors, auth_controller_1.resetPassword);
+// Password setup for Google OAuth users
+router.post('/send-password-setup-otp', auth_controller_1.sendPasswordSetupOtp);
+router.post('/set-password', auth_controller_1.setPasswordForOAuthUser);
 // Common
 router.get('/me', auth_middleware_1.protect, auth_controller_1.getMe);
 router.post('/refresh', auth_controller_1.refresh);
