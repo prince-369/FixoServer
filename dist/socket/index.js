@@ -119,6 +119,38 @@ const emitRetryBlocked = (socket, workerId, retryAvailableAt, reason) => {
         retryAvailableAt: retryAvailableAt.toISOString(),
     });
 };
+// Aggregate "VideoCall component ready" signals on the instance that OWNS the room.
+// Called both for local sockets and (via serverSideEmit) for sockets connected to
+// other instances, so a worker + admin split across instances still reaches 2-ready.
+const handleVideoReady = (roomId, socketId) => {
+    const room = ekycRooms.get(roomId);
+    if (!room)
+        return; // Only the owning instance has the room — others ignore.
+    // A participant came back during the grace window → resume this call.
+    // Clear the grace timer, wipe the stale WebRTC handshake, and ask BOTH sides
+    // to re-run a clean negotiation so the live call continues from where it left off.
+    if (room.interrupted) {
+        if (room.graceTimeoutId) {
+            clearTimeout(room.graceTimeoutId);
+            room.graceTimeoutId = undefined;
+        }
+        room.interrupted = false;
+        room.offer = undefined;
+        room.answer = undefined;
+        room.iceCandidates = [];
+        room.readySockets.clear();
+        io.to(roomId).emit('ekyc:reconnect-now', { roomId });
+        io.to('role:admin').emit('ekyc:reconnect-now', { roomId });
+        console.log(`[eKYC] Reconnect during grace → fresh handshake for room ${roomId}`);
+    }
+    room.readySockets.add(socketId);
+    console.log(`[eKYC] video-ready from ${socketId}, room ${roomId}, readySockets: ${room.readySockets.size}`);
+    if (room.readySockets.size >= 2) {
+        // Both sides are ready — tell EVERYONE in the room to start
+        console.log(`[eKYC] Both ready! Emitting ekyc:both-ready to room ${roomId}`);
+        io.to(roomId).emit('ekyc:both-ready', { roomId });
+    }
+};
 const setupSocketRedisAdapter = async () => {
     if (!env_1.default.REDIS_URL || !isSocketInitialized)
         return;
@@ -193,6 +225,69 @@ const initializeSocket = (server) => {
     isSocketInitialized = true;
     (0, metrics_1.setActiveEkycRooms)(0);
     void setupSocketRedisAdapter();
+    // ─── Inter-instance eKYC sync (multi-instance AWS deploy) ───
+    // When an admin joins on a different server instance than the one that owns the
+    // in-memory room, the join is broadcast here so the owning instance can update
+    // the room's adminId and clear its auto-cancel timeout.
+    io.on('ekyc:admin-joined-sync', ({ roomId, adminId }) => {
+        const room = ekycRooms.get(roomId);
+        if (room) {
+            room.adminId = adminId;
+            if (room.timeoutId) {
+                clearTimeout(room.timeoutId);
+                room.timeoutId = undefined;
+            }
+            deleteEkycNotifications(room.workerId);
+            console.log(`[eKYC] admin-joined-sync applied on owning instance for room ${roomId}`);
+        }
+    });
+    // Aggregate cross-instance "video-ready" signals on the owning instance.
+    io.on('ekyc:video-ready-sync', ({ roomId, socketId }) => {
+        handleVideoReady(roomId, socketId);
+    });
+    // Buffer WebRTC handshake artifacts on the owning instance when the producing
+    // socket connected to a different instance (multi-instance deploy).
+    io.on('ekyc:buffer-offer', ({ roomId, offer }) => {
+        const room = ekycRooms.get(roomId);
+        if (room)
+            room.offer = offer;
+    });
+    io.on('ekyc:buffer-answer', ({ roomId, answer }) => {
+        const room = ekycRooms.get(roomId);
+        if (room)
+            room.answer = answer;
+    });
+    io.on('ekyc:buffer-ice', ({ roomId, fromSocketId, candidate }) => {
+        const room = ekycRooms.get(roomId);
+        if (room)
+            room.iceCandidates.push({ from: fromSocketId, candidate });
+    });
+    // Serve buffered artifacts to a requester that connected to a different instance.
+    io.on('ekyc:request-offer-sync', ({ roomId, requesterId }) => {
+        const room = ekycRooms.get(roomId);
+        if (room?.offer)
+            io.to(requesterId).emit('ekyc:offer', { offer: room.offer });
+    });
+    io.on('ekyc:request-answer-sync', ({ roomId, requesterId }) => {
+        const room = ekycRooms.get(roomId);
+        if (room?.answer)
+            io.to(requesterId).emit('ekyc:answer', { answer: room.answer });
+    });
+    io.on('ekyc:request-candidates-sync', ({ roomId, requesterId }) => {
+        const room = ekycRooms.get(roomId);
+        if (room) {
+            const others = room.iceCandidates.filter((c) => c.from !== requesterId);
+            others.forEach(({ candidate }) => io.to(requesterId).emit('ekyc:ice-candidate', { candidate }));
+        }
+    });
+    // Worker reconnected on a different instance — owning instance re-notifies if admin joined.
+    io.on('ekyc:rejoin-sync', ({ roomId, workerId }) => {
+        const room = ekycRooms.get(roomId);
+        if (room && room.workerId === workerId && room.adminId) {
+            io.to(`user:${workerId}`).emit('ekyc:admin-joined', { adminId: room.adminId, roomId });
+            console.log(`[eKYC] rejoin-sync re-notified worker ${workerId} (admin already joined) for room ${roomId}`);
+        }
+    });
     io.use((socket, next) => {
         try {
             const authToken = socket.handshake.auth?.token;
@@ -458,6 +553,15 @@ const initializeSocket = (server) => {
                     socket.emit('ekyc:admin-joined', { adminId: room.adminId, roomId });
                 }
             }
+            else {
+                // Room may live on another instance — still join locally for signaling and
+                // ask the owning instance to re-notify if an admin has already joined.
+                socket.join(roomId);
+                try {
+                    io.serverSideEmit('ekyc:rejoin-sync', { roomId, workerId });
+                }
+                catch { /* no adapter */ }
+            }
         });
         // Admin joins eKYC call — clear timeout since call is answered
         socket.on('ekyc:join-room', ({ roomId, adminId }) => {
@@ -465,23 +569,40 @@ const initializeSocket = (server) => {
                 return;
             if (typeof adminId !== 'string' || !adminId.trim())
                 return;
+            (0, metrics_1.recordSocketEvent)('ekyc:join-room');
+            // Always join the room locally so this admin socket receives WebRTC signaling.
+            socket.join(roomId);
+            // RoomId always encodes the workerId as `ekyc:<workerId>` — derive it so we can
+            // reach the worker even when the in-memory room lives on a DIFFERENT server
+            // instance (multi-instance AWS deploy behind the Redis adapter).
             const room = ekycRooms.get(roomId);
+            const workerId = room?.workerId || roomId.replace(/^ekyc:/, '');
             if (room) {
-                (0, metrics_1.recordSocketEvent)('ekyc:join-room');
+                // Room is owned by THIS instance — update its state directly.
                 room.adminId = adminId;
                 if (room.timeoutId) {
                     clearTimeout(room.timeoutId);
                     room.timeoutId = undefined;
                 }
-                socket.join(roomId);
-                io.to(roomId).emit('ekyc:admin-joined', { adminId, roomId });
-                // Also notify the worker's personal room in case their socket left the ekyc room during reconnect
-                if (room.workerId) {
-                    io.to(`user:${room.workerId}`).emit('ekyc:admin-joined', { adminId, roomId });
-                }
                 deleteEkycNotifications(room.workerId);
-                console.log(`[eKYC] Admin ${adminId} joined room: ${roomId}, socket: ${socket.id}`);
             }
+            else {
+                // Room lives on another instance — sync the join across the cluster so the
+                // owning instance updates adminId + clears its auto-cancel timeout.
+                try {
+                    io.serverSideEmit('ekyc:admin-joined-sync', { roomId, adminId });
+                }
+                catch (e) {
+                    console.error('[eKYC] serverSideEmit admin-joined-sync failed:', e);
+                }
+            }
+            // Notify the worker. The Redis adapter makes `io.to(...)` cross-instance, so this
+            // reaches the worker socket regardless of which instance it connected to.
+            io.to(roomId).emit('ekyc:admin-joined', { adminId, roomId });
+            if (workerId) {
+                io.to(`user:${workerId}`).emit('ekyc:admin-joined', { adminId, roomId });
+            }
+            console.log(`[eKYC] Admin ${adminId} joined room: ${roomId} (workerId: ${workerId}, localRoom: ${!!room}), socket: ${socket.id}`);
         });
         // Admin rejects/declines the incoming call
         socket.on('ekyc:reject-call', ({ roomId }) => {
@@ -505,41 +626,30 @@ const initializeSocket = (server) => {
         // Server tracks which sockets are ready; when 2 sockets are ready, tells the initiator to create offer
         socket.on('ekyc:video-ready', ({ roomId }) => {
             socket.join(roomId); // Ensure room membership
-            const room = ekycRooms.get(roomId);
-            if (!room) {
-                console.log(`[eKYC] video-ready: room ${roomId} not found`);
-                return;
+            // Process locally if this instance owns the room…
+            handleVideoReady(roomId, socket.id);
+            // …and forward to the rest of the cluster so the owning instance (which may be
+            // different from where this socket connected) can aggregate readiness too.
+            try {
+                io.serverSideEmit('ekyc:video-ready-sync', { roomId, socketId: socket.id });
             }
-            // A participant came back during the grace window → resume this call.
-            // Clear the grace timer, wipe the stale WebRTC handshake, and ask BOTH sides
-            // to re-run a clean negotiation so the live call continues from where it left off.
-            if (room.interrupted) {
-                if (room.graceTimeoutId) {
-                    clearTimeout(room.graceTimeoutId);
-                    room.graceTimeoutId = undefined;
-                }
-                room.interrupted = false;
-                room.offer = undefined;
-                room.answer = undefined;
-                room.iceCandidates = [];
-                room.readySockets.clear();
-                io.to(roomId).emit('ekyc:reconnect-now', { roomId });
-                io.to('role:admin').emit('ekyc:reconnect-now', { roomId });
-                console.log(`[eKYC] Reconnect during grace → fresh handshake for room ${roomId}`);
-            }
-            room.readySockets.add(socket.id);
-            console.log(`[eKYC] video-ready from ${socket.id}, room ${roomId}, readySockets: ${room.readySockets.size}`);
-            if (room.readySockets.size >= 2) {
-                // Both sides are ready — tell EVERYONE in the room to start
-                console.log(`[eKYC] Both ready! Emitting ekyc:both-ready to room ${roomId}`);
-                io.to(roomId).emit('ekyc:both-ready', { roomId });
+            catch (e) {
+                console.error('[eKYC] serverSideEmit video-ready-sync failed:', e);
             }
         });
         // WebRTC offer — buffer on server + relay
         socket.on('ekyc:offer', ({ roomId, offer }) => {
             const room = ekycRooms.get(roomId);
-            if (room)
+            if (room) {
                 room.offer = offer;
+            }
+            else {
+                // Buffer on the owning instance (multi-instance deploy).
+                try {
+                    io.serverSideEmit('ekyc:buffer-offer', { roomId, offer });
+                }
+                catch { /* no adapter */ }
+            }
             console.log(`[eKYC] Offer received from ${socket.id}, relaying to room ${roomId}`);
             socket.to(roomId).emit('ekyc:offer', { offer });
         });
@@ -550,12 +660,26 @@ const initializeSocket = (server) => {
                 console.log(`[eKYC] Sending buffered offer to ${socket.id}`);
                 socket.emit('ekyc:offer', { offer: room.offer });
             }
+            else {
+                // Owning instance may be elsewhere — ask the cluster to deliver it.
+                try {
+                    io.serverSideEmit('ekyc:request-offer-sync', { roomId, requesterId: socket.id });
+                }
+                catch { /* no adapter */ }
+            }
         });
         // WebRTC answer — relay
         socket.on('ekyc:answer', ({ roomId, answer }) => {
             const room = ekycRooms.get(roomId);
-            if (room)
+            if (room) {
                 room.answer = answer;
+            }
+            else {
+                try {
+                    io.serverSideEmit('ekyc:buffer-answer', { roomId, answer });
+                }
+                catch { /* no adapter */ }
+            }
             console.log(`[eKYC] Answer received from ${socket.id}, relaying to room ${roomId}`);
             socket.to(roomId).emit('ekyc:answer', { answer });
         });
@@ -566,12 +690,25 @@ const initializeSocket = (server) => {
                 console.log(`[eKYC] Sending buffered answer to ${socket.id}`);
                 socket.emit('ekyc:answer', { answer: room.answer });
             }
+            else {
+                try {
+                    io.serverSideEmit('ekyc:request-answer-sync', { roomId, requesterId: socket.id });
+                }
+                catch { /* no adapter */ }
+            }
         });
         // ICE candidate — buffer + relay
         socket.on('ekyc:ice-candidate', ({ roomId, candidate }) => {
             const room = ekycRooms.get(roomId);
-            if (room)
+            if (room) {
                 room.iceCandidates.push({ from: socket.id, candidate });
+            }
+            else {
+                try {
+                    io.serverSideEmit('ekyc:buffer-ice', { roomId, fromSocketId: socket.id, candidate });
+                }
+                catch { /* no adapter */ }
+            }
             socket.to(roomId).emit('ekyc:ice-candidate', { candidate });
         });
         // Request buffered ICE candidates (in case some were missed)
@@ -583,6 +720,12 @@ const initializeSocket = (server) => {
                     socket.emit('ekyc:ice-candidate', { candidate });
                 });
                 console.log(`[eKYC] Sent ${others.length} buffered ICE candidates to ${socket.id}`);
+            }
+            else {
+                try {
+                    io.serverSideEmit('ekyc:request-candidates-sync', { roomId, requesterId: socket.id });
+                }
+                catch { /* no adapter */ }
             }
         });
         // End eKYC call
