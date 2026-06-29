@@ -335,6 +335,23 @@ export const initializeSocket = (server: HTTPServer): SocketIOServer => {
     }
   });
 
+  // A user reconnected on a different instance and asked to resume — the instance
+  // that owns their ongoing eKYC room answers by emitting resume-available to them.
+  io.on('ekyc:check-resume-sync', ({ userId, role }: { userId: string; role: string }) => {
+    for (const [roomId, room] of ekycRooms.entries()) {
+      const isWorker = role === 'worker' && room.workerId === userId;
+      const isAdmin = role === 'admin' && room.adminId === userId;
+      if (!isWorker && !isAdmin) continue;
+      io.to(`user:${userId}`).emit('ekyc:resume-available', {
+        roomId,
+        role,
+        workerId: room.workerId,
+        adminId: room.adminId,
+      });
+      console.log(`[eKYC] check-resume-sync: re-notified ${role} ${userId} to resume ${roomId}`);
+    }
+  });
+
   io.use((socket, next) => {
     try {
       const authToken = socket.handshake.auth?.token as string | undefined;
@@ -635,6 +652,39 @@ export const initializeSocket = (server: HTTPServer): SocketIOServer => {
         // ask the owning instance to re-notify if an admin has already joined.
         socket.join(roomId);
         try { io.serverSideEmit('ekyc:rejoin-sync', { roomId, workerId }); } catch { /* no adapter */ }
+      }
+    });
+
+    // ─── Client-initiated resume check (page reload / network drop / app relaunch) ───
+    // The admin/worker asks "am I part of an ongoing eKYC call?" right after their
+    // socket is ready and listeners are attached. This avoids the race where the
+    // server's auto-register fires resume-available before the client is listening,
+    // and works across instances via serverSideEmit.
+    socket.on('ekyc:check-resume', () => {
+      const actor = connectedUsers.get(socket.id);
+      if (!actor) return;
+
+      let foundLocally = false;
+      for (const [roomId, room] of ekycRooms.entries()) {
+        const isWorker = actor.role === 'worker' && room.workerId === actor.userId;
+        const isAdmin = actor.role === 'admin' && room.adminId === actor.userId;
+        if (!isWorker && !isAdmin) continue;
+        foundLocally = true;
+        socket.join(roomId);
+        socket.emit('ekyc:resume-available', {
+          roomId,
+          role: actor.role,
+          workerId: room.workerId,
+          adminId: room.adminId,
+        });
+        console.log(`[eKYC] check-resume: ${actor.role} ${actor.userId} resumed into ${roomId}`);
+      }
+
+      if (!foundLocally) {
+        // Room may be owned by another instance — ask the cluster.
+        try {
+          io.serverSideEmit('ekyc:check-resume-sync', { userId: actor.userId, role: actor.role });
+        } catch { /* no adapter */ }
       }
     });
 
