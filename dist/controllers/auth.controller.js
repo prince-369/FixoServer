@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.verifyVideoKycToken = exports.logout = exports.refresh = exports.setPasswordForOAuthUser = exports.sendPasswordSetupOtp = exports.getMe = exports.resetPassword = exports.verifyOTPHandler = exports.forgotPassword = exports.loginAdmin = exports.loginWorker = exports.registerWorker = exports.registerWorkerWithGoogle = exports.googleAuthWorker = exports.loginCustomer = exports.completeGoogleRegistration = exports.googleAuthCustomer = exports.registerCustomer = void 0;
+exports.verifyVideoKycToken = exports.logout = exports.refresh = exports.setPasswordForOAuthUser = exports.sendPasswordSetupOtp = exports.getMe = exports.changePassword = exports.resetPassword = exports.verifyOTPHandler = exports.forgotPassword = exports.loginAdmin = exports.loginWorker = exports.registerWorker = exports.registerWorkerWithGoogle = exports.googleAuthWorker = exports.loginCustomer = exports.completeGoogleRegistration = exports.googleAuthCustomer = exports.registerCustomer = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const crypto_1 = __importDefault(require("crypto"));
 const axios_1 = __importDefault(require("axios"));
@@ -885,6 +885,58 @@ const resetPassword = async (req, res) => {
     }
 };
 exports.resetPassword = resetPassword;
+// ─── Change Password (authenticated) ───
+const changePassword = async (req, res) => {
+    try {
+        if (!req.user) {
+            res.status(401).json({ message: 'Not authorized' });
+            return;
+        }
+        const { currentPassword, newPassword } = req.body;
+        if (!currentPassword || !newPassword) {
+            res.status(400).json({ message: 'Current password and new password are required' });
+            return;
+        }
+        // Validate strong password
+        const pwdError = validateStrongPassword(newPassword);
+        if (pwdError) {
+            res.status(400).json({ message: pwdError });
+            return;
+        }
+        let account = null;
+        if (req.user.role === 'customer') {
+            account = await User_1.default.findById(req.user.id).select('+password');
+        }
+        else if (req.user.role === 'worker') {
+            account = await Worker_1.default.findById(req.user.id).select('+password');
+        }
+        if (!account) {
+            res.status(404).json({ message: 'Account not found' });
+            return;
+        }
+        // If account has no password (Google OAuth only), reject
+        if (!account.password) {
+            res.status(400).json({ message: 'Your account uses Google Sign-In. Set a password first using the "Set Password" option.' });
+            return;
+        }
+        // Verify current password
+        const isMatch = await bcryptjs_1.default.compare(currentPassword, account.password);
+        if (!isMatch) {
+            res.status(400).json({ message: 'Current password is incorrect' });
+            return;
+        }
+        // Hash and update
+        const hashedPassword = await bcryptjs_1.default.hash(newPassword, 12);
+        account.password = hashedPassword;
+        await account.save();
+        res.json({ message: 'Password changed successfully' });
+    }
+    catch (error) {
+        console.error('Change password error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.changePassword = changePassword;
 // ─── Get Current User ───
 const getMe = async (req, res) => {
     try {

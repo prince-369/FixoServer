@@ -12,6 +12,7 @@ import {
   forgotPassword,
   verifyOTPHandler,
   resetPassword,
+  changePassword,
   getMe,
   logout,
   refresh,
@@ -59,6 +60,7 @@ router.post('/set-password', setPasswordForOAuthUser);
 
 // Common
 router.get('/me', protect, getMe);
+router.post('/change-password', protect, changePassword);
 router.post('/refresh', refresh);
 router.post('/logout', logout);
 

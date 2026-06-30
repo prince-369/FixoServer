@@ -293,7 +293,6 @@ const getWorkerPromotions = async (req, res) => {
             isActive: true,
             status: 'active',
             startsAt: { $lte: now },
-            $or: [{ endsAt: null }, { endsAt: { $gte: now } }],
         }).sort({ createdAt: -1 });
         // Only bonus-earning promotions remain — platform is free (no commission).
         const applicable = promos.filter((p) => p.type === 'bonus_earning' &&
@@ -307,6 +306,7 @@ const getWorkerPromotions = async (req, res) => {
             .filter((r) => r.kind === 'bonus')
             .reduce((sum, r) => sum + (r.bonusAmount || 0), 0);
         const promotionViews = applicable.map((p) => {
+            const isExpired = p.endsAt ? new Date(p.endsAt).getTime() < now.getTime() : false;
             const base = {
                 _id: p._id,
                 title: p.title,
@@ -314,6 +314,7 @@ const getWorkerPromotions = async (req, res) => {
                 type: p.type,
                 startsAt: p.startsAt,
                 endsAt: p.endsAt,
+                expired: isExpired,
             };
             const tiers = (p.bonusTiers || []).map((t) => {
                 const claimed = claimedTiers.has(`${String(p._id)}:${t.jobsRequired}`);
@@ -324,7 +325,7 @@ const getWorkerPromotions = async (req, res) => {
                     progress: Math.min(worker.totalWorkDone, t.jobsRequired),
                     progressPercent: Math.min(100, Math.round((worker.totalWorkDone / t.jobsRequired) * 100)),
                     claimed,
-                    claimable: achieved && !claimed,
+                    claimable: achieved && !claimed && !isExpired,
                 };
             });
             return { ...base, bonusTiers: tiers };
