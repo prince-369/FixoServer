@@ -274,11 +274,6 @@ const toWorkerAuthPayload = (worker: {
   balance: worker.balance,
 });
 
-const generateGooglePlaceholderPassword = (): string => {
-  const randomChunk = crypto.randomBytes(18).toString('base64url');
-  return `Gg1!${randomChunk}`;
-};
-
 // ─── Customer Registration ───
 export const registerCustomer = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -641,9 +636,8 @@ export const registerWorkerWithGoogle = async (req: Request, res: Response): Pro
       existingWorker.aadhaarFront = existingWorker.aadhaarFront || frontUpload.url;
       existingWorker.aadhaarBack = existingWorker.aadhaarBack || backUpload.url;
 
-      if (!existingWorker.password) {
-        existingWorker.password = await bcrypt.hash(generateGooglePlaceholderPassword(), 12);
-      }
+      // Do NOT set a placeholder password. A Google-only worker keeps no password
+      // so email/phone login offers "Set Password" (needsPassword), same as customer.
 
       await existingWorker.save();
 
@@ -655,8 +649,6 @@ export const registerWorkerWithGoogle = async (req: Request, res: Response): Pro
       });
       return;
     }
-
-    const generatedPasswordHash = await bcrypt.hash(generateGooglePlaceholderPassword(), 12);
 
     const gSkillsInput = parseSkillsInput(req.body?.skills);
     if (!gSkillsInput.some((s) => s.confirmed)) {
@@ -674,7 +666,8 @@ export const registerWorkerWithGoogle = async (req: Request, res: Response): Pro
       email,
       googleId,
       profileImage,
-      password: generatedPasswordHash,
+      // No password: Google-only account. Login with email/phone will offer
+      // "Set Password" (needsPassword) just like the customer flow.
       aadhaarFront: frontUpload.url,
       aadhaarBack: backUpload.url,
       accountStatus: 'test',

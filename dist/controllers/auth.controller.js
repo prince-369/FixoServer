@@ -226,10 +226,6 @@ const toWorkerAuthPayload = (worker) => ({
     isActive: worker.isActive,
     balance: worker.balance,
 });
-const generateGooglePlaceholderPassword = () => {
-    const randomChunk = crypto_1.default.randomBytes(18).toString('base64url');
-    return `Gg1!${randomChunk}`;
-};
 // ─── Customer Registration ───
 const registerCustomer = async (req, res) => {
     try {
@@ -548,9 +544,8 @@ const registerWorkerWithGoogle = async (req, res) => {
             existingWorker.profileImage = existingWorker.profileImage || profileImage;
             existingWorker.aadhaarFront = existingWorker.aadhaarFront || frontUpload.url;
             existingWorker.aadhaarBack = existingWorker.aadhaarBack || backUpload.url;
-            if (!existingWorker.password) {
-                existingWorker.password = await bcryptjs_1.default.hash(generateGooglePlaceholderPassword(), 12);
-            }
+            // Do NOT set a placeholder password. A Google-only worker keeps no password
+            // so email/phone login offers "Set Password" (needsPassword), same as customer.
             await existingWorker.save();
             const accessToken = await issueTokens(res, existingWorker._id.toString(), 'worker');
             res.json({
@@ -560,7 +555,6 @@ const registerWorkerWithGoogle = async (req, res) => {
             });
             return;
         }
-        const generatedPasswordHash = await bcryptjs_1.default.hash(generateGooglePlaceholderPassword(), 12);
         const gSkillsInput = (0, workerSkills_1.parseSkillsInput)(req.body?.skills);
         if (!gSkillsInput.some((s) => s.confirmed)) {
             res.status(400).json({ message: 'Select at least one skill you can do and confirm it.' });
@@ -576,7 +570,8 @@ const registerWorkerWithGoogle = async (req, res) => {
             email,
             googleId,
             profileImage,
-            password: generatedPasswordHash,
+            // No password: Google-only account. Login with email/phone will offer
+            // "Set Password" (needsPassword) just like the customer flow.
             aadhaarFront: frontUpload.url,
             aadhaarBack: backUpload.url,
             accountStatus: 'test',
