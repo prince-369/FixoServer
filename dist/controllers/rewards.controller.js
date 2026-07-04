@@ -325,7 +325,9 @@ const getWorkerPromotions = async (req, res) => {
                     progress: Math.min(worker.totalWorkDone, t.jobsRequired),
                     progressPercent: Math.min(100, Math.round((worker.totalWorkDone / t.jobsRequired) * 100)),
                     claimed,
-                    claimable: achieved && !claimed && !isExpired,
+                    // Allow claiming even after expiry if milestone was achieved — worker
+                    // earned it during active period; denying it now is unfair.
+                    claimable: achieved && !claimed,
                 };
             });
             return { ...base, bonusTiers: tiers };
