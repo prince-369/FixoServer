@@ -38,6 +38,8 @@ const otpCodeSchema = new mongoose_1.Schema({
     phone: { type: String, required: true },
     purpose: { type: String, enum: ['password-reset'], required: true, default: 'password-reset' },
     otpHash: { type: String, required: true },
+    // Failed-verification counter for per-account brute-force lockout.
+    attempts: { type: Number, default: 0 },
     expiresAt: { type: Date, required: true },
 }, { timestamps: true });
 otpCodeSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });

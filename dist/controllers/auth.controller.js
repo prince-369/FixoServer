@@ -129,13 +129,10 @@ const handleGoogleErrorResponse = (res, error, fallback500Message) => {
             authorizedParty: error.authorizedParty,
             allowedClientIds: error.allowedClientIds,
         });
+        // Internal OAuth config (allowed client IDs, token aud/azp) is logged above
+        // for debugging but never returned to the client.
         res.status(401).json({
             message: 'Google authentication failed. OAuth client ID mismatch.',
-            details: {
-                tokenAud: error.audience || null,
-                tokenAzp: error.authorizedParty || null,
-                allowedClientIds: error.allowedClientIds,
-            },
         });
         return;
     }
@@ -828,13 +825,16 @@ exports.forgotPassword = forgotPassword;
 const verifyOTPHandler = async (req, res) => {
     try {
         const { phone, otp } = req.body;
-        const isValid = await (0, sms_service_1.verifyOTP)(phone, otp);
-        if (!isValid) {
-            res.status(400).json({ message: 'Invalid or expired OTP' });
+        const result = await (0, sms_service_1.verifyOTP)(String(phone), otp);
+        if (!result.ok) {
+            const message = result.reason === 'locked'
+                ? 'Too many incorrect attempts. Please request a new OTP.'
+                : 'Invalid or expired OTP';
+            res.status(400).json({ message });
             return;
         }
-        const customer = await User_1.default.findOne({ phone });
-        const worker = customer ? null : await Worker_1.default.findOne({ phone });
+        const customer = await User_1.default.findOne({ phone: String(phone) });
+        const worker = customer ? null : await Worker_1.default.findOne({ phone: String(phone) });
         const account = customer || worker;
         if (!account) {
             res.status(404).json({ message: 'Account not found' });
@@ -1056,9 +1056,10 @@ const setPasswordForOAuthUser = async (req, res) => {
             res.status(400).json({ message: 'All fields are required' });
             return;
         }
-        // Validate password strength
-        if (password.length < 8) {
-            res.status(400).json({ message: 'Password must be at least 8 characters' });
+        // Validate password strength (same policy as the rest of the app)
+        const passwordError = validateStrongPassword(String(password));
+        if (passwordError) {
+            res.status(400).json({ message: passwordError });
             return;
         }
         let email = '';
@@ -1095,9 +1096,12 @@ const setPasswordForOAuthUser = async (req, res) => {
             return;
         }
         // Verify OTP
-        const isValid = await (0, sms_service_1.verifyOTP)(email, otp);
-        if (!isValid) {
-            res.status(400).json({ message: 'Invalid or expired OTP' });
+        const result = await (0, sms_service_1.verifyOTP)(email, otp);
+        if (!result.ok) {
+            const message = result.reason === 'locked'
+                ? 'Too many incorrect attempts. Please request a new OTP.'
+                : 'Invalid or expired OTP';
+            res.status(400).json({ message });
             return;
         }
         // Hash and set password

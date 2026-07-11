@@ -6,7 +6,7 @@ import CouponRedemption from '../models/CouponRedemption';
 import WorkerPromotion, { IWorkerPromotion } from '../models/WorkerPromotion';
 import PromotionRedemption from '../models/PromotionRedemption';
 import IncentiveAuditLog, { AuditActorModel } from '../models/IncentiveAuditLog';
-import { IWorker } from '../models/Worker';
+import Worker, { IWorker } from '../models/Worker';
 import { generateTID } from '../utils/generateTID';
 import { sendNotification } from '../socket';
 
@@ -164,12 +164,21 @@ export const claimWorkerBonusTier = async (params: {
     throw err;
   }
 
-  worker.balance += tier.bonusAmount;
-  worker.totalEarnings += tier.bonusAmount;
-  await worker.save();
+  // Credit atomically with $inc (not read-modify-write via save) so a concurrent
+  // balance change — e.g. a withdrawal debit or completeWork credit — can't be
+  // clobbered by a stale document write. The PromotionRedemption unique index
+  // above already guarantees this bonus is credited at most once.
+  const updatedWorker = await Worker.findOneAndUpdate(
+    { _id: worker._id },
+    { $inc: { balance: tier.bonusAmount, totalEarnings: tier.bonusAmount } },
+    { new: true }
+  );
+  const newBalance = updatedWorker?.balance ?? worker.balance + tier.bonusAmount;
 
-  promo.spentBudget += tier.bonusAmount;
-  await promo.save();
+  await WorkerPromotion.updateOne(
+    { _id: promo._id },
+    { $inc: { spentBudget: tier.bonusAmount } }
+  );
 
   await Transaction.create({
     tid: generateTID(),
@@ -194,7 +203,7 @@ export const claimWorkerBonusTier = async (params: {
     ok: true,
     message: `₹${tier.bonusAmount} bonus credited to your wallet!`,
     bonusAmount: tier.bonusAmount,
-    newBalance: worker.balance,
+    newBalance,
   };
 };
 
@@ -252,6 +261,9 @@ export const recordCouponRedemption = async (params: {
   orderAmount: number;
 }): Promise<void> => {
   if (!params.discountAmount || params.discountAmount <= 0) return;
+
+  // Idempotent per booking (unique index on booking) — a retried/duplicated
+  // finalize for the same booking never double-counts.
   try {
     await CouponRedemption.create({
       coupon: params.couponId,
@@ -261,23 +273,61 @@ export const recordCouponRedemption = async (params: {
       discountAmount: params.discountAmount,
       orderAmount: params.orderAmount,
     });
+  } catch (err: unknown) {
+    if ((err as { code?: number }).code === 11000) return; // already recorded for this booking
+    console.error('recordCouponRedemption error:', err);
+    return;
+  }
 
-    await CouponCampaign.updateOne(
-      { _id: params.couponId },
-      { $inc: { usedCount: 1, spentBudget: params.discountAmount } }
-    );
+  // Atomically bump the global counters, but ONLY while the coupon is still
+  // within its usage and budget limits. This conditional $inc is the race guard:
+  // concurrent redemptions that would push usedCount past usageLimit (or
+  // spentBudget past budgetLimit) fail the precondition, so the counters — and
+  // therefore the platform's discount exposure — are hard-capped even under a
+  // burst of concurrent bookings.
+  const gate = await CouponCampaign.updateOne(
+    {
+      _id: params.couponId,
+      $expr: {
+        $and: [
+          { $or: [{ $eq: ['$usageLimit', null] }, { $lt: ['$usedCount', '$usageLimit'] }] },
+          {
+            $or: [
+              { $eq: ['$budgetLimit', null] },
+              { $lte: [{ $add: ['$spentBudget', params.discountAmount] }, '$budgetLimit'] },
+            ],
+          },
+        ],
+      },
+    },
+    { $inc: { usedCount: 1, spentBudget: params.discountAmount } }
+  );
 
+  if (gate.modifiedCount === 0) {
+    // Coupon hit its usage/budget cap under concurrency. Roll back this
+    // redemption so the stored records stay consistent with the counters, and
+    // leave an audit trail of the blocked over-redemption.
+    await CouponRedemption.deleteOne({ booking: params.bookingId });
     await audit({
-      action: 'coupon_redeemed',
+      action: 'coupon_redemption_blocked',
       actorId: params.userId as mongoose.Types.ObjectId,
       actorModel: 'User',
       targetType: 'CouponCampaign',
       targetId: params.couponId as mongoose.Types.ObjectId,
       amount: params.discountAmount,
+      reason: 'usage_or_budget_limit_reached',
       meta: { bookingId: String(params.bookingId), code: params.couponCode },
     });
-  } catch (err: unknown) {
-    if ((err as { code?: number }).code === 11000) return; // already recorded
-    console.error('recordCouponRedemption error:', err);
+    return;
   }
+
+  await audit({
+    action: 'coupon_redeemed',
+    actorId: params.userId as mongoose.Types.ObjectId,
+    actorModel: 'User',
+    targetType: 'CouponCampaign',
+    targetId: params.couponId as mongoose.Types.ObjectId,
+    amount: params.discountAmount,
+    meta: { bookingId: String(params.bookingId), code: params.couponCode },
+  });
 };

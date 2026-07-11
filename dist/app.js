@@ -15,6 +15,7 @@ const env_1 = __importDefault(require("./config/env"));
 const error_middleware_1 = require("./middlewares/error.middleware");
 const rateLimit_middleware_1 = require("./middlewares/rateLimit.middleware");
 const metrics_1 = require("./monitoring/metrics");
+const sanitize_middleware_1 = require("./middlewares/sanitize.middleware");
 const swagger_1 = __importDefault(require("./docs/swagger"));
 // Import routes
 const auth_routes_1 = __importDefault(require("./routes/auth.routes"));
@@ -51,6 +52,9 @@ app.use(express_1.default.json({
 }));
 app.use(express_1.default.urlencoded({ extended: true, limit: `${env_1.default.URL_ENCODED_LIMIT_MB}mb` }));
 app.use((0, cookie_parser_1.default)());
+// Strip NoSQL-injection operators ($..., dotted keys) from all input as
+// defense-in-depth, especially for endpoints without express-validator.
+app.use(sanitize_middleware_1.sanitizeRequest);
 // Request tracing + slow/error request logs
 app.use((req, res, next) => {
     const requestId = req.header('x-request-id')?.trim() || (0, crypto_1.randomUUID)();

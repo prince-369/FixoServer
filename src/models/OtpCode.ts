@@ -4,6 +4,7 @@ export interface IOtpCode extends Document {
   phone: string;
   purpose: 'password-reset';
   otpHash: string;
+  attempts: number;
   expiresAt: Date;
   createdAt: Date;
 }
@@ -13,6 +14,8 @@ const otpCodeSchema = new Schema<IOtpCode>(
     phone: { type: String, required: true },
     purpose: { type: String, enum: ['password-reset'], required: true, default: 'password-reset' },
     otpHash: { type: String, required: true },
+    // Failed-verification counter for per-account brute-force lockout.
+    attempts: { type: Number, default: 0 },
     expiresAt: { type: Date, required: true },
   },
   { timestamps: true }

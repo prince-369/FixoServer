@@ -7,14 +7,22 @@ interface TokenPayload {
   role: 'customer' | 'worker' | 'admin';
 }
 
-// Access token — long-lived (matches JWT_EXPIRE from env, default 7 days)
+// Algorithm is pinned on both sign and verify to prevent algorithm-confusion
+// attacks (e.g. a forged token declaring "alg":"none" or an asymmetric alg).
+const JWT_ALGORITHM: SignOptions['algorithm'] = 'HS256';
+
+// Access token — short-lived (matches JWT_EXPIRE from env, default 30 minutes);
+// revocation is handled by the DB-backed refresh-token rotation.
 export const generateAccessToken = (payload: TokenPayload): string => {
-  return jwt.sign(payload, env.JWT_SECRET, { expiresIn: env.JWT_EXPIRE as SignOptions['expiresIn'] });
+  return jwt.sign(payload, env.JWT_SECRET, {
+    expiresIn: env.JWT_EXPIRE as SignOptions['expiresIn'],
+    algorithm: JWT_ALGORITHM,
+  });
 };
 
 // Verify access token
 export const verifyAccessToken = (token: string): TokenPayload => {
-  return jwt.verify(token, env.JWT_SECRET) as TokenPayload;
+  return jwt.verify(token, env.JWT_SECRET, { algorithms: [JWT_ALGORITHM] }) as TokenPayload;
 };
 
 // Refresh token — cryptographically random string (not JWT)
@@ -26,9 +34,10 @@ export const generateRefreshTokenString = (): string => {
 export const generateToken = (payload: TokenPayload): string => {
   return jwt.sign(payload, env.JWT_SECRET, {
     expiresIn: env.JWT_EXPIRE as SignOptions['expiresIn'],
+    algorithm: JWT_ALGORITHM,
   });
 };
 
 export const verifyToken = (token: string): TokenPayload => {
-  return jwt.verify(token, env.JWT_SECRET) as TokenPayload;
+  return jwt.verify(token, env.JWT_SECRET, { algorithms: [JWT_ALGORITHM] }) as TokenPayload;
 };

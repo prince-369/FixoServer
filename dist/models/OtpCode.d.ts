@@ -3,6 +3,7 @@ export interface IOtpCode extends Document {
     phone: string;
     purpose: 'password-reset';
     otpHash: string;
+    attempts: number;
     expiresAt: Date;
     createdAt: Date;
 }

@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import jwt, { type SignOptions } from 'jsonwebtoken';
 import Worker from '../models/Worker';
 import Category from '../models/Category';
@@ -1214,76 +1215,114 @@ export const completeWork = async (req: Request, res: Response): Promise<void> =
 
     const isCashBooking = booking.paymentMethod === 'cash';
 
-    booking.status = 'completed';
-    if (isCashBooking) {
-      booking.paymentStatus = 'paid';
-    }
-    await booking.save();
-    void removeBookingVoiceNote(booking);
+    // Atomically claim the completion transition. Only the request that flips the
+    // status from payment_done/in_progress → completed proceeds to credit the
+    // worker; a concurrent duplicate finds no matching booking and stops here,
+    // so earnings can never be double-credited.
+    const claimed = await Booking.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        assignedWorker: req.user!.id,
+        status: { $in: ['payment_done', 'in_progress'] },
+      },
+      { $set: { status: 'completed', ...(isCashBooking ? { paymentStatus: 'paid' } : {}) } },
+      { new: true }
+    );
 
-    const worker = await Worker.findById(req.user!.id);
-    if (!worker) {
-      res.status(404).json({ message: 'Worker not found' });
+    if (!claimed) {
+      res.status(404).json({ message: 'Booking not found' });
       return;
     }
 
+    void removeBookingVoiceNote(claimed);
+
     // FREE platform — no commission, no dues. Worker keeps 100%.
-    const workerEarning = booking.amount;
-    if (booking.paymentMethod === 'online') {
-      worker.balance += workerEarning;
-    }
-    // Cash: worker already collected in hand, nothing to add to balance.
+    const workerEarning = claimed.amount;
 
-    worker.totalWorkDone += 1;
-    worker.totalEarnings += workerEarning;
-    await worker.save();
+    // Credit the worker and write the ledger rows atomically so a partial
+    // failure can't leave a balance change without its Transaction record.
+    const session = await mongoose.startSession();
+    let newBalance = 0;
+    try {
+      await session.withTransaction(async () => {
+        const inc: Record<string, number> = { totalWorkDone: 1, totalEarnings: workerEarning };
+        // Cash: worker already collected in hand, nothing to add to balance.
+        if (claimed.paymentMethod === 'online') inc.balance = workerEarning;
 
-    if (isCashBooking) {
-      const cashPaymentAmount = booking.amount;
-      const existingCashPayment = await Transaction.findOne({
-        booking: booking._id,
-        type: 'booking_payment',
-        method: 'cash',
+        const updatedWorker = await Worker.findOneAndUpdate(
+          { _id: req.user!.id },
+          { $inc: inc },
+          { new: true, session }
+        );
+
+        if (!updatedWorker) {
+          const notFound = new Error('WORKER_NOT_FOUND') as Error & { code?: string };
+          notFound.code = 'WORKER_NOT_FOUND';
+          throw notFound;
+        }
+        newBalance = updatedWorker.balance;
+
+        if (isCashBooking) {
+          const existingCashPayment = await Transaction.findOne({
+            booking: claimed._id,
+            type: 'booking_payment',
+            method: 'cash',
+          }).session(session);
+
+          if (existingCashPayment) {
+            existingCashPayment.amount = claimed.amount;
+            existingCashPayment.status = 'completed';
+            existingCashPayment.user = claimed.customer;
+            existingCashPayment.worker = updatedWorker._id;
+            await existingCashPayment.save({ session });
+          } else {
+            await Transaction.create(
+              [{
+                tid: generateTID(),
+                booking: claimed._id,
+                user: claimed.customer,
+                worker: updatedWorker._id,
+                type: 'booking_payment',
+                amount: claimed.amount,
+                method: 'cash',
+                status: 'completed',
+              }],
+              { session }
+            );
+          }
+        }
+
+        // Create earning transaction
+        await Transaction.create(
+          [{
+            tid: generateTID(),
+            booking: claimed._id,
+            user: claimed.customer,
+            worker: updatedWorker._id,
+            type: 'worker_earning',
+            amount: workerEarning,
+            method: claimed.paymentMethod!,
+            status: 'completed',
+          }],
+          { session }
+        );
       });
-
-      if (existingCashPayment) {
-        existingCashPayment.amount = cashPaymentAmount;
-        existingCashPayment.status = 'completed';
-        existingCashPayment.user = booking.customer;
-        existingCashPayment.worker = worker._id;
-        await existingCashPayment.save();
-      } else {
-        await Transaction.create({
-          tid: generateTID(),
-          booking: booking._id,
-          user: booking.customer,
-          worker: worker._id,
-          type: 'booking_payment',
-          amount: cashPaymentAmount,
-          method: 'cash',
-          status: 'completed',
-        });
+    } catch (err) {
+      if ((err as { code?: string }).code === 'WORKER_NOT_FOUND') {
+        res.status(404).json({ message: 'Worker not found' });
+        return;
       }
+      throw err;
+    } finally {
+      await session.endSession();
     }
-
-    // Create earning transaction
-    await Transaction.create({
-      tid: generateTID(),
-      booking: booking._id,
-      user: booking.customer,
-      worker: worker._id,
-      type: 'worker_earning',
-      amount: workerEarning,
-      method: booking.paymentMethod!,
-      status: 'completed',
-    });
 
     // Real-time: Notify customer that work is completed
-    const customerId = booking.customer.toString();
+    const customerId = claimed.customer.toString();
     const completionPayload = {
-      bookingId: booking._id,
+      bookingId: claimed._id,
       status: 'completed',
-      paymentStatus: booking.paymentStatus,
+      paymentStatus: claimed.paymentStatus,
     };
     notifyUser(customerId, 'booking_status_updated', completionPayload);
     notifyUser(req.user!.id, 'booking_status_updated', completionPayload);
@@ -1294,13 +1333,13 @@ export const completeWork = async (req: Request, res: Response): Promise<void> =
       type: 'work_completed',
       title: 'Work Completed!',
       message: 'The worker has completed the job. Please rate your experience.',
-      data: { bookingId: booking._id },
+      data: { bookingId: claimed._id },
     });
 
     res.json({
       message: 'Work completed successfully!',
       earning: workerEarning,
-      newBalance: worker.balance,
+      newBalance,
     });
   } catch (error) {
     console.error('Complete work error:', error);
@@ -1435,33 +1474,58 @@ export const requestWithdrawal = async (req: Request, res: Response): Promise<vo
       return;
     }
 
-    if (amount > worker.balance) {
-      res.status(400).json({ message: 'Insufficient balance' });
-      return;
-    }
-
-    if (amount <= 0) {
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
       res.status(400).json({ message: 'Invalid amount' });
       return;
     }
 
-    const withdrawal = await Withdrawal.create({
-      worker: worker._id,
-      amount,
-      bankDetails: worker.bankDetails,
-    });
+    // Debit the balance and create the withdrawal atomically. The conditional
+    // `balance: { $gte: amount }` update is the race guard: two concurrent
+    // requests can never both pass, so a worker can't over-withdraw. The debit
+    // and the ledger row are wrapped in a transaction so they both commit or
+    // both roll back (no debit without a matching withdrawal record).
+    const session = await mongoose.startSession();
+    let withdrawal;
+    let newBalance = worker.balance;
+    try {
+      await session.withTransaction(async () => {
+        const debited = await Worker.findOneAndUpdate(
+          { _id: req.user!.id, balance: { $gte: amount } },
+          { $inc: { balance: -amount } },
+          { new: true, session }
+        );
 
-    worker.balance -= amount;
-    await worker.save();
+        if (!debited) {
+          const insufficient = new Error('INSUFFICIENT_BALANCE') as Error & { code?: string };
+          insufficient.code = 'INSUFFICIENT_BALANCE';
+          throw insufficient;
+        }
+
+        const [created] = await Withdrawal.create(
+          [{ worker: debited._id, amount, bankDetails: worker.bankDetails }],
+          { session }
+        );
+        withdrawal = created;
+        newBalance = debited.balance;
+      });
+    } catch (err) {
+      if ((err as { code?: string }).code === 'INSUFFICIENT_BALANCE') {
+        res.status(400).json({ message: 'Insufficient balance' });
+        return;
+      }
+      throw err;
+    } finally {
+      await session.endSession();
+    }
 
     notifyUser(req.user!.id, 'withdrawal_update', {
-      withdrawalId: withdrawal._id,
+      withdrawalId: withdrawal!._id,
       status: 'pending',
       withdrawal,
-      balance: worker.balance,
+      balance: newBalance,
     });
     notifyRole('admin', 'withdrawal_update', {
-      withdrawalId: withdrawal._id,
+      withdrawalId: withdrawal!._id,
       status: 'pending',
       withdrawal,
       workerId: worker._id,
@@ -1472,7 +1536,7 @@ export const requestWithdrawal = async (req: Request, res: Response): Promise<vo
       type: 'new_withdrawal',
       title: 'New Withdrawal Request',
       message: `Worker requested ₹${amount} withdrawal.`,
-      data: { withdrawalId: withdrawal._id, workerId: worker._id },
+      data: { withdrawalId: withdrawal!._id, workerId: worker._id },
     }).catch(() => {});
 
     res.status(201).json({

@@ -248,6 +248,37 @@ const setupSocketRedisAdapter = async (): Promise<void> => {
   console.log('Socket Redis adapter enabled');
 };
 
+export interface SocketAuth {
+  id: string;
+  role: 'customer' | 'worker' | 'admin';
+}
+
+// Authenticate a Socket.IO handshake from its access token.
+// Returns the verified identity, or null when no valid token is presented.
+// Identity is ONLY ever derived from a verified token here — never from the
+// client-supplied `register` payload — which closes the impersonation bypass.
+export const authenticateHandshake = (handshake: {
+  auth?: { token?: unknown } | null;
+  headers?: Record<string, unknown>;
+}): SocketAuth | null => {
+  try {
+    const authToken = typeof handshake.auth?.token === 'string' ? handshake.auth.token : undefined;
+    const headerAuthRaw = handshake.headers?.authorization;
+    const headerAuth = typeof headerAuthRaw === 'string' ? headerAuthRaw : undefined;
+    const headerToken = headerAuth?.startsWith('Bearer ') ? headerAuth.slice(7) : undefined;
+    const token = authToken || headerToken;
+
+    if (!token) return null;
+
+    const decoded = verifyAccessToken(token);
+    if (!decoded?.id || !decoded?.role) return null;
+
+    return { id: decoded.id, role: decoded.role };
+  } catch {
+    return null;
+  }
+};
+
 export const initializeSocket = (server: HTTPServer): SocketIOServer => {
   io = new SocketIOServer(server, {
     transports: ['websocket', 'polling'],
@@ -353,25 +384,16 @@ export const initializeSocket = (server: HTTPServer): SocketIOServer => {
   });
 
   io.use((socket, next) => {
-    try {
-      const authToken = socket.handshake.auth?.token as string | undefined;
-      const headerAuth = socket.handshake.headers.authorization as string | undefined;
-      const headerToken = headerAuth?.startsWith('Bearer ') ? headerAuth.slice(7) : undefined;
-      const token = authToken || headerToken;
-
-      if (!token) {
-        next();
-        return;
-      }
-
-      const decoded = verifyAccessToken(token);
-      socket.data.auth = decoded;
-      next();
-    } catch {
-      // Allow connection even with invalid/expired token — manual 'register' event will handle identity
-      console.warn('Socket auth failed (expired token?), allowing unauthenticated connection');
-      next();
+    // Reject any socket that does not present a valid access token. A missing or
+    // invalid/expired token is unauthorized — we never fall back to trusting
+    // client-supplied identity.
+    const auth = authenticateHandshake(socket.handshake);
+    if (!auth) {
+      next(new Error('unauthorized'));
+      return;
     }
+    socket.data.auth = auth;
+    next();
   });
 
   io.on('connection', (socket) => {
@@ -427,25 +449,20 @@ export const initializeSocket = (server: HTTPServer): SocketIOServer => {
       }
     };
 
-    const authData = socket.data.auth as { id: string; role: 'customer' | 'worker' | 'admin' } | undefined;
+    const authData = socket.data.auth as SocketAuth | undefined;
     if (authData?.id && authData?.role) {
       registerSocketUser(authData.id, authData.role);
     }
 
     // ─── Register user ───
-    socket.on('register', ({ userId, role }: { userId: string; role: string }) => {
-      const tokenUserId = authData?.id;
-      const tokenRole = authData?.role;
-
-      if (tokenUserId && tokenRole) {
-        if (tokenUserId !== userId || tokenRole !== role) {
-          socket.emit('socket:error', { message: 'Socket identity mismatch' });
-          return;
-        }
+    // Identity is taken exclusively from the verified token (socket.data.auth);
+    // any client-supplied userId/role in the payload is ignored. Kept so clients
+    // that emit `register` on connect still get (re-)joined to their rooms.
+    socket.on('register', () => {
+      if (authData?.id && authData?.role) {
+        registerSocketUser(authData.id, authData.role);
+        recordSocketEvent('register');
       }
-
-      registerSocketUser(tokenUserId || userId, tokenRole || role);
-      recordSocketEvent('register');
     });
 
     // ─── Admin marks themself as available for worker eKYC ───

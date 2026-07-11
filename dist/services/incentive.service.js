@@ -11,6 +11,7 @@ const CouponRedemption_1 = __importDefault(require("../models/CouponRedemption")
 const WorkerPromotion_1 = __importDefault(require("../models/WorkerPromotion"));
 const PromotionRedemption_1 = __importDefault(require("../models/PromotionRedemption"));
 const IncentiveAuditLog_1 = __importDefault(require("../models/IncentiveAuditLog"));
+const Worker_1 = __importDefault(require("../models/Worker"));
 const generateTID_1 = require("../utils/generateTID");
 const socket_1 = require("../socket");
 // ───────────────────────────────────────────────────────────
@@ -151,11 +152,13 @@ const claimWorkerBonusTier = async (params) => {
         }
         throw err;
     }
-    worker.balance += tier.bonusAmount;
-    worker.totalEarnings += tier.bonusAmount;
-    await worker.save();
-    promo.spentBudget += tier.bonusAmount;
-    await promo.save();
+    // Credit atomically with $inc (not read-modify-write via save) so a concurrent
+    // balance change — e.g. a withdrawal debit or completeWork credit — can't be
+    // clobbered by a stale document write. The PromotionRedemption unique index
+    // above already guarantees this bonus is credited at most once.
+    const updatedWorker = await Worker_1.default.findOneAndUpdate({ _id: worker._id }, { $inc: { balance: tier.bonusAmount, totalEarnings: tier.bonusAmount } }, { new: true });
+    const newBalance = updatedWorker?.balance ?? worker.balance + tier.bonusAmount;
+    await WorkerPromotion_1.default.updateOne({ _id: promo._id }, { $inc: { spentBudget: tier.bonusAmount } });
     await Transaction_1.default.create({
         tid: (0, generateTID_1.generateTID)(),
         worker: worker._id,
@@ -177,7 +180,7 @@ const claimWorkerBonusTier = async (params) => {
         ok: true,
         message: `₹${tier.bonusAmount} bonus credited to your wallet!`,
         bonusAmount: tier.bonusAmount,
-        newBalance: worker.balance,
+        newBalance,
     };
 };
 exports.claimWorkerBonusTier = claimWorkerBonusTier;
@@ -224,6 +227,8 @@ exports.validateAndPriceCoupon = validateAndPriceCoupon;
 const recordCouponRedemption = async (params) => {
     if (!params.discountAmount || params.discountAmount <= 0)
         return;
+    // Idempotent per booking (unique index on booking) — a retried/duplicated
+    // finalize for the same booking never double-counts.
     try {
         await CouponRedemption_1.default.create({
             coupon: params.couponId,
@@ -233,22 +238,59 @@ const recordCouponRedemption = async (params) => {
             discountAmount: params.discountAmount,
             orderAmount: params.orderAmount,
         });
-        await CouponCampaign_1.default.updateOne({ _id: params.couponId }, { $inc: { usedCount: 1, spentBudget: params.discountAmount } });
+    }
+    catch (err) {
+        if (err.code === 11000)
+            return; // already recorded for this booking
+        console.error('recordCouponRedemption error:', err);
+        return;
+    }
+    // Atomically bump the global counters, but ONLY while the coupon is still
+    // within its usage and budget limits. This conditional $inc is the race guard:
+    // concurrent redemptions that would push usedCount past usageLimit (or
+    // spentBudget past budgetLimit) fail the precondition, so the counters — and
+    // therefore the platform's discount exposure — are hard-capped even under a
+    // burst of concurrent bookings.
+    const gate = await CouponCampaign_1.default.updateOne({
+        _id: params.couponId,
+        $expr: {
+            $and: [
+                { $or: [{ $eq: ['$usageLimit', null] }, { $lt: ['$usedCount', '$usageLimit'] }] },
+                {
+                    $or: [
+                        { $eq: ['$budgetLimit', null] },
+                        { $lte: [{ $add: ['$spentBudget', params.discountAmount] }, '$budgetLimit'] },
+                    ],
+                },
+            ],
+        },
+    }, { $inc: { usedCount: 1, spentBudget: params.discountAmount } });
+    if (gate.modifiedCount === 0) {
+        // Coupon hit its usage/budget cap under concurrency. Roll back this
+        // redemption so the stored records stay consistent with the counters, and
+        // leave an audit trail of the blocked over-redemption.
+        await CouponRedemption_1.default.deleteOne({ booking: params.bookingId });
         await (0, exports.audit)({
-            action: 'coupon_redeemed',
+            action: 'coupon_redemption_blocked',
             actorId: params.userId,
             actorModel: 'User',
             targetType: 'CouponCampaign',
             targetId: params.couponId,
             amount: params.discountAmount,
+            reason: 'usage_or_budget_limit_reached',
             meta: { bookingId: String(params.bookingId), code: params.couponCode },
         });
+        return;
     }
-    catch (err) {
-        if (err.code === 11000)
-            return; // already recorded
-        console.error('recordCouponRedemption error:', err);
-    }
+    await (0, exports.audit)({
+        action: 'coupon_redeemed',
+        actorId: params.userId,
+        actorModel: 'User',
+        targetType: 'CouponCampaign',
+        targetId: params.couponId,
+        amount: params.discountAmount,
+        meta: { bookingId: String(params.bookingId), code: params.couponCode },
+    });
 };
 exports.recordCouponRedemption = recordCouponRedemption;
 //# sourceMappingURL=incentive.service.js.map

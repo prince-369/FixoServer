@@ -1,5 +1,15 @@
 import { Server as SocketIOServer } from 'socket.io';
 import { Server as HTTPServer } from 'http';
+export interface SocketAuth {
+    id: string;
+    role: 'customer' | 'worker' | 'admin';
+}
+export declare const authenticateHandshake: (handshake: {
+    auth?: {
+        token?: unknown;
+    } | null;
+    headers?: Record<string, unknown>;
+}) => SocketAuth | null;
 export declare const initializeSocket: (server: HTTPServer) => SocketIOServer;
 export declare const getIO: () => SocketIOServer;
 export declare const notifyUser: (userId: string, event: string, data: unknown) => void;

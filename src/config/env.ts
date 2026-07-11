@@ -172,7 +172,9 @@ const env: EnvConfig = {
   MONGODB_CONNECT_TIMEOUT_MS: parseNumberEnv('MONGODB_CONNECT_TIMEOUT_MS', 10_000, { min: 1_000 }),
   MONGODB_MAX_IDLE_TIME_MS: parseNumberEnv('MONGODB_MAX_IDLE_TIME_MS', 30_000, { min: 5_000 }),
   JWT_SECRET: getRequiredEnv('JWT_SECRET'),
-  JWT_EXPIRE: process.env.JWT_EXPIRE || '7d',
+  // Short-lived access token. Revocation relies on refresh-token rotation, so a
+  // stolen access token is only valid for this window (default 30 minutes).
+  JWT_EXPIRE: process.env.JWT_EXPIRE || '30m',
   CLIENT_URL: clientUrl,
   CLIENT_URLS: parseClientOrigins(clientUrl),
   WORKER_CLIENT_URL: process.env.WORKER_CLIENT_URL || 'https://fixoworker.vercel.app',

@@ -125,13 +125,10 @@ const handleGoogleErrorResponse = (
       authorizedParty: error.authorizedParty,
       allowedClientIds: error.allowedClientIds,
     });
+    // Internal OAuth config (allowed client IDs, token aud/azp) is logged above
+    // for debugging but never returned to the client.
     res.status(401).json({
       message: 'Google authentication failed. OAuth client ID mismatch.',
-      details: {
-        tokenAud: error.audience || null,
-        tokenAzp: error.authorizedParty || null,
-        allowedClientIds: error.allowedClientIds,
-      },
     });
     return;
   }
@@ -945,14 +942,17 @@ export const verifyOTPHandler = async (req: Request, res: Response): Promise<voi
   try {
     const { phone, otp } = req.body;
 
-    const isValid = await verifyOTP(phone, otp);
-    if (!isValid) {
-      res.status(400).json({ message: 'Invalid or expired OTP' });
+    const result = await verifyOTP(String(phone), otp);
+    if (!result.ok) {
+      const message = result.reason === 'locked'
+        ? 'Too many incorrect attempts. Please request a new OTP.'
+        : 'Invalid or expired OTP';
+      res.status(400).json({ message });
       return;
     }
 
-    const customer = await User.findOne({ phone });
-    const worker = customer ? null : await Worker.findOne({ phone });
+    const customer = await User.findOne({ phone: String(phone) });
+    const worker = customer ? null : await Worker.findOne({ phone: String(phone) });
     const account = customer || worker;
 
     if (!account) {
@@ -1177,9 +1177,10 @@ export const setPasswordForOAuthUser = async (req: Request, res: Response): Prom
       return;
     }
 
-    // Validate password strength
-    if (password.length < 8) {
-      res.status(400).json({ message: 'Password must be at least 8 characters' });
+    // Validate password strength (same policy as the rest of the app)
+    const passwordError = validateStrongPassword(String(password));
+    if (passwordError) {
+      res.status(400).json({ message: passwordError });
       return;
     }
 
@@ -1206,9 +1207,12 @@ export const setPasswordForOAuthUser = async (req: Request, res: Response): Prom
     }
 
     // Verify OTP
-    const isValid = await verifyOTP(email, otp);
-    if (!isValid) {
-      res.status(400).json({ message: 'Invalid or expired OTP' });
+    const result = await verifyOTP(email, otp);
+    if (!result.ok) {
+      const message = result.reason === 'locked'
+        ? 'Too many incorrect attempts. Please request a new OTP.'
+        : 'Invalid or expired OTP';
+      res.status(400).json({ message });
       return;
     }
 

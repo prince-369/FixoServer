@@ -5,6 +5,13 @@ import OtpCode from '../models/OtpCode';
 
 const OTP_EXPIRY_MINUTES = 10;
 const OTP_PURPOSE = 'password-reset';
+// After this many wrong guesses the OTP is invalidated and a new one must be
+// requested — caps brute-force attempts per account regardless of source IP.
+const MAX_OTP_ATTEMPTS = 5;
+
+export type OtpVerifyResult =
+  | { ok: true }
+  | { ok: false; reason: 'invalid' | 'expired' | 'locked' };
 
 const hashOTP = (phone: string, otp: string): string => {
   return crypto
@@ -18,12 +25,13 @@ export const generateOTP = (): string => {
 };
 
 export const storeOTP = async (phone: string, otp: string): Promise<void> => {
-  const otpHash = hashOTP(phone, otp);
+  const otpHash = hashOTP(String(phone), otp);
 
   await OtpCode.findOneAndUpdate(
-    { phone, purpose: OTP_PURPOSE },
+    { phone: String(phone), purpose: OTP_PURPOSE },
     {
       otpHash,
+      attempts: 0, // fresh OTP resets the lockout counter
       expiresAt: new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000),
     },
     {
@@ -34,17 +42,39 @@ export const storeOTP = async (phone: string, otp: string): Promise<void> => {
   );
 };
 
-export const verifyOTP = async (phone: string, otp: string): Promise<boolean> => {
-  const otpHash = hashOTP(phone, otp);
+export const verifyOTP = async (phone: string, otp: string): Promise<OtpVerifyResult> => {
+  const record = await OtpCode.findOne({ phone: String(phone), purpose: OTP_PURPOSE });
+  if (!record) return { ok: false, reason: 'invalid' };
 
-  const stored = await OtpCode.findOneAndDelete({
-    phone,
-    purpose: OTP_PURPOSE,
-    otpHash,
-    expiresAt: { $gt: new Date() },
-  });
+  if (record.expiresAt.getTime() <= Date.now()) {
+    await OtpCode.deleteOne({ _id: record._id });
+    return { ok: false, reason: 'expired' };
+  }
 
-  return Boolean(stored);
+  // Already exhausted — force the user to request a new OTP.
+  if (record.attempts >= MAX_OTP_ATTEMPTS) {
+    await OtpCode.deleteOne({ _id: record._id });
+    return { ok: false, reason: 'locked' };
+  }
+
+  const otpHash = hashOTP(String(phone), otp);
+  if (record.otpHash !== otpHash) {
+    // Atomically count this failed guess; invalidate once the cap is hit.
+    const updated = await OtpCode.findOneAndUpdate(
+      { _id: record._id },
+      { $inc: { attempts: 1 } },
+      { new: true }
+    );
+    if (updated && updated.attempts >= MAX_OTP_ATTEMPTS) {
+      await OtpCode.deleteOne({ _id: record._id });
+      return { ok: false, reason: 'locked' };
+    }
+    return { ok: false, reason: 'invalid' };
+  }
+
+  // Correct OTP — single use.
+  await OtpCode.deleteOne({ _id: record._id });
+  return { ok: true };
 };
 
 export const sendOTP = async (phone: string, otp: string): Promise<boolean> => {

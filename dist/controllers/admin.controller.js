@@ -38,6 +38,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.markWaitlistReached = exports.getWaitlist = exports.personalNotification = exports.broadcastNotification = exports.broadcastToAudience = exports.getCancellationFlags = exports.unblockWorkerAccount = exports.blockWorkerAccount = exports.unblockCustomer = exports.blockCustomer = exports.getWorkerDetail = exports.getAllWorkers = exports.deleteChatbotQA = exports.updateChatbotQA = exports.createChatbotQA = exports.getChatbotQA = exports.deleteAdminNotification = exports.markAllAdminNotificationsRead = exports.markAdminNotificationRead = exports.getAdminNotifications = exports.rejectRefund = exports.processRefund = exports.getRefunds = exports.replyHelpTicket = exports.resolveHelpTicket = exports.getHelpTickets = exports.getCustomers = exports.reorderBanners = exports.updateBanner = exports.deleteBanner = exports.createBanner = exports.getBanners = exports.deleteCategory = exports.updateCategoryDetails = exports.updateCategory = exports.createCategory = exports.getCategories = exports.declineWithdrawal = exports.completeWithdrawal = exports.getWithdrawals = exports.saveEkycCapture = exports.rejectWorker = exports.approveWorker = exports.updateVideoKycResult = exports.getWorkerEKYCDetails = exports.getPendingEKYC = exports.getAdminBootstrapStatus = exports.getPendingAdminBadges = exports.getDashboard = exports.clearDashboardCache = void 0;
 exports.logSkillCallAttempt = exports.reviewSkill = exports.getSkillRequests = exports.searchNotificationRecipients = void 0;
+const mongoose_1 = __importDefault(require("mongoose"));
 const Worker_1 = __importDefault(require("../models/Worker"));
 const User_1 = __importDefault(require("../models/User"));
 const Booking_1 = __importDefault(require("../models/Booking"));
@@ -451,9 +452,12 @@ const getWithdrawals = async (_req, res) => {
 exports.getWithdrawals = getWithdrawals;
 const completeWithdrawal = async (req, res) => {
     try {
-        const withdrawal = await Withdrawal_1.default.findByIdAndUpdate(req.params.id, { status: 'completed', processedAt: new Date() }, { new: true });
+        // Atomic pending → completed transition. Guards against a double-complete
+        // race (which would create two withdrawal ledger rows) and against completing
+        // an already-declined/completed withdrawal.
+        const withdrawal = await Withdrawal_1.default.findOneAndUpdate({ _id: req.params.id, status: 'pending' }, { $set: { status: 'completed', processedAt: new Date() } }, { new: true });
         if (!withdrawal) {
-            res.status(404).json({ message: 'Withdrawal not found' });
+            res.status(404).json({ message: 'Pending withdrawal not found' });
             return;
         }
         // Create transaction
@@ -488,19 +492,34 @@ exports.completeWithdrawal = completeWithdrawal;
 const declineWithdrawal = async (req, res) => {
     try {
         const { reason } = req.body;
-        const withdrawal = await Withdrawal_1.default.findById(req.params.id);
-        if (!withdrawal || withdrawal.status !== 'pending') {
-            res.status(404).json({ message: 'Pending withdrawal not found' });
-            return;
+        // Atomically claim the pending → declined transition AND refund the worker in
+        // one transaction, so two concurrent declines can't both refund the amount
+        // (double credit) and a decline can never leave the balance un-refunded.
+        const session = await mongoose_1.default.startSession();
+        let withdrawal;
+        try {
+            await session.withTransaction(async () => {
+                const claimed = await Withdrawal_1.default.findOneAndUpdate({ _id: req.params.id, status: 'pending' }, { $set: { status: 'declined', declineReason: reason, processedAt: new Date() } }, { new: true, session });
+                if (!claimed) {
+                    const notFound = new Error('WITHDRAWAL_NOT_PENDING');
+                    notFound.code = 'WITHDRAWAL_NOT_PENDING';
+                    throw notFound;
+                }
+                // Refund amount back to worker
+                await Worker_1.default.updateOne({ _id: claimed.worker }, { $inc: { balance: claimed.amount } }, { session });
+                withdrawal = claimed;
+            });
         }
-        withdrawal.status = 'declined';
-        withdrawal.declineReason = reason;
-        withdrawal.processedAt = new Date();
-        await withdrawal.save();
-        // Refund amount back to worker
-        await Worker_1.default.findByIdAndUpdate(withdrawal.worker, {
-            $inc: { balance: withdrawal.amount },
-        });
+        catch (err) {
+            if (err.code === 'WITHDRAWAL_NOT_PENDING') {
+                res.status(404).json({ message: 'Pending withdrawal not found' });
+                return;
+            }
+            throw err;
+        }
+        finally {
+            await session.endSession();
+        }
         (0, socket_1.notifyUser)(withdrawal.worker.toString(), 'withdrawal_update', {
             withdrawalId: withdrawal._id,
             status: 'declined',
@@ -1201,21 +1220,22 @@ exports.getRefunds = getRefunds;
 // ─── Process Refund ───
 const processRefund = async (req, res) => {
     try {
-        const booking = await Booking_1.default.findById(req.params.bookingId);
-        if (!booking || booking.paymentStatus !== 'refund_pending') {
+        const existing = await Booking_1.default.findById(req.params.bookingId).select('paymentStatus paymentMethod');
+        if (!existing || existing.paymentStatus !== 'refund_pending') {
             res.status(404).json({ message: 'No pending refund found for this booking' });
             return;
         }
-        if (booking.paymentMethod !== 'online') {
+        if (existing.paymentMethod !== 'online') {
             res.status(400).json({ message: 'Refunds are supported only for online payments' });
             return;
         }
-        booking.paymentStatus = 'refunded';
-        if (booking.refundDetails) {
-            booking.refundDetails.status = 'completed';
-            booking.refundDetails.processedAt = new Date();
+        // Atomically claim the refund_pending → refunded transition so two concurrent
+        // admins can't both process (and double-ledger) the same refund.
+        const booking = await Booking_1.default.findOneAndUpdate({ _id: req.params.bookingId, paymentStatus: 'refund_pending' }, { $set: { paymentStatus: 'refunded', 'refundDetails.status': 'completed', 'refundDetails.processedAt': new Date() } }, { new: true });
+        if (!booking) {
+            res.status(404).json({ message: 'No pending refund found for this booking' });
+            return;
         }
-        await booking.save();
         // Create refund transaction
         await Transaction_1.default.create({
             tid: (await Promise.resolve().then(() => __importStar(require('../utils/generateTID')))).generateTID(),
@@ -1253,22 +1273,22 @@ const rejectRefund = async (req, res) => {
             res.status(400).json({ message: 'Rejection reason is required' });
             return;
         }
-        const booking = await Booking_1.default.findById(req.params.bookingId);
-        if (!booking || booking.paymentStatus !== 'refund_pending') {
+        const existing = await Booking_1.default.findById(req.params.bookingId).select('paymentStatus paymentMethod');
+        if (!existing || existing.paymentStatus !== 'refund_pending') {
             res.status(404).json({ message: 'No pending refund found for this booking' });
             return;
         }
-        if (booking.paymentMethod !== 'online') {
+        if (existing.paymentMethod !== 'online') {
             res.status(400).json({ message: 'Refunds are supported only for online payments' });
             return;
         }
-        // Mark as refund rejected — payment stays as 'paid' (no refund given)
-        booking.paymentStatus = 'paid';
-        if (booking.refundDetails) {
-            booking.refundDetails.status = 'completed';
-            booking.refundDetails.processedAt = new Date();
+        // Atomically claim refund_pending → paid (refund rejected; no refund given).
+        // Prevents a concurrent process + reject from both acting on the same refund.
+        const booking = await Booking_1.default.findOneAndUpdate({ _id: req.params.bookingId, paymentStatus: 'refund_pending' }, { $set: { paymentStatus: 'paid', 'refundDetails.status': 'completed', 'refundDetails.processedAt': new Date() } }, { new: true });
+        if (!booking) {
+            res.status(404).json({ message: 'No pending refund found for this booking' });
+            return;
         }
-        await booking.save();
         // Notify customer
         await (0, socket_1.sendNotification)({
             recipientId: booking.customer.toString(),
@@ -1342,9 +1362,20 @@ const getChatbotQA = async (_req, res) => {
     }
 };
 exports.getChatbotQA = getChatbotQA;
+// Only these fields may ever be written from a request body — prevents
+// mass-assignment of unexpected/internal fields via raw req.body.
+const CHATBOT_QA_FIELDS = ['category', 'targetAudience', 'keywords', 'question', 'answer', 'order', 'isActive'];
+const pickChatbotQAFields = (body) => {
+    const data = {};
+    for (const field of CHATBOT_QA_FIELDS) {
+        if (body[field] !== undefined)
+            data[field] = body[field];
+    }
+    return data;
+};
 const createChatbotQA = async (req, res) => {
     try {
-        const qa = await ChatbotQA_1.default.create(req.body);
+        const qa = await ChatbotQA_1.default.create(pickChatbotQAFields(req.body ?? {}));
         res.status(201).json({ message: 'QA created', qa });
     }
     catch (error) {
@@ -1354,7 +1385,7 @@ const createChatbotQA = async (req, res) => {
 exports.createChatbotQA = createChatbotQA;
 const updateChatbotQA = async (req, res) => {
     try {
-        const qa = await ChatbotQA_1.default.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        const qa = await ChatbotQA_1.default.findByIdAndUpdate(req.params.id, pickChatbotQAFields(req.body ?? {}), { new: true });
         res.json({ message: 'QA updated', qa });
     }
     catch (error) {

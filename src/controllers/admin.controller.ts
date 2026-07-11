@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import Worker from '../models/Worker';
 import User from '../models/User';
 import Booking from '../models/Booking';
@@ -456,14 +457,17 @@ export const getWithdrawals = async (_req: Request, res: Response): Promise<void
 
 export const completeWithdrawal = async (req: Request, res: Response): Promise<void> => {
   try {
-    const withdrawal = await Withdrawal.findByIdAndUpdate(
-      req.params.id,
-      { status: 'completed', processedAt: new Date() },
+    // Atomic pending → completed transition. Guards against a double-complete
+    // race (which would create two withdrawal ledger rows) and against completing
+    // an already-declined/completed withdrawal.
+    const withdrawal = await Withdrawal.findOneAndUpdate(
+      { _id: req.params.id, status: 'pending' },
+      { $set: { status: 'completed', processedAt: new Date() } },
       { new: true }
     );
 
     if (!withdrawal) {
-      res.status(404).json({ message: 'Withdrawal not found' });
+      res.status(404).json({ message: 'Pending withdrawal not found' });
       return;
     }
 
@@ -500,37 +504,59 @@ export const completeWithdrawal = async (req: Request, res: Response): Promise<v
 export const declineWithdrawal = async (req: Request, res: Response): Promise<void> => {
   try {
     const { reason } = req.body;
-    const withdrawal = await Withdrawal.findById(req.params.id);
 
-    if (!withdrawal || withdrawal.status !== 'pending') {
-      res.status(404).json({ message: 'Pending withdrawal not found' });
-      return;
+    // Atomically claim the pending → declined transition AND refund the worker in
+    // one transaction, so two concurrent declines can't both refund the amount
+    // (double credit) and a decline can never leave the balance un-refunded.
+    const session = await mongoose.startSession();
+    let withdrawal;
+    try {
+      await session.withTransaction(async () => {
+        const claimed = await Withdrawal.findOneAndUpdate(
+          { _id: req.params.id, status: 'pending' },
+          { $set: { status: 'declined', declineReason: reason, processedAt: new Date() } },
+          { new: true, session }
+        );
+
+        if (!claimed) {
+          const notFound = new Error('WITHDRAWAL_NOT_PENDING') as Error & { code?: string };
+          notFound.code = 'WITHDRAWAL_NOT_PENDING';
+          throw notFound;
+        }
+
+        // Refund amount back to worker
+        await Worker.updateOne(
+          { _id: claimed.worker },
+          { $inc: { balance: claimed.amount } },
+          { session }
+        );
+
+        withdrawal = claimed;
+      });
+    } catch (err) {
+      if ((err as { code?: string }).code === 'WITHDRAWAL_NOT_PENDING') {
+        res.status(404).json({ message: 'Pending withdrawal not found' });
+        return;
+      }
+      throw err;
+    } finally {
+      await session.endSession();
     }
 
-    withdrawal.status = 'declined';
-    withdrawal.declineReason = reason;
-    withdrawal.processedAt = new Date();
-    await withdrawal.save();
-
-    // Refund amount back to worker
-    await Worker.findByIdAndUpdate(withdrawal.worker, {
-      $inc: { balance: withdrawal.amount },
-    });
-
-    notifyUser(withdrawal.worker.toString(), 'withdrawal_update', {
-      withdrawalId: withdrawal._id,
+    notifyUser(withdrawal!.worker.toString(), 'withdrawal_update', {
+      withdrawalId: withdrawal!._id,
       status: 'declined',
       reason,
       withdrawal,
     });
     notifyRole('admin', 'withdrawal_update', {
-      withdrawalId: withdrawal._id,
+      withdrawalId: withdrawal!._id,
       status: 'declined',
       reason,
       withdrawal,
     });
 
-    await logAdminActivity(req, { action: 'withdrawal.decline', category: 'withdrawals', targetType: 'withdrawal', targetId: String(withdrawal._id), amount: withdrawal.amount });
+    await logAdminActivity(req, { action: 'withdrawal.decline', category: 'withdrawals', targetType: 'withdrawal', targetId: String(withdrawal!._id), amount: withdrawal!.amount });
     res.json({ message: 'Withdrawal declined, amount refunded to worker', withdrawal });
   } catch (error) {
     console.error('Decline withdrawal error:', error);
@@ -1294,24 +1320,30 @@ export const getRefunds = async (_req: Request, res: Response): Promise<void> =>
 // ─── Process Refund ───
 export const processRefund = async (req: Request, res: Response): Promise<void> => {
   try {
-    const booking = await Booking.findById(req.params.bookingId);
+    const existing = await Booking.findById(req.params.bookingId).select('paymentStatus paymentMethod');
 
-    if (!booking || booking.paymentStatus !== 'refund_pending') {
+    if (!existing || existing.paymentStatus !== 'refund_pending') {
       res.status(404).json({ message: 'No pending refund found for this booking' });
       return;
     }
 
-    if (booking.paymentMethod !== 'online') {
+    if (existing.paymentMethod !== 'online') {
       res.status(400).json({ message: 'Refunds are supported only for online payments' });
       return;
     }
 
-    booking.paymentStatus = 'refunded';
-    if (booking.refundDetails) {
-      booking.refundDetails.status = 'completed';
-      booking.refundDetails.processedAt = new Date();
+    // Atomically claim the refund_pending → refunded transition so two concurrent
+    // admins can't both process (and double-ledger) the same refund.
+    const booking = await Booking.findOneAndUpdate(
+      { _id: req.params.bookingId, paymentStatus: 'refund_pending' },
+      { $set: { paymentStatus: 'refunded', 'refundDetails.status': 'completed', 'refundDetails.processedAt': new Date() } },
+      { new: true }
+    );
+
+    if (!booking) {
+      res.status(404).json({ message: 'No pending refund found for this booking' });
+      return;
     }
-    await booking.save();
 
     // Create refund transaction
     await Transaction.create({
@@ -1352,25 +1384,30 @@ export const rejectRefund = async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    const booking = await Booking.findById(req.params.bookingId);
+    const existing = await Booking.findById(req.params.bookingId).select('paymentStatus paymentMethod');
 
-    if (!booking || booking.paymentStatus !== 'refund_pending') {
+    if (!existing || existing.paymentStatus !== 'refund_pending') {
       res.status(404).json({ message: 'No pending refund found for this booking' });
       return;
     }
 
-    if (booking.paymentMethod !== 'online') {
+    if (existing.paymentMethod !== 'online') {
       res.status(400).json({ message: 'Refunds are supported only for online payments' });
       return;
     }
 
-    // Mark as refund rejected — payment stays as 'paid' (no refund given)
-    booking.paymentStatus = 'paid';
-    if (booking.refundDetails) {
-      booking.refundDetails.status = 'completed';
-      booking.refundDetails.processedAt = new Date();
+    // Atomically claim refund_pending → paid (refund rejected; no refund given).
+    // Prevents a concurrent process + reject from both acting on the same refund.
+    const booking = await Booking.findOneAndUpdate(
+      { _id: req.params.bookingId, paymentStatus: 'refund_pending' },
+      { $set: { paymentStatus: 'paid', 'refundDetails.status': 'completed', 'refundDetails.processedAt': new Date() } },
+      { new: true }
+    );
+
+    if (!booking) {
+      res.status(404).json({ message: 'No pending refund found for this booking' });
+      return;
     }
-    await booking.save();
 
     // Notify customer
     await sendNotification({
@@ -1446,9 +1483,21 @@ export const getChatbotQA = async (_req: Request, res: Response): Promise<void> 
   }
 };
 
+// Only these fields may ever be written from a request body — prevents
+// mass-assignment of unexpected/internal fields via raw req.body.
+const CHATBOT_QA_FIELDS = ['category', 'targetAudience', 'keywords', 'question', 'answer', 'order', 'isActive'] as const;
+
+const pickChatbotQAFields = (body: Record<string, unknown>): Record<string, unknown> => {
+  const data: Record<string, unknown> = {};
+  for (const field of CHATBOT_QA_FIELDS) {
+    if (body[field] !== undefined) data[field] = body[field];
+  }
+  return data;
+};
+
 export const createChatbotQA = async (req: Request, res: Response): Promise<void> => {
   try {
-    const qa = await ChatbotQA.create(req.body);
+    const qa = await ChatbotQA.create(pickChatbotQAFields(req.body ?? {}));
     res.status(201).json({ message: 'QA created', qa });
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
@@ -1457,7 +1506,7 @@ export const createChatbotQA = async (req: Request, res: Response): Promise<void
 
 export const updateChatbotQA = async (req: Request, res: Response): Promise<void> => {
   try {
-    const qa = await ChatbotQA.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const qa = await ChatbotQA.findByIdAndUpdate(req.params.id, pickChatbotQAFields(req.body ?? {}), { new: true });
     res.json({ message: 'QA updated', qa });
   } catch (error) {
     res.status(500).json({ message: 'Server error' });

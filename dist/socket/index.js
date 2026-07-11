@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.closeSocketServer = exports.sendAdminNotification = exports.sendNotification = exports.getActiveEKYCRooms = exports.isUserOnline = exports.notifyBookingRoom = exports.notifyRole = exports.notifyWorkers = exports.notifyActiveWorkers = exports.notifyUser = exports.getIO = exports.initializeSocket = void 0;
+exports.closeSocketServer = exports.sendAdminNotification = exports.sendNotification = exports.getActiveEKYCRooms = exports.isUserOnline = exports.notifyBookingRoom = exports.notifyRole = exports.notifyWorkers = exports.notifyActiveWorkers = exports.notifyUser = exports.getIO = exports.initializeSocket = exports.authenticateHandshake = void 0;
 const socket_io_1 = require("socket.io");
 const ioredis_1 = __importDefault(require("ioredis"));
 const redis_adapter_1 = require("@socket.io/redis-adapter");
@@ -200,6 +200,29 @@ const setupSocketRedisAdapter = async () => {
     io.adapter((0, redis_adapter_1.createAdapter)(redisPubClient, redisSubClient));
     console.log('Socket Redis adapter enabled');
 };
+// Authenticate a Socket.IO handshake from its access token.
+// Returns the verified identity, or null when no valid token is presented.
+// Identity is ONLY ever derived from a verified token here — never from the
+// client-supplied `register` payload — which closes the impersonation bypass.
+const authenticateHandshake = (handshake) => {
+    try {
+        const authToken = typeof handshake.auth?.token === 'string' ? handshake.auth.token : undefined;
+        const headerAuthRaw = handshake.headers?.authorization;
+        const headerAuth = typeof headerAuthRaw === 'string' ? headerAuthRaw : undefined;
+        const headerToken = headerAuth?.startsWith('Bearer ') ? headerAuth.slice(7) : undefined;
+        const token = authToken || headerToken;
+        if (!token)
+            return null;
+        const decoded = (0, generateToken_1.verifyAccessToken)(token);
+        if (!decoded?.id || !decoded?.role)
+            return null;
+        return { id: decoded.id, role: decoded.role };
+    }
+    catch {
+        return null;
+    }
+};
+exports.authenticateHandshake = authenticateHandshake;
 const initializeSocket = (server) => {
     io = new socket_io_1.Server(server, {
         transports: ['websocket', 'polling'],
@@ -306,24 +329,16 @@ const initializeSocket = (server) => {
         }
     });
     io.use((socket, next) => {
-        try {
-            const authToken = socket.handshake.auth?.token;
-            const headerAuth = socket.handshake.headers.authorization;
-            const headerToken = headerAuth?.startsWith('Bearer ') ? headerAuth.slice(7) : undefined;
-            const token = authToken || headerToken;
-            if (!token) {
-                next();
-                return;
-            }
-            const decoded = (0, generateToken_1.verifyAccessToken)(token);
-            socket.data.auth = decoded;
-            next();
+        // Reject any socket that does not present a valid access token. A missing or
+        // invalid/expired token is unauthorized — we never fall back to trusting
+        // client-supplied identity.
+        const auth = (0, exports.authenticateHandshake)(socket.handshake);
+        if (!auth) {
+            next(new Error('unauthorized'));
+            return;
         }
-        catch {
-            // Allow connection even with invalid/expired token — manual 'register' event will handle identity
-            console.warn('Socket auth failed (expired token?), allowing unauthenticated connection');
-            next();
-        }
+        socket.data.auth = auth;
+        next();
     });
     io.on('connection', (socket) => {
         console.log(`Socket connected: ${socket.id}`);
@@ -378,17 +393,14 @@ const initializeSocket = (server) => {
             registerSocketUser(authData.id, authData.role);
         }
         // ─── Register user ───
-        socket.on('register', ({ userId, role }) => {
-            const tokenUserId = authData?.id;
-            const tokenRole = authData?.role;
-            if (tokenUserId && tokenRole) {
-                if (tokenUserId !== userId || tokenRole !== role) {
-                    socket.emit('socket:error', { message: 'Socket identity mismatch' });
-                    return;
-                }
+        // Identity is taken exclusively from the verified token (socket.data.auth);
+        // any client-supplied userId/role in the payload is ignored. Kept so clients
+        // that emit `register` on connect still get (re-)joined to their rooms.
+        socket.on('register', () => {
+            if (authData?.id && authData?.role) {
+                registerSocketUser(authData.id, authData.role);
+                (0, metrics_1.recordSocketEvent)('register');
             }
-            registerSocketUser(tokenUserId || userId, tokenRole || role);
-            (0, metrics_1.recordSocketEvent)('register');
         });
         // ─── Admin marks themself as available for worker eKYC ───
         socket.on('ekyc:notify-availability', async ({ workerId }, ack) => {

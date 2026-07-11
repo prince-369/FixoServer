@@ -10,6 +10,7 @@ import env from './config/env';
 import { errorHandler } from './middlewares/error.middleware';
 import { apiLimiter, authLimiter, mutationLimiter } from './middlewares/rateLimit.middleware';
 import { metricsMiddleware, serveMetrics } from './monitoring/metrics';
+import { sanitizeRequest } from './middlewares/sanitize.middleware';
 import swaggerSpec from './docs/swagger';
 
 // Import routes
@@ -51,6 +52,10 @@ app.use(express.json({
 }));
 app.use(express.urlencoded({ extended: true, limit: `${env.URL_ENCODED_LIMIT_MB}mb` }));
 app.use(cookieParser());
+
+// Strip NoSQL-injection operators ($..., dotted keys) from all input as
+// defense-in-depth, especially for endpoints without express-validator.
+app.use(sanitizeRequest);
 
 // Request tracing + slow/error request logs
 app.use((req, res, next) => {
