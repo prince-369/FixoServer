@@ -38,6 +38,7 @@ export declare const createChatbotQA: (req: Request, res: Response) => Promise<v
 export declare const updateChatbotQA: (req: Request, res: Response) => Promise<void>;
 export declare const deleteChatbotQA: (req: Request, res: Response) => Promise<void>;
 export declare const getAllWorkers: (req: Request, res: Response) => Promise<void>;
+export declare const checkAadhaarDuplicate: (req: Request, res: Response) => Promise<void>;
 export declare const getWorkerDetail: (req: Request, res: Response) => Promise<void>;
 export declare const blockCustomer: (req: Request, res: Response) => Promise<void>;
 export declare const unblockCustomer: (req: Request, res: Response) => Promise<void>;

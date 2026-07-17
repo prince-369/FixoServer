@@ -8,6 +8,7 @@ const idempotency_middleware_1 = require("../middlewares/idempotency.middleware"
 const staff_controller_1 = require("../controllers/staff.controller");
 const admin_controller_1 = require("../controllers/admin.controller");
 const incentiveAdmin_controller_1 = require("../controllers/incentiveAdmin.controller");
+const landing_controller_1 = require("../controllers/landing.controller");
 const router = (0, express_1.Router)();
 const mutationGuard = (0, idempotency_middleware_1.idempotencyGuard)(20000);
 router.use(auth_middleware_1.protect, (0, auth_middleware_1.authorize)('admin'));
@@ -28,6 +29,7 @@ router.use('/customers', (0, permission_middleware_1.requirePermission)('custome
 router.use('/help-tickets', (0, permission_middleware_1.requirePermission)('support_customer', 'support_worker'));
 router.use('/refunds', (0, permission_middleware_1.requirePermission)('refunds'));
 router.use('/chatbot-qa', (0, permission_middleware_1.requirePermission)('chatbot'));
+router.use('/landing', (0, permission_middleware_1.requirePermission)('landing'));
 router.use('/workers', (0, permission_middleware_1.requirePermission)('workers'));
 router.use('/coupons', (0, permission_middleware_1.requirePermission)('coupons'));
 router.use('/coupon-redemptions', (0, permission_middleware_1.requirePermission)('coupons', 'analytics'));
@@ -80,6 +82,13 @@ router.delete('/chatbot-qa/:id', mutationGuard, admin_controller_1.deleteChatbot
 // Workers (gated by the /workers path-permission above)
 router.get('/workers', admin_controller_1.getAllWorkers);
 router.get('/workers/:id', admin_controller_1.getWorkerDetail);
+// Aadhaar duplicate check (scan image / manual number / a worker's stored hash).
+router.post('/aadhaar/check', upload_middleware_1.uploadScanImage, admin_controller_1.checkAadhaarDuplicate);
+// ─── Landing site: launch waitlist + partnership requests ───
+router.get('/landing/waitlist', landing_controller_1.getLaunchWaitlist);
+router.patch('/landing/waitlist/:id', mutationGuard, landing_controller_1.markSignupNotified);
+router.get('/landing/partners', landing_controller_1.getPartnerRequests);
+router.patch('/landing/partners/:id', mutationGuard, landing_controller_1.updatePartnerRequestStatus);
 // ─── Cancellation moderation (customer-side and worker-side permissions) ───
 router.get('/moderation/flags', (0, permission_middleware_1.requirePermission)('moderation_customer', 'moderation_worker'), admin_controller_1.getCancellationFlags);
 router.post('/moderation/customer/:id/block', (0, permission_middleware_1.requirePermission)('moderation_customer'), mutationGuard, admin_controller_1.blockCustomer);

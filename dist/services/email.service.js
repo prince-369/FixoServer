@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sendPasswordSetupOtpEmail = exports.sendAccountDeactivationOtpEmail = exports.sendPasswordResetEmail = void 0;
+exports.sendPasswordSetupOtpEmail = exports.sendAccountDeactivationOtpEmail = exports.sendPasswordResetEmail = exports.sendPartnerRequestEmail = exports.sendWaitlistSignupEmail = void 0;
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const env_1 = __importDefault(require("../config/env"));
 const transporter = nodemailer_1.default.createTransport({
@@ -15,6 +15,85 @@ const transporter = nodemailer_1.default.createTransport({
         pass: env_1.default.SMTP_PASS,
     },
 });
+// ─── Landing site notifications (→ support inbox) ───
+const escapeHtml = (v) => String(v ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+const shell = (title, accent, rows, footer) => `
+  <div style="font-family: Arial, sans-serif; max-width: 620px; margin: 0 auto; background:#f6f7fb; padding:24px;">
+    <div style="background:#0f1c3f; border-radius:14px 14px 0 0; padding:18px 22px;">
+      <h2 style="margin:0; color:#fff; font-size:18px;">${escapeHtml(title)}</h2>
+    </div>
+    <div style="background:#fff; border-radius:0 0 14px 14px; padding:22px;">
+      <table style="width:100%; border-collapse:collapse; font-size:14px; color:#111827;">
+        ${rows
+    .map(([k, v]) => `<tr>
+              <td style="padding:9px 0; color:#6b7280; width:170px; vertical-align:top;">${escapeHtml(k)}</td>
+              <td style="padding:9px 0; font-weight:600; color:#0f1c3f;">${escapeHtml(v) || '—'}</td>
+            </tr>`)
+    .join('')}
+      </table>
+      ${footer ? `<p style="margin:18px 0 0; padding-top:14px; border-top:1px solid #e5e7eb; color:#6b7280; font-size:13px;">${footer}</p>` : ''}
+      <div style="margin-top:16px; height:3px; border-radius:2px; background:${accent};"></div>
+    </div>
+  </div>`;
+/** Someone joined the pre-launch waitlist on the marketing site. */
+const sendWaitlistSignupEmail = async (data) => {
+    try {
+        if (!env_1.default.SMTP_USER) {
+            console.log(`[DEV] Waitlist signup → ${env_1.default.SUPPORT_EMAIL}:`, data);
+            return true;
+        }
+        await transporter.sendMail({
+            from: `"Fixo Waitlist" <${env_1.default.SMTP_USER}>`,
+            to: env_1.default.SUPPORT_EMAIL,
+            replyTo: data.contact.includes('@') ? data.contact : undefined,
+            subject: `New waitlist signup — ${data.contact}`,
+            html: shell('🎉 New waitlist signup', '#F97316', [
+                ['Contact', data.contact],
+                ['Signed up as', data.role === 'worker' ? 'Wants to work with Fixo' : 'Customer'],
+                ['Source', data.source],
+                ['Total signups', String(data.total)],
+            ], 'They will be notified when Fixo launches.'),
+        });
+        return true;
+    }
+    catch (error) {
+        console.error('Waitlist signup email error:', error);
+        return false;
+    }
+};
+exports.sendWaitlistSignupEmail = sendWaitlistSignupEmail;
+/** Someone submitted the "Partner with Fixo" form. */
+const sendPartnerRequestEmail = async (data) => {
+    try {
+        if (!env_1.default.SMTP_USER) {
+            console.log(`[DEV] Partner request → ${env_1.default.SUPPORT_EMAIL}:`, data);
+            return true;
+        }
+        await transporter.sendMail({
+            from: `"Fixo Partnerships" <${env_1.default.SMTP_USER}>`,
+            to: env_1.default.SUPPORT_EMAIL,
+            replyTo: data.email,
+            subject: `Partner request — ${data.company} (${data.fullName})`,
+            html: shell('🤝 New partnership request', '#10B981', [
+                ['Name', data.fullName],
+                ['Business / Company', data.company],
+                ['Phone', data.phone],
+                ['Email', data.email],
+                ['City', data.city],
+                ['Partnership type', data.partnershipType],
+                ['Message', data.message],
+            ], 'Reply within 3 working days — that is what the site promises.'),
+        });
+        return true;
+    }
+    catch (error) {
+        console.error('Partner request email error:', error);
+        return false;
+    }
+};
+exports.sendPartnerRequestEmail = sendPartnerRequestEmail;
 const sendPasswordResetEmail = async (email, resetToken, role) => {
     try {
         // Use correct frontend URL based on role

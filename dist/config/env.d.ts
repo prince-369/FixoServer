@@ -48,6 +48,7 @@ interface EnvConfig {
     SMTP_PORT: number;
     SMTP_USER: string;
     SMTP_PASS: string;
+    SUPPORT_EMAIL: string;
     GOOGLE_CLIENT_IDS: string[];
     GOOGLE_CLIENT_ID: string;
     GOOGLE_CLIENT_SECRET: string;

@@ -18,6 +18,7 @@ exports.PERMISSIONS = [
     { key: 'analytics', label: 'Analytics & Reports', scope: 'platform' },
     { key: 'categories', label: 'Categories', scope: 'platform', route: '/admin/categories' },
     { key: 'chatbot', label: 'Chatbot Config', scope: 'platform', route: '/admin/chatbot-qa' },
+    { key: 'landing', label: 'Landing Site (Waitlist & Partners)', scope: 'platform', route: '/admin/launch-waitlist' },
     // Customer side
     { key: 'customers', label: 'Customers', scope: 'customer', route: '/admin/customers' },
     { key: 'moderation_customer', label: 'Cancellation Watch (Customers)', scope: 'customer', route: '/admin/moderation' },
@@ -101,8 +102,8 @@ exports.ROLES = [
     {
         role: 'marketing_manager',
         label: 'Marketing Manager',
-        description: 'Growth — banners, coupons, offers, promotions and notifications.',
-        defaults: ['banners', 'coupons', 'promotions', 'incentives', 'notify_customer', 'notify_worker'],
+        description: 'Growth — banners, coupons, offers, promotions, notifications and the landing site.',
+        defaults: ['banners', 'coupons', 'promotions', 'incentives', 'notify_customer', 'notify_worker', 'landing'],
     },
     {
         role: 'analytics_manager',

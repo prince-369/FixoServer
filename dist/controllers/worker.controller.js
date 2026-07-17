@@ -3,10 +3,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateVideoKycToken = exports.unselectSkill = exports.bumpSkillExperience = exports.requestSkill = exports.getSkills = exports.escalateHelpTicket = exports.appendHelpTicketMessage = exports.getHelpTicketDetail = exports.getHelpTickets = exports.createHelpTicket = exports.getChatbotQA = exports.deleteNotification = exports.markAllNotificationsRead = exports.markNotificationRead = exports.getNotifications = exports.getWithdrawals = exports.requestWithdrawal = exports.saveBankDetails = exports.getWalletTransactions = exports.getEarningsHistory = exports.getFunds = exports.completeWork = exports.requestCompletionCode = exports.sendMessage = exports.cancelBookingByWorker = exports.rejectBooking = exports.approveBooking = exports.respondToNegotiation = exports.submitBid = exports.getWorkRequestDetail = exports.getWorkRequests = exports.getReviews = exports.getDashboard = exports.updateCurrentLocation = exports.updateLocation = exports.toggleActive = exports.completeProfile = exports.reRequestEKYC = exports.updateProfile = exports.getProfile = void 0;
+exports.generateVideoKycToken = exports.unselectSkill = exports.bumpSkillExperience = exports.requestSkill = exports.getSkills = exports.escalateHelpTicket = exports.appendHelpTicketMessage = exports.getHelpTicketDetail = exports.getHelpTickets = exports.createHelpTicket = exports.getChatbotQA = exports.deleteNotification = exports.markAllNotificationsRead = exports.markNotificationRead = exports.getNotifications = exports.getWithdrawals = exports.requestWithdrawal = exports.saveBankDetails = exports.getWalletTransactions = exports.getEarningsHistory = exports.getFunds = exports.completeWork = exports.requestCompletionCode = exports.sendMessage = exports.cancelBookingByWorker = exports.rejectBooking = exports.approveBooking = exports.respondToNegotiation = exports.submitBid = exports.getWorkRequestDetail = exports.getWorkRequests = exports.getReviews = exports.getDashboard = exports.updateCurrentLocation = exports.updateLocation = exports.toggleActive = exports.submitOnboardingSkills = exports.submitOnboardingAadhaar = exports.validateAadhaarScan = exports.completeProfile = exports.reRequestEKYC = exports.updateProfile = exports.getProfile = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const Worker_1 = __importDefault(require("../models/Worker"));
+const aadhaarValidation_service_1 = require("../services/aadhaarValidation.service");
 const Category_1 = __importDefault(require("../models/Category"));
 const Booking_1 = __importDefault(require("../models/Booking"));
 const workerSkills_1 = require("../utils/workerSkills");
@@ -255,6 +256,142 @@ const completeProfile = async (req, res) => {
     }
 };
 exports.completeProfile = completeProfile;
+// ─── Onboarding helpers (aadhaar + skills submitted AFTER account creation) ───
+const withOnboardingFlags = (w) => w
+    ? {
+        ...(typeof w.toObject === 'function' ? w.toObject() : w),
+        aadhaarSubmitted: Boolean(w.aadhaarFront && w.aadhaarBack),
+        skillsCount: Array.isArray(w.skills) ? w.skills.length : 0,
+    }
+    : w;
+const parseOnboardingSkills = (raw) => {
+    let arr = raw;
+    if (typeof raw === 'string') {
+        try {
+            arr = JSON.parse(raw);
+        }
+        catch {
+            arr = [];
+        }
+    }
+    if (!Array.isArray(arr))
+        return [];
+    return arr
+        .filter((s) => Boolean(s) && typeof s === 'object' && Boolean(s.categoryId))
+        .map((s) => ({
+        categoryId: String(s.categoryId),
+        experienceYears: Number(s.experienceYears) || 0,
+        confirmed: s.confirmed === true || s.confirmed === 'true',
+    }));
+};
+// ─── Live-scan / manual Aadhaar validation (single side) ───
+const validateAadhaarScan = async (req, res) => {
+    try {
+        const file = req.file;
+        const side = String(req.body?.side || '').toLowerCase();
+        if (!file) {
+            res.status(400).json({ message: 'No image received' });
+            return;
+        }
+        if (side !== 'front' && side !== 'back') {
+            res.status(400).json({ message: 'side must be "front" or "back"' });
+            return;
+        }
+        const result = await (0, aadhaarValidation_service_1.validateAadhaarSide)(file.buffer, side);
+        res.json(result);
+    }
+    catch (error) {
+        console.error('Validate aadhaar scan error:', error);
+        res.status(500).json({ message: 'Could not validate image' });
+    }
+};
+exports.validateAadhaarScan = validateAadhaarScan;
+// ─── Onboarding Step 1: Upload Aadhaar ───
+const submitOnboardingAadhaar = async (req, res) => {
+    try {
+        const worker = await Worker_1.default.findById(req.user.id);
+        if (!worker) {
+            res.status(404).json({ message: 'Worker not found' });
+            return;
+        }
+        const files = req.files;
+        const front = files?.aadhaarFront?.[0];
+        const back = files?.aadhaarBack?.[0];
+        if (!front || !back) {
+            res.status(400).json({ message: 'Aadhaar card front and back photos are required' });
+            return;
+        }
+        // Server-side guard: reject if either image clearly isn't an Aadhaar card.
+        // The front pass also extracts the printed details (name/dob/number) to store.
+        const [frontInspect, backOk] = await Promise.all([
+            (0, aadhaarValidation_service_1.inspectAadhaar)(front.buffer),
+            (0, aadhaarValidation_service_1.looksLikeAadhaar)(back.buffer),
+        ]);
+        if (!frontInspect.looksAadhaar || !backOk) {
+            res.status(400).json({ message: 'Please upload valid Aadhaar card photos (front and back).' });
+            return;
+        }
+        const [frontUpload, backUpload] = await Promise.all([
+            (0, cloudinary_service_1.uploadBufferToCloudinary)(front.buffer, 'aadhaar'),
+            (0, cloudinary_service_1.uploadBufferToCloudinary)(back.buffer, 'aadhaar'),
+        ]);
+        // Persist the extracted details (number stored only as a hash) so admins can
+        // detect duplicate accounts made with the same Aadhaar.
+        const details = frontInspect.details;
+        if (details.aadhaarNumber) {
+            const digits = (0, aadhaarValidation_service_1.normaliseAadhaarDigits)(details.aadhaarNumber);
+            worker.aadhaarNumberHash = (0, aadhaarValidation_service_1.hashAadhaarNumber)(digits);
+            worker.aadhaarNumberLast4 = digits.slice(-4);
+        }
+        if (details.name)
+            worker.aadhaarName = details.name;
+        if (details.dob)
+            worker.aadhaarDob = details.dob;
+        worker.aadhaarFront = frontUpload.url;
+        worker.aadhaarBack = backUpload.url;
+        await worker.save();
+        const populated = await Worker_1.default.findById(worker._id).populate('categories');
+        res.json({ message: 'Aadhaar uploaded successfully.', worker: withOnboardingFlags(populated) });
+    }
+    catch (error) {
+        console.error('Submit onboarding aadhaar error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.submitOnboardingAadhaar = submitOnboardingAadhaar;
+// ─── Onboarding Step 2: Select Skills ───
+const submitOnboardingSkills = async (req, res) => {
+    try {
+        const worker = await Worker_1.default.findById(req.user.id);
+        if (!worker) {
+            res.status(404).json({ message: 'Worker not found' });
+            return;
+        }
+        const parsed = parseOnboardingSkills(req.body?.skills);
+        if (!parsed.some((s) => s.confirmed)) {
+            res.status(400).json({ message: 'Select at least one skill you can do and confirm it.' });
+            return;
+        }
+        worker.skills = parsed.map((s) => ({
+            category: s.categoryId,
+            experienceYears: s.experienceYears,
+            confirmed: s.confirmed,
+            status: 'pending_kyc',
+            experienceBumpsUsed: 0,
+            callAttempts: 0,
+            requestedAt: new Date(),
+            decidedAt: null,
+        }));
+        await worker.save();
+        const populated = await Worker_1.default.findById(worker._id).populate('categories');
+        res.json({ message: 'Skills saved successfully.', worker: withOnboardingFlags(populated) });
+    }
+    catch (error) {
+        console.error('Submit onboarding skills error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.submitOnboardingSkills = submitOnboardingSkills;
 // ─── Toggle Active Status ───
 const toggleActive = async (req, res) => {
     try {

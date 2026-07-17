@@ -24,6 +24,7 @@ const worker_routes_1 = __importDefault(require("./routes/worker.routes"));
 const booking_routes_1 = __importDefault(require("./routes/booking.routes"));
 const admin_routes_1 = __importDefault(require("./routes/admin.routes"));
 const notification_routes_1 = __importDefault(require("./routes/notification.routes"));
+const landing_routes_1 = __importDefault(require("./routes/landing.routes"));
 const app = (0, express_1.default)();
 const allowedOrigins = new Set(env_1.default.CLIENT_URLS);
 // Security & parsing middleware
@@ -124,6 +125,7 @@ app.use('/api/worker', worker_routes_1.default);
 app.use('/api/booking', booking_routes_1.default);
 app.use('/api/admin', admin_routes_1.default);
 app.use('/api/notifications', notification_routes_1.default);
+app.use('/api/landing', landing_routes_1.default);
 app.use('/api', (_req, res) => {
     res.status(404).json({ message: 'API route not found' });
 });

@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.uploadSingle = exports.uploadAadhaar = exports.uploadBookingVoice = exports.upload = void 0;
+exports.uploadScanImage = exports.uploadSingle = exports.uploadAadhaar = exports.uploadBookingVoice = exports.upload = void 0;
 const multer_1 = __importDefault(require("multer"));
 const path_1 = __importDefault(require("path"));
 const storage = multer_1.default.memoryStorage();
@@ -44,4 +44,17 @@ exports.uploadAadhaar = exports.upload.fields([
     { name: 'aadhaarBack', maxCount: 1 },
 ]);
 exports.uploadSingle = exports.upload.single('image');
+// For live-scan frames / camera blobs that may have no filename extension —
+// accept anything with an image/* mimetype.
+const imageMimeFilter = (req, file, cb) => {
+    if (/^image\//.test(file.mimetype))
+        cb(null, true);
+    else
+        cb(new Error('Only image files are allowed'));
+};
+exports.uploadScanImage = (0, multer_1.default)({
+    storage,
+    fileFilter: imageMimeFilter,
+    limits: { fileSize: 8 * 1024 * 1024 },
+}).single('image');
 //# sourceMappingURL=upload.middleware.js.map

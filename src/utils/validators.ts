@@ -5,7 +5,7 @@ export const registerCustomerValidation = [
   body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
   body('phone').trim().notEmpty().withMessage('Phone number is required')
     .matches(/^[6-9]\d{9}$/).withMessage('Valid 10-digit Indian phone number required'),
-  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
+  body('password').isLength({ min: 8, max: 64 }).withMessage('Password must be 8 to 64 characters')
     .matches(/[a-z]/).withMessage('Password must include a lowercase letter')
     .matches(/[A-Z]/).withMessage('Password must include an uppercase letter')
     .matches(/\d/).withMessage('Password must include a number')
@@ -16,7 +16,7 @@ export const registerWorkerValidation = [
   body('fullName').trim().notEmpty().withMessage('Full name is required (as per document)'),
   body('phone').trim().notEmpty().withMessage('Phone number is required')
     .matches(/^[6-9]\d{9}$/).withMessage('Valid 10-digit Indian phone number required'),
-  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
+  body('password').isLength({ min: 8, max: 64 }).withMessage('Password must be 8 to 64 characters')
     .matches(/[a-z]/).withMessage('Password must include a lowercase letter')
     .matches(/[A-Z]/).withMessage('Password must include an uppercase letter')
     .matches(/\d/).withMessage('Password must include a number')
@@ -40,7 +40,7 @@ export const forgotPasswordValidation = [
 ];
 
 export const resetPasswordValidation = [
-  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
+  body('password').isLength({ min: 8, max: 64 }).withMessage('Password must be 8 to 64 characters')
     .matches(/[a-z]/).withMessage('Password must include a lowercase letter')
     .matches(/[A-Z]/).withMessage('Password must include an uppercase letter')
     .matches(/\d/).withMessage('Password must include a number')

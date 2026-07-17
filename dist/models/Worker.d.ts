@@ -27,6 +27,10 @@ export interface IWorker extends Document {
     googleId?: string;
     aadhaarFront: string;
     aadhaarBack: string;
+    aadhaarNumberHash?: string;
+    aadhaarNumberLast4?: string;
+    aadhaarName?: string;
+    aadhaarDob?: string;
     accountStatus: WorkerAccountStatus;
     ekycRejectionReason?: string;
     videoKycIncompleteReason?: string;

@@ -20,6 +20,7 @@ import workerRoutes from './routes/worker.routes';
 import bookingRoutes from './routes/booking.routes';
 import adminRoutes from './routes/admin.routes';
 import notificationRoutes from './routes/notification.routes';
+import landingRoutes from './routes/landing.routes';
 
 const app = express();
 const allowedOrigins = new Set(env.CLIENT_URLS);
@@ -138,6 +139,7 @@ app.use('/api/worker', workerRoutes);
 app.use('/api/booking', bookingRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/landing', landingRoutes);
 
 app.use('/api', (_req, res) => {
   res.status(404).json({ message: 'API route not found' });

@@ -41,8 +41,14 @@ const workerSchema = new mongoose_1.Schema({
     email: { type: String, lowercase: true, trim: true, sparse: true },
     password: { type: String, select: false },
     googleId: { type: String, sparse: true },
-    aadhaarFront: { type: String, required: true },
-    aadhaarBack: { type: String, required: true },
+    // Aadhaar is uploaded during onboarding (after the account is created), so it
+    // is optional at creation time and defaults to empty until the worker submits it.
+    aadhaarFront: { type: String, default: '' },
+    aadhaarBack: { type: String, default: '' },
+    aadhaarNumberHash: { type: String, default: '' },
+    aadhaarNumberLast4: { type: String, default: '' },
+    aadhaarName: { type: String, default: '' },
+    aadhaarDob: { type: String, default: '' },
     accountStatus: {
         type: String,
         enum: ['test', 'ekyc_pending', 'ekyc_done', 'approved', 'rejected', 'live'],
@@ -101,6 +107,7 @@ const workerSchema = new mongoose_1.Schema({
     totalEarnings: { type: Number, default: 0 },
     block: { type: User_1.blockSchemaDefinition, default: () => ({}) },
 }, { timestamps: true });
+workerSchema.index({ aadhaarNumberHash: 1 }, { sparse: true });
 workerSchema.index({ location: '2dsphere' });
 workerSchema.index({ currentLocation: '2dsphere' });
 workerSchema.index({ phone: 1 });

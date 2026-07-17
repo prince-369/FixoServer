@@ -15,7 +15,46 @@ import Category from '../models/Category';
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/fixo';
 
 const categories = [
-  // ──────────────── 1. Plumber ────────────────
+  // ──────────────── 1. Electrician ────────────────
+  {
+    name: 'Electrician',
+    slug: 'electrician',
+    tagline: 'Trusted electricians for wiring, repairs & installations — same day',
+    description:
+      'From a flickering light to full home wiring, our verified electricians handle every electrical need safely and quickly. All work follows proper safety standards and comes with a service guarantee.',
+    priceStartsFrom: 149,
+    order: 1,
+    highlights: [
+      'Verified & Safety-Trained Electricians',
+      '30-Day Service Guarantee',
+      'Genuine Switches, Wires & Fittings',
+      'Transparent Pricing — No Hidden Costs',
+      'Same-Day Availability',
+      'Safe & Standards-Compliant Work',
+    ],
+    services: [
+      { title: 'Fan Installation & Repair', description: 'Ceiling/wall/exhaust fan installation, regulator fix, noise & speed issue repair' },
+      { title: 'Switch & Socket Work', description: 'Switchboard repair, new socket point, modular switch replacement, loose connection fix' },
+      { title: 'Wiring & Rewiring', description: 'New house wiring, concealed/open wiring, faulty wire replacement, extension points' },
+      { title: 'MCB / Fuse / DB Box', description: 'MCB tripping fix, fuse replacement, distribution box installation, load balancing' },
+      { title: 'Light & Fixture Installation', description: 'LED/tube light, chandelier, panel light, decorative & focus light installation' },
+      { title: 'Inverter & Battery', description: 'Inverter installation, battery connection, wiring for backup, fault diagnosis' },
+      { title: 'Doorbell & Calling Bell', description: 'Doorbell installation, wiring, chime replacement, video door phone point' },
+      { title: 'Appliance & Power Point', description: 'AC/geyser/washing machine power point, heavy-load socket, dedicated line wiring' },
+      { title: 'Fault Finding & Short Circuit', description: 'Power failure diagnosis, short circuit tracing, earthing check, tripping issue fix' },
+      { title: 'Geyser & Heavy Appliance Wiring', description: 'Geyser point, motor connection, high-load appliance wiring with safety switch' },
+    ],
+    faqs: [
+      { question: 'What is the minimum visit charge?', answer: 'Basic visit and inspection starts at ₹149. Final cost depends on the work and materials needed — you get a clear quote before work begins.' },
+      { question: 'Do electricians bring their own materials?', answer: 'Yes, our electricians carry commonly needed items like switches, wires, tape, holders and fittings. You can use ours or provide your own.' },
+      { question: 'Can you fix frequent power tripping?', answer: 'Yes, our electricians diagnose the cause of MCB tripping — overload, short circuit or faulty appliance — and fix it safely.' },
+      { question: 'Do you handle full house wiring?', answer: 'Absolutely. From new construction wiring to complete rewiring of old homes, our electricians handle concealed and open wiring with proper safety standards.' },
+      { question: 'Is same-day service available?', answer: 'Yes! Based on availability in your area, we offer same-day electrician visits. Book early for the best time slots.' },
+      { question: 'Is there a warranty on electrical work?', answer: 'Yes, all electrical work comes with a 30-day service guarantee. If the same issue recurs, we fix it free of charge.' },
+    ],
+  },
+
+  // ──────────────── 2. Plumber ────────────────
   {
     name: 'Plumber',
     slug: 'plumber',

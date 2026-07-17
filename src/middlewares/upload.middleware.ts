@@ -47,3 +47,16 @@ export const uploadAadhaar = upload.fields([
 ]);
 
 export const uploadSingle = upload.single('image');
+
+// For live-scan frames / camera blobs that may have no filename extension —
+// accept anything with an image/* mimetype.
+const imageMimeFilter = (req: Express.Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+  if (/^image\//.test(file.mimetype)) cb(null, true);
+  else cb(new Error('Only image files are allowed'));
+};
+
+export const uploadScanImage = multer({
+  storage,
+  fileFilter: imageMimeFilter,
+  limits: { fileSize: 8 * 1024 * 1024 },
+}).single('image');

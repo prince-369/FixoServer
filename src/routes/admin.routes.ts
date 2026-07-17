@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { protect, authorize } from '../middlewares/auth.middleware';
 import { requirePermission, requireSuperAdmin } from '../middlewares/permission.middleware';
-import { uploadSingle } from '../middlewares/upload.middleware';
+import { uploadSingle, uploadScanImage } from '../middlewares/upload.middleware';
 import { idempotencyGuard } from '../middlewares/idempotency.middleware';
 import {
   getStaffMeta, listStaff, createStaff, updateStaff, deleteStaff, getStaffActivity,
@@ -14,6 +14,7 @@ import {
   getWorkerEKYCDetails,
   updateVideoKycResult,
   approveWorker,
+  checkAadhaarDuplicate,
   rejectWorker,
   saveEkycCapture,
   getWithdrawals,
@@ -80,6 +81,12 @@ import {
   adminIncentiveAnalytics,
   adminListCouponRedemptions,
 } from '../controllers/incentiveAdmin.controller';
+import {
+  getLaunchWaitlist,
+  markSignupNotified,
+  getPartnerRequests,
+  updatePartnerRequestStatus,
+} from '../controllers/landing.controller';
 
 const router = Router();
 const mutationGuard = idempotencyGuard(20_000);
@@ -104,6 +111,7 @@ router.use('/customers', requirePermission('customers'));
 router.use('/help-tickets', requirePermission('support_customer', 'support_worker'));
 router.use('/refunds', requirePermission('refunds'));
 router.use('/chatbot-qa', requirePermission('chatbot'));
+router.use('/landing', requirePermission('landing'));
 router.use('/workers', requirePermission('workers'));
 router.use('/coupons', requirePermission('coupons'));
 router.use('/coupon-redemptions', requirePermission('coupons', 'analytics'));
@@ -166,6 +174,14 @@ router.delete('/chatbot-qa/:id', mutationGuard, deleteChatbotQA);
 // Workers (gated by the /workers path-permission above)
 router.get('/workers', getAllWorkers);
 router.get('/workers/:id', getWorkerDetail);
+// Aadhaar duplicate check (scan image / manual number / a worker's stored hash).
+router.post('/aadhaar/check', uploadScanImage, checkAadhaarDuplicate);
+
+// ─── Landing site: launch waitlist + partnership requests ───
+router.get('/landing/waitlist', getLaunchWaitlist);
+router.patch('/landing/waitlist/:id', mutationGuard, markSignupNotified);
+router.get('/landing/partners', getPartnerRequests);
+router.patch('/landing/partners/:id', mutationGuard, updatePartnerRequestStatus);
 
 // ─── Cancellation moderation (customer-side and worker-side permissions) ───
 router.get('/moderation/flags', requirePermission('moderation_customer', 'moderation_worker'), getCancellationFlags);

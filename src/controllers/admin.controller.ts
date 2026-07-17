@@ -22,6 +22,8 @@ import { sendWebPushNotification } from '../services/webPush.service';
 import Notification from '../models/Notification';
 import { deleteFromCloudinary, uploadBufferToCloudinary } from '../services/cloudinary.service';
 import { getSeedAdminBootstrapStatus } from '../services/adminBootstrap.service';
+import { extractAadhaarFromImage, hashAadhaarNumber, normaliseAadhaarDigits } from '../services/aadhaarValidation.service';
+import { isValidAadhaarNumber } from '../utils/verhoeff';
 
 const VIDEO_KYC_RETRY_COOLDOWN_MS = 3 * 60 * 1000;
 
@@ -1552,6 +1554,101 @@ export const getAllWorkers = async (req: Request, res: Response): Promise<void> 
     res.json({ workers, stats });
   } catch (error) {
     console.error('Get all workers error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─── Aadhaar duplicate check ───
+// Detects whether an Aadhaar is already tied to another worker account.
+// Sources (in priority): manual number → scanned image → a worker's stored hash.
+const fetchImageBuffer = async (url: string): Promise<Buffer | null> => {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return Buffer.from(await res.arrayBuffer());
+  } catch {
+    return null;
+  }
+};
+
+export const checkAadhaarDuplicate = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const manualNumber = normaliseAadhaarDigits(String(req.body?.aadhaarNumber || ''));
+    const workerId = String(req.body?.workerId || '').trim();
+    const excludeWorkerId = String(req.body?.excludeWorkerId || workerId || '').trim();
+    const file = req.file;
+
+    let digits = '';
+    let details: { name?: string; dob?: string; aadhaarNumber?: string } = {};
+
+    if (manualNumber) {
+      if (!isValidAadhaarNumber(manualNumber)) {
+        res.status(400).json({ message: 'Enter a valid 12-digit Aadhaar number.' });
+        return;
+      }
+      digits = manualNumber;
+    } else if (file) {
+      details = await extractAadhaarFromImage(file.buffer);
+      digits = normaliseAadhaarDigits(details.aadhaarNumber || '');
+      if (!isValidAadhaarNumber(digits)) {
+        res.status(422).json({ message: 'Could not read a valid Aadhaar number from the image. Try a clearer photo.' });
+        return;
+      }
+    } else if (workerId) {
+      const w = await Worker.findById(workerId).select('aadhaarNumberHash aadhaarNumberLast4 aadhaarName aadhaarDob aadhaarFront');
+      if (!w) { res.status(404).json({ message: 'Worker not found' }); return; }
+
+      if (w.aadhaarNumberHash) {
+        const matches = await Worker.find({ aadhaarNumberHash: w.aadhaarNumberHash, _id: { $ne: w._id } })
+          .select('fullName phone accountStatus createdAt')
+          .limit(10)
+          .lean();
+        res.json({
+          source: 'stored',
+          last4: w.aadhaarNumberLast4 || '',
+          details: { name: w.aadhaarName || undefined, dob: w.aadhaarDob || undefined },
+          exists: matches.length > 0,
+          matches,
+        });
+        return;
+      }
+
+      // Legacy worker without a stored hash — OCR the saved front image.
+      if (w.aadhaarFront) {
+        const buf = await fetchImageBuffer(w.aadhaarFront);
+        if (buf) {
+          details = await extractAadhaarFromImage(buf);
+          digits = normaliseAadhaarDigits(details.aadhaarNumber || '');
+        }
+      }
+      if (!isValidAadhaarNumber(digits)) {
+        res.status(422).json({ message: "Could not read this worker's Aadhaar number. Enter it manually to check." });
+        return;
+      }
+    } else {
+      res.status(400).json({ message: 'Provide a worker, an Aadhaar number, or an image.' });
+      return;
+    }
+
+    const hash = hashAadhaarNumber(digits);
+    const query: Record<string, unknown> = { aadhaarNumberHash: hash };
+    if (excludeWorkerId && mongoose.Types.ObjectId.isValid(excludeWorkerId)) {
+      query._id = { $ne: excludeWorkerId };
+    }
+    const matches = await Worker.find(query)
+      .select('fullName phone accountStatus createdAt')
+      .limit(10)
+      .lean();
+
+    res.json({
+      source: file ? 'scan' : 'manual',
+      last4: digits.slice(-4),
+      details: { name: details.name, dob: details.dob },
+      exists: matches.length > 0,
+      matches,
+    });
+  } catch (error) {
+    console.error('Check aadhaar duplicate error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };

@@ -1,7 +1,8 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import jwt, { type SignOptions } from 'jsonwebtoken';
-import Worker from '../models/Worker';
+import Worker, { type IWorkerSkill } from '../models/Worker';
+import { validateAadhaarSide, looksLikeAadhaar, inspectAadhaar, hashAadhaarNumber, normaliseAadhaarDigits } from '../services/aadhaarValidation.service';
 import Category from '../models/Category';
 import Booking from '../models/Booking';
 import { syncCategoriesFromSkills, maxExperienceBumps, accountAgeMonths } from '../utils/workerSkills';
@@ -275,6 +276,144 @@ export const completeProfile = async (req: Request, res: Response): Promise<void
     res.json({ message: 'Profile completed! You are now live.', worker: populated });
   } catch (error) {
     console.error('Complete profile error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─── Onboarding helpers (aadhaar + skills submitted AFTER account creation) ───
+const withOnboardingFlags = (w: any) =>
+  w
+    ? {
+        ...(typeof w.toObject === 'function' ? w.toObject() : w),
+        aadhaarSubmitted: Boolean(w.aadhaarFront && w.aadhaarBack),
+        skillsCount: Array.isArray(w.skills) ? w.skills.length : 0,
+      }
+    : w;
+
+const parseOnboardingSkills = (
+  raw: unknown
+): { categoryId: string; experienceYears: number; confirmed: boolean }[] => {
+  let arr: unknown = raw;
+  if (typeof raw === 'string') {
+    try { arr = JSON.parse(raw); } catch { arr = []; }
+  }
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .filter((s): s is Record<string, unknown> => Boolean(s) && typeof s === 'object' && Boolean((s as Record<string, unknown>).categoryId))
+    .map((s) => ({
+      categoryId: String(s.categoryId),
+      experienceYears: Number(s.experienceYears) || 0,
+      confirmed: s.confirmed === true || s.confirmed === 'true',
+    }));
+};
+
+// ─── Live-scan / manual Aadhaar validation (single side) ───
+export const validateAadhaarScan = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const file = req.file;
+    const side = String(req.body?.side || '').toLowerCase();
+    if (!file) {
+      res.status(400).json({ message: 'No image received' });
+      return;
+    }
+    if (side !== 'front' && side !== 'back') {
+      res.status(400).json({ message: 'side must be "front" or "back"' });
+      return;
+    }
+    const result = await validateAadhaarSide(file.buffer, side);
+    res.json(result);
+  } catch (error) {
+    console.error('Validate aadhaar scan error:', error);
+    res.status(500).json({ message: 'Could not validate image' });
+  }
+};
+
+// ─── Onboarding Step 1: Upload Aadhaar ───
+export const submitOnboardingAadhaar = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const worker = await Worker.findById(req.user!.id);
+    if (!worker) {
+      res.status(404).json({ message: 'Worker not found' });
+      return;
+    }
+
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+    const front = files?.aadhaarFront?.[0];
+    const back = files?.aadhaarBack?.[0];
+    if (!front || !back) {
+      res.status(400).json({ message: 'Aadhaar card front and back photos are required' });
+      return;
+    }
+
+    // Server-side guard: reject if either image clearly isn't an Aadhaar card.
+    // The front pass also extracts the printed details (name/dob/number) to store.
+    const [frontInspect, backOk] = await Promise.all([
+      inspectAadhaar(front.buffer),
+      looksLikeAadhaar(back.buffer),
+    ]);
+    if (!frontInspect.looksAadhaar || !backOk) {
+      res.status(400).json({ message: 'Please upload valid Aadhaar card photos (front and back).' });
+      return;
+    }
+
+    const [frontUpload, backUpload] = await Promise.all([
+      uploadBufferToCloudinary(front.buffer, 'aadhaar'),
+      uploadBufferToCloudinary(back.buffer, 'aadhaar'),
+    ]);
+
+    // Persist the extracted details (number stored only as a hash) so admins can
+    // detect duplicate accounts made with the same Aadhaar.
+    const details = frontInspect.details;
+    if (details.aadhaarNumber) {
+      const digits = normaliseAadhaarDigits(details.aadhaarNumber);
+      worker.aadhaarNumberHash = hashAadhaarNumber(digits);
+      worker.aadhaarNumberLast4 = digits.slice(-4);
+    }
+    if (details.name) worker.aadhaarName = details.name;
+    if (details.dob) worker.aadhaarDob = details.dob;
+    worker.aadhaarFront = frontUpload.url;
+    worker.aadhaarBack = backUpload.url;
+    await worker.save();
+
+    const populated = await Worker.findById(worker._id).populate('categories');
+    res.json({ message: 'Aadhaar uploaded successfully.', worker: withOnboardingFlags(populated) });
+  } catch (error) {
+    console.error('Submit onboarding aadhaar error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─── Onboarding Step 2: Select Skills ───
+export const submitOnboardingSkills = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const worker = await Worker.findById(req.user!.id);
+    if (!worker) {
+      res.status(404).json({ message: 'Worker not found' });
+      return;
+    }
+
+    const parsed = parseOnboardingSkills(req.body?.skills);
+    if (!parsed.some((s) => s.confirmed)) {
+      res.status(400).json({ message: 'Select at least one skill you can do and confirm it.' });
+      return;
+    }
+
+    worker.skills = parsed.map((s) => ({
+      category: s.categoryId as unknown as IWorkerSkill['category'],
+      experienceYears: s.experienceYears,
+      confirmed: s.confirmed,
+      status: 'pending_kyc',
+      experienceBumpsUsed: 0,
+      callAttempts: 0,
+      requestedAt: new Date(),
+      decidedAt: null,
+    }));
+    await worker.save();
+
+    const populated = await Worker.findById(worker._id).populate('categories');
+    res.json({ message: 'Skills saved successfully.', worker: withOnboardingFlags(populated) });
+  } catch (error) {
+    console.error('Submit onboarding skills error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };

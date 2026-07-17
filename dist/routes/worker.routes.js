@@ -18,6 +18,10 @@ router.put('/profile', upload_middleware_1.uploadSingle, worker_controller_1.upd
 router.post('/ekyc/re-request', mutationGuard, upload_middleware_1.uploadAadhaar, worker_controller_1.reRequestEKYC);
 router.post('/video-kyc-token', mutationGuard, worker_controller_1.generateVideoKycToken);
 router.post('/complete-profile', upload_middleware_1.uploadSingle, worker_controller_1.completeProfile);
+// Post-signup onboarding (account-first): upload aadhaar, then pick skills, then KYC.
+router.post('/onboarding/aadhaar/validate', upload_middleware_1.uploadScanImage, worker_controller_1.validateAadhaarScan);
+router.put('/onboarding/aadhaar', mutationGuard, upload_middleware_1.uploadAadhaar, worker_controller_1.submitOnboardingAadhaar);
+router.put('/onboarding/skills', mutationGuard, worker_controller_1.submitOnboardingSkills);
 router.put('/toggle-active', worker_controller_1.toggleActive);
 router.put('/location', worker_controller_1.updateLocation);
 router.put('/current-location', worker_controller_1.updateCurrentLocation);

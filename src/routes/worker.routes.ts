@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { protect, authorize } from '../middlewares/auth.middleware';
 import { blockGuard } from '../middlewares/block.middleware';
-import { uploadAadhaar, uploadSingle } from '../middlewares/upload.middleware';
+import { uploadAadhaar, uploadSingle, uploadScanImage } from '../middlewares/upload.middleware';
 import { handleValidationErrors } from '../middlewares/error.middleware';
 import { idempotencyGuard } from '../middlewares/idempotency.middleware';
 import { bidValidation, withdrawalValidation, bankDetailsValidation } from '../utils/validators';
@@ -9,6 +9,9 @@ import {
   getProfile,
   updateProfile,
   reRequestEKYC,
+  validateAadhaarScan,
+  submitOnboardingAadhaar,
+  submitOnboardingSkills,
   completeProfile,
   toggleActive,
   updateLocation,
@@ -60,6 +63,10 @@ router.put('/profile', uploadSingle, updateProfile);
 router.post('/ekyc/re-request', mutationGuard, uploadAadhaar, reRequestEKYC);
 router.post('/video-kyc-token', mutationGuard, generateVideoKycToken);
 router.post('/complete-profile', uploadSingle, completeProfile);
+// Post-signup onboarding (account-first): upload aadhaar, then pick skills, then KYC.
+router.post('/onboarding/aadhaar/validate', uploadScanImage, validateAadhaarScan);
+router.put('/onboarding/aadhaar', mutationGuard, uploadAadhaar, submitOnboardingAadhaar);
+router.put('/onboarding/skills', mutationGuard, submitOnboardingSkills);
 router.put('/toggle-active', toggleActive);
 router.put('/location', updateLocation);
 router.put('/current-location', updateCurrentLocation);

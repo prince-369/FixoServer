@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.closeRateLimiterStore = exports.mutationLimiter = exports.authLimiter = exports.apiLimiter = void 0;
+exports.closeRateLimiterStore = exports.partnerLimiter = exports.waitlistLimiter = exports.mutationLimiter = exports.authLimiter = exports.apiLimiter = void 0;
 const express_rate_limit_1 = __importStar(require("express-rate-limit"));
 const ioredis_1 = __importDefault(require("ioredis"));
 const rate_limit_redis_1 = require("rate-limit-redis");
@@ -241,6 +241,29 @@ exports.mutationLimiter = (0, express_rate_limit_1.default)({
     store: getRateLimitStore('fixo:ratelimit:mutation:'),
     message: { message: 'Too many write requests. Please slow down and retry.' },
 });
+/**
+ * Public marketing-site forms. These are unauthenticated, so they're keyed by IP
+ * on top of the global apiLimiter.
+ *
+ * `skipFailedRequests` matters here: a visitor fixing a typo in their email would
+ * otherwise burn their budget on rejected attempts and get locked out mid-signup.
+ * Only submissions that actually stored something count. The two forms get their
+ * own budgets so a partner enquiry can't lock out the waitlist, or vice versa.
+ * Dev is left effectively open so local testing doesn't trip it.
+ */
+const landingLimiter = (name, max) => (0, express_rate_limit_1.default)({
+    windowMs: 10 * 60 * 1000,
+    max: env_1.default.NODE_ENV === 'production' ? max : 1000,
+    passOnStoreError: true,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: keyByUserOrIp,
+    skipFailedRequests: true,
+    store: getRateLimitStore(`fixo:ratelimit:landing:${name}:`),
+    message: { message: 'Too many submissions. Please try again in a few minutes.' },
+});
+exports.waitlistLimiter = landingLimiter('waitlist', 20);
+exports.partnerLimiter = landingLimiter('partner', 10);
 const closeRateLimiterStore = async () => {
     if (!redisClient)
         return;

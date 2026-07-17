@@ -235,6 +235,31 @@ export const mutationLimiter = rateLimit({
   message: { message: 'Too many write requests. Please slow down and retry.' },
 });
 
+/**
+ * Public marketing-site forms. These are unauthenticated, so they're keyed by IP
+ * on top of the global apiLimiter.
+ *
+ * `skipFailedRequests` matters here: a visitor fixing a typo in their email would
+ * otherwise burn their budget on rejected attempts and get locked out mid-signup.
+ * Only submissions that actually stored something count. The two forms get their
+ * own budgets so a partner enquiry can't lock out the waitlist, or vice versa.
+ * Dev is left effectively open so local testing doesn't trip it.
+ */
+const landingLimiter = (name: string, max: number) => rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: env.NODE_ENV === 'production' ? max : 1000,
+  passOnStoreError: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: keyByUserOrIp,
+  skipFailedRequests: true,
+  store: getRateLimitStore(`fixo:ratelimit:landing:${name}:`),
+  message: { message: 'Too many submissions. Please try again in a few minutes.' },
+});
+
+export const waitlistLimiter = landingLimiter('waitlist', 20);
+export const partnerLimiter = landingLimiter('partner', 10);
+
 export const closeRateLimiterStore = async (): Promise<void> => {
   if (!redisClient) return;
   try {

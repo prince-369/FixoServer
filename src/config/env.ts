@@ -52,6 +52,7 @@ interface EnvConfig {
   SMTP_PORT: number;
   SMTP_USER: string;
   SMTP_PASS: string;
+  SUPPORT_EMAIL: string;
   GOOGLE_CLIENT_IDS: string[];
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
@@ -106,6 +107,14 @@ const parseBooleanEnv = (name: keyof NodeJS.ProcessEnv, fallback: boolean): bool
   return fallback;
 };
 
+// The marketing site (Fixo-Landing-Page) posts the waitlist + partner forms here.
+// Baked in so CORS works without an env change; CLIENT_URLS can still add more.
+const LANDING_ORIGINS = [
+  'http://localhost:3500',
+  'https://fixoservice.in',
+  'https://www.fixoservice.in',
+];
+
 const parseClientOrigins = (primaryOrigin: string): string[] => {
   const list = process.env.CLIENT_URLS
     ?.split(',')
@@ -115,6 +124,8 @@ const parseClientOrigins = (primaryOrigin: string): string[] => {
   if (!list.includes(primaryOrigin)) {
     list.unshift(primaryOrigin);
   }
+
+  list.push(...LANDING_ORIGINS);
 
   return Array.from(new Set(list));
 };
@@ -212,6 +223,8 @@ const env: EnvConfig = {
   SMTP_PORT: parseInt(process.env.SMTP_PORT || '587', 10),
   SMTP_USER: process.env.SMTP_USER || '',
   SMTP_PASS: process.env.SMTP_PASS || '',
+  // Inbox that receives landing-page waitlist signups and partner enquiries.
+  SUPPORT_EMAIL: process.env.SUPPORT_EMAIL || 'support.fixo@gmail.com',
   GOOGLE_CLIENT_IDS: googleClientIds,
   GOOGLE_CLIENT_ID: googleClientIds[0] || '',
   GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET || '',

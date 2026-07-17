@@ -7,7 +7,7 @@ exports.registerCustomerValidation = [
     (0, express_validator_1.body)('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
     (0, express_validator_1.body)('phone').trim().notEmpty().withMessage('Phone number is required')
         .matches(/^[6-9]\d{9}$/).withMessage('Valid 10-digit Indian phone number required'),
-    (0, express_validator_1.body)('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
+    (0, express_validator_1.body)('password').isLength({ min: 8, max: 64 }).withMessage('Password must be 8 to 64 characters')
         .matches(/[a-z]/).withMessage('Password must include a lowercase letter')
         .matches(/[A-Z]/).withMessage('Password must include an uppercase letter')
         .matches(/\d/).withMessage('Password must include a number')
@@ -17,7 +17,7 @@ exports.registerWorkerValidation = [
     (0, express_validator_1.body)('fullName').trim().notEmpty().withMessage('Full name is required (as per document)'),
     (0, express_validator_1.body)('phone').trim().notEmpty().withMessage('Phone number is required')
         .matches(/^[6-9]\d{9}$/).withMessage('Valid 10-digit Indian phone number required'),
-    (0, express_validator_1.body)('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
+    (0, express_validator_1.body)('password').isLength({ min: 8, max: 64 }).withMessage('Password must be 8 to 64 characters')
         .matches(/[a-z]/).withMessage('Password must include a lowercase letter')
         .matches(/[A-Z]/).withMessage('Password must include an uppercase letter')
         .matches(/\d/).withMessage('Password must include a number')
@@ -37,7 +37,7 @@ exports.forgotPasswordValidation = [
     (0, express_validator_1.body)('role').isIn(['customer', 'worker']).withMessage('Role must be customer or worker'),
 ];
 exports.resetPasswordValidation = [
-    (0, express_validator_1.body)('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
+    (0, express_validator_1.body)('password').isLength({ min: 8, max: 64 }).withMessage('Password must be 8 to 64 characters')
         .matches(/[a-z]/).withMessage('Password must include a lowercase letter')
         .matches(/[A-Z]/).withMessage('Password must include an uppercase letter')
         .matches(/\d/).withMessage('Password must include a number')

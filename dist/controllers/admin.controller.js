@@ -36,8 +36,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.markWaitlistReached = exports.getWaitlist = exports.personalNotification = exports.broadcastNotification = exports.broadcastToAudience = exports.getCancellationFlags = exports.unblockWorkerAccount = exports.blockWorkerAccount = exports.unblockCustomer = exports.blockCustomer = exports.getWorkerDetail = exports.getAllWorkers = exports.deleteChatbotQA = exports.updateChatbotQA = exports.createChatbotQA = exports.getChatbotQA = exports.deleteAdminNotification = exports.markAllAdminNotificationsRead = exports.markAdminNotificationRead = exports.getAdminNotifications = exports.rejectRefund = exports.processRefund = exports.getRefunds = exports.replyHelpTicket = exports.resolveHelpTicket = exports.getHelpTickets = exports.getCustomers = exports.reorderBanners = exports.updateBanner = exports.deleteBanner = exports.createBanner = exports.getBanners = exports.deleteCategory = exports.updateCategoryDetails = exports.updateCategory = exports.createCategory = exports.getCategories = exports.declineWithdrawal = exports.completeWithdrawal = exports.getWithdrawals = exports.saveEkycCapture = exports.rejectWorker = exports.approveWorker = exports.updateVideoKycResult = exports.getWorkerEKYCDetails = exports.getPendingEKYC = exports.getAdminBootstrapStatus = exports.getPendingAdminBadges = exports.getDashboard = exports.clearDashboardCache = void 0;
-exports.logSkillCallAttempt = exports.reviewSkill = exports.getSkillRequests = exports.searchNotificationRecipients = void 0;
+exports.getWaitlist = exports.personalNotification = exports.broadcastNotification = exports.broadcastToAudience = exports.getCancellationFlags = exports.unblockWorkerAccount = exports.blockWorkerAccount = exports.unblockCustomer = exports.blockCustomer = exports.getWorkerDetail = exports.checkAadhaarDuplicate = exports.getAllWorkers = exports.deleteChatbotQA = exports.updateChatbotQA = exports.createChatbotQA = exports.getChatbotQA = exports.deleteAdminNotification = exports.markAllAdminNotificationsRead = exports.markAdminNotificationRead = exports.getAdminNotifications = exports.rejectRefund = exports.processRefund = exports.getRefunds = exports.replyHelpTicket = exports.resolveHelpTicket = exports.getHelpTickets = exports.getCustomers = exports.reorderBanners = exports.updateBanner = exports.deleteBanner = exports.createBanner = exports.getBanners = exports.deleteCategory = exports.updateCategoryDetails = exports.updateCategory = exports.createCategory = exports.getCategories = exports.declineWithdrawal = exports.completeWithdrawal = exports.getWithdrawals = exports.saveEkycCapture = exports.rejectWorker = exports.approveWorker = exports.updateVideoKycResult = exports.getWorkerEKYCDetails = exports.getPendingEKYC = exports.getAdminBootstrapStatus = exports.getPendingAdminBadges = exports.getDashboard = exports.clearDashboardCache = void 0;
+exports.logSkillCallAttempt = exports.reviewSkill = exports.getSkillRequests = exports.searchNotificationRecipients = exports.markWaitlistReached = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const Worker_1 = __importDefault(require("../models/Worker"));
 const User_1 = __importDefault(require("../models/User"));
@@ -61,6 +61,8 @@ const webPush_service_1 = require("../services/webPush.service");
 const Notification_1 = __importDefault(require("../models/Notification"));
 const cloudinary_service_1 = require("../services/cloudinary.service");
 const adminBootstrap_service_1 = require("../services/adminBootstrap.service");
+const aadhaarValidation_service_1 = require("../services/aadhaarValidation.service");
+const verhoeff_1 = require("../utils/verhoeff");
 const VIDEO_KYC_RETRY_COOLDOWN_MS = 3 * 60 * 1000;
 // ─── Dashboard Cache (2-minute TTL) ───
 let _dashboardCache = null;
@@ -1436,6 +1438,103 @@ const getAllWorkers = async (req, res) => {
     }
 };
 exports.getAllWorkers = getAllWorkers;
+// ─── Aadhaar duplicate check ───
+// Detects whether an Aadhaar is already tied to another worker account.
+// Sources (in priority): manual number → scanned image → a worker's stored hash.
+const fetchImageBuffer = async (url) => {
+    try {
+        const res = await fetch(url);
+        if (!res.ok)
+            return null;
+        return Buffer.from(await res.arrayBuffer());
+    }
+    catch {
+        return null;
+    }
+};
+const checkAadhaarDuplicate = async (req, res) => {
+    try {
+        const manualNumber = (0, aadhaarValidation_service_1.normaliseAadhaarDigits)(String(req.body?.aadhaarNumber || ''));
+        const workerId = String(req.body?.workerId || '').trim();
+        const excludeWorkerId = String(req.body?.excludeWorkerId || workerId || '').trim();
+        const file = req.file;
+        let digits = '';
+        let details = {};
+        if (manualNumber) {
+            if (!(0, verhoeff_1.isValidAadhaarNumber)(manualNumber)) {
+                res.status(400).json({ message: 'Enter a valid 12-digit Aadhaar number.' });
+                return;
+            }
+            digits = manualNumber;
+        }
+        else if (file) {
+            details = await (0, aadhaarValidation_service_1.extractAadhaarFromImage)(file.buffer);
+            digits = (0, aadhaarValidation_service_1.normaliseAadhaarDigits)(details.aadhaarNumber || '');
+            if (!(0, verhoeff_1.isValidAadhaarNumber)(digits)) {
+                res.status(422).json({ message: 'Could not read a valid Aadhaar number from the image. Try a clearer photo.' });
+                return;
+            }
+        }
+        else if (workerId) {
+            const w = await Worker_1.default.findById(workerId).select('aadhaarNumberHash aadhaarNumberLast4 aadhaarName aadhaarDob aadhaarFront');
+            if (!w) {
+                res.status(404).json({ message: 'Worker not found' });
+                return;
+            }
+            if (w.aadhaarNumberHash) {
+                const matches = await Worker_1.default.find({ aadhaarNumberHash: w.aadhaarNumberHash, _id: { $ne: w._id } })
+                    .select('fullName phone accountStatus createdAt')
+                    .limit(10)
+                    .lean();
+                res.json({
+                    source: 'stored',
+                    last4: w.aadhaarNumberLast4 || '',
+                    details: { name: w.aadhaarName || undefined, dob: w.aadhaarDob || undefined },
+                    exists: matches.length > 0,
+                    matches,
+                });
+                return;
+            }
+            // Legacy worker without a stored hash — OCR the saved front image.
+            if (w.aadhaarFront) {
+                const buf = await fetchImageBuffer(w.aadhaarFront);
+                if (buf) {
+                    details = await (0, aadhaarValidation_service_1.extractAadhaarFromImage)(buf);
+                    digits = (0, aadhaarValidation_service_1.normaliseAadhaarDigits)(details.aadhaarNumber || '');
+                }
+            }
+            if (!(0, verhoeff_1.isValidAadhaarNumber)(digits)) {
+                res.status(422).json({ message: "Could not read this worker's Aadhaar number. Enter it manually to check." });
+                return;
+            }
+        }
+        else {
+            res.status(400).json({ message: 'Provide a worker, an Aadhaar number, or an image.' });
+            return;
+        }
+        const hash = (0, aadhaarValidation_service_1.hashAadhaarNumber)(digits);
+        const query = { aadhaarNumberHash: hash };
+        if (excludeWorkerId && mongoose_1.default.Types.ObjectId.isValid(excludeWorkerId)) {
+            query._id = { $ne: excludeWorkerId };
+        }
+        const matches = await Worker_1.default.find(query)
+            .select('fullName phone accountStatus createdAt')
+            .limit(10)
+            .lean();
+        res.json({
+            source: file ? 'scan' : 'manual',
+            last4: digits.slice(-4),
+            details: { name: details.name, dob: details.dob },
+            exists: matches.length > 0,
+            matches,
+        });
+    }
+    catch (error) {
+        console.error('Check aadhaar duplicate error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.checkAadhaarDuplicate = checkAadhaarDuplicate;
 // ─── Worker Detail ───
 const getWorkerDetail = async (req, res) => {
     try {

@@ -47,6 +47,9 @@ const STRONG_PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+
 
 const validateStrongPassword = (password: string): string | null => {
   if (password.length < 8) return 'Password must be at least 8 characters';
+  // Cap length: bcrypt only hashes the first 72 bytes, so anything longer is both
+  // pointless and a security footgun (two long passwords could collide). 64 is safe.
+  if (password.length > 64) return 'Password must be at most 64 characters';
   if (!/[a-z]/.test(password)) return 'Password must include a lowercase letter';
   if (!/[A-Z]/.test(password)) return 'Password must include an uppercase letter';
   if (!/\d/.test(password)) return 'Password must include a number';
@@ -257,6 +260,9 @@ const toWorkerAuthPayload = (worker: {
   profileImage?: string;
   videoKycIncompleteReason?: string;
   videoKycRetryAvailableAt?: Date | null;
+  aadhaarFront?: string;
+  aadhaarBack?: string;
+  skills?: unknown[];
 }) => ({
   id: worker._id,
   fullName: worker.fullName,
@@ -269,6 +275,9 @@ const toWorkerAuthPayload = (worker: {
   profileCompleted: worker.profileCompleted,
   isActive: worker.isActive,
   balance: worker.balance,
+  // Onboarding progress (aadhaar upload + skills selection happen after signup).
+  aadhaarSubmitted: Boolean(worker.aadhaarFront && worker.aadhaarBack),
+  skillsCount: Array.isArray(worker.skills) ? worker.skills.length : 0,
 });
 
 // ─── Customer Registration ───
@@ -569,12 +578,7 @@ export const googleAuthWorker = async (req: Request, res: Response): Promise<voi
 // ─── Worker Google Registration ───
 export const registerWorkerWithGoogle = async (req: Request, res: Response): Promise<void> => {
   try {
-    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-
-    if (!files?.aadhaarFront?.[0] || !files?.aadhaarBack?.[0]) {
-      res.status(400).json({ message: 'Aadhaar card front and back photos are required' });
-      return;
-    }
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
 
     const phone = typeof req.body?.phone === 'string' ? req.body.phone.trim() : '';
     if (!/^[6-9]\d{9}$/.test(phone)) {
@@ -620,18 +624,25 @@ export const registerWorkerWithGoogle = async (req: Request, res: Response): Pro
       return;
     }
 
-    const [frontUpload, backUpload] = await Promise.all([
-      uploadBufferToCloudinary(files.aadhaarFront[0].buffer, 'aadhaar'),
-      uploadBufferToCloudinary(files.aadhaarBack[0].buffer, 'aadhaar'),
-    ]);
+    // Aadhaar is optional here (account-first) — uploaded later via onboarding.
+    let gFrontUrl = '';
+    let gBackUrl = '';
+    if (files?.aadhaarFront?.[0] && files?.aadhaarBack?.[0]) {
+      const [frontUpload, backUpload] = await Promise.all([
+        uploadBufferToCloudinary(files.aadhaarFront[0].buffer, 'aadhaar'),
+        uploadBufferToCloudinary(files.aadhaarBack[0].buffer, 'aadhaar'),
+      ]);
+      gFrontUrl = frontUpload.url;
+      gBackUrl = backUpload.url;
+    }
 
     if (existingWorker) {
       existingWorker.fullName = existingWorker.fullName || fullName;
       existingWorker.email = existingWorker.email || email;
       existingWorker.googleId = existingWorker.googleId || googleId;
       existingWorker.profileImage = existingWorker.profileImage || profileImage;
-      existingWorker.aadhaarFront = existingWorker.aadhaarFront || frontUpload.url;
-      existingWorker.aadhaarBack = existingWorker.aadhaarBack || backUpload.url;
+      if (gFrontUrl) existingWorker.aadhaarFront = existingWorker.aadhaarFront || gFrontUrl;
+      if (gBackUrl) existingWorker.aadhaarBack = existingWorker.aadhaarBack || gBackUrl;
 
       // Do NOT set a placeholder password. A Google-only worker keeps no password
       // so email/phone login offers "Set Password" (needsPassword), same as customer.
@@ -647,15 +658,14 @@ export const registerWorkerWithGoogle = async (req: Request, res: Response): Pro
       return;
     }
 
+    // Skills are optional here — selected later via onboarding (account-first).
     const gSkillsInput = parseSkillsInput(req.body?.skills);
-    if (!gSkillsInput.some((s) => s.confirmed)) {
-      res.status(400).json({ message: 'Select at least one skill you can do and confirm it.' });
-      return;
-    }
-    const gSkills = gSkillsInput.map((s) => ({
-      category: s.categoryId, experienceYears: s.experienceYears, confirmed: s.confirmed,
-      status: 'pending_kyc' as const, experienceBumpsUsed: 0, callAttempts: 0, requestedAt: new Date(),
-    }));
+    const gSkills = gSkillsInput
+      .filter((s) => s.confirmed)
+      .map((s) => ({
+        category: s.categoryId, experienceYears: s.experienceYears, confirmed: s.confirmed,
+        status: 'pending_kyc' as const, experienceBumpsUsed: 0, callAttempts: 0, requestedAt: new Date(),
+      }));
 
     const worker = await Worker.create({
       fullName,
@@ -665,8 +675,8 @@ export const registerWorkerWithGoogle = async (req: Request, res: Response): Pro
       profileImage,
       // No password: Google-only account. Login with email/phone will offer
       // "Set Password" (needsPassword) just like the customer flow.
-      aadhaarFront: frontUpload.url,
-      aadhaarBack: backUpload.url,
+      aadhaarFront: gFrontUrl,
+      aadhaarBack: gBackUrl,
       accountStatus: 'test',
       skills: gSkills,
     });
@@ -688,12 +698,7 @@ export const registerWorkerWithGoogle = async (req: Request, res: Response): Pro
 export const registerWorker = async (req: Request, res: Response): Promise<void> => {
   try {
     const { fullName, phone, email, password } = req.body;
-    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-
-    if (!files?.aadhaarFront?.[0] || !files?.aadhaarBack?.[0]) {
-      res.status(400).json({ message: 'Aadhaar card front and back photos are required' });
-      return;
-    }
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
 
     // Validate strong password
     const pwdError = validateStrongPassword(password);
@@ -708,27 +713,32 @@ export const registerWorker = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    // Skills chosen at registration (each with experience + confirmation).
+    // Account-first onboarding: aadhaar + skills are submitted AFTER signup via the
+    // onboarding endpoints. They remain optional here so the account can be created
+    // from just the basic details. (Legacy single-step signups may still send them.)
     const skillsInput = parseSkillsInput(req.body?.skills);
-    if (!skillsInput.some((s) => s.confirmed)) {
-      res.status(400).json({ message: 'Select at least one skill you can do and confirm it.' });
-      return;
-    }
-    const skills = skillsInput.map((s) => ({
-      category: s.categoryId,
-      experienceYears: s.experienceYears,
-      confirmed: s.confirmed,
-      status: 'pending_kyc' as const,
-      experienceBumpsUsed: 0,
-      callAttempts: 0,
-      requestedAt: new Date(),
-    }));
+    const skills = skillsInput
+      .filter((s) => s.confirmed)
+      .map((s) => ({
+        category: s.categoryId,
+        experienceYears: s.experienceYears,
+        confirmed: s.confirmed,
+        status: 'pending_kyc' as const,
+        experienceBumpsUsed: 0,
+        callAttempts: 0,
+        requestedAt: new Date(),
+      }));
 
-    // Upload Aadhaar images to Cloudinary
-    const [frontUpload, backUpload] = await Promise.all([
-      uploadBufferToCloudinary(files.aadhaarFront[0].buffer, 'aadhaar'),
-      uploadBufferToCloudinary(files.aadhaarBack[0].buffer, 'aadhaar'),
-    ]);
+    let aadhaarFrontUrl = '';
+    let aadhaarBackUrl = '';
+    if (files?.aadhaarFront?.[0] && files?.aadhaarBack?.[0]) {
+      const [frontUpload, backUpload] = await Promise.all([
+        uploadBufferToCloudinary(files.aadhaarFront[0].buffer, 'aadhaar'),
+        uploadBufferToCloudinary(files.aadhaarBack[0].buffer, 'aadhaar'),
+      ]);
+      aadhaarFrontUrl = frontUpload.url;
+      aadhaarBackUrl = backUpload.url;
+    }
 
     const hashedPassword = await bcrypt.hash(password, 12);
 
@@ -737,8 +747,8 @@ export const registerWorker = async (req: Request, res: Response): Promise<void>
       phone,
       email: email || undefined,
       password: hashedPassword,
-      aadhaarFront: frontUpload.url,
-      aadhaarBack: backUpload.url,
+      aadhaarFront: aadhaarFrontUrl,
+      aadhaarBack: aadhaarBackUrl,
       accountStatus: 'test',
       skills,
     });
@@ -1084,7 +1094,15 @@ export const getMe = async (req: Request, res: Response): Promise<void> => {
       case 'worker': {
         const worker = await Worker.findById(req.user.id).populate('categories');
         if (worker) await clearExpiredBlock(worker);
-        res.json({ role: 'worker', worker, block: blockPayload(worker?.block) });
+        // Augment with onboarding-progress flags so the client wizard can gate steps.
+        const workerPayload = worker
+          ? {
+              ...worker.toObject(),
+              aadhaarSubmitted: Boolean(worker.aadhaarFront && worker.aadhaarBack),
+              skillsCount: Array.isArray(worker.skills) ? worker.skills.length : 0,
+            }
+          : worker;
+        res.json({ role: 'worker', worker: workerPayload, block: blockPayload(worker?.block) });
         break;
       }
       case 'admin': {
