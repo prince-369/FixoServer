@@ -52,6 +52,17 @@ export const joinLaunchWaitlist = async (req: Request, res: Response): Promise<v
 
     // Re-submitting the same contact updates it instead of erroring or duplicating.
     const existing = await LaunchSignup.findOne({ contact: key }).select('_id');
+
+    // Already on the list: tell them so, and stop — no second team email, no
+    // notification. The frontend just shows this message.
+    if (existing) {
+      res.status(200).json({
+        already: true,
+        message: "You're already on the list — we'll notify you as soon as Fixo launches.",
+      });
+      return;
+    }
+
     await LaunchSignup.findOneAndUpdate(
       { contact: key },
       {
@@ -66,9 +77,7 @@ export const joinLaunchWaitlist = async (req: Request, res: Response): Promise<v
     );
 
     // Respond first — the visitor shouldn't wait on SMTP.
-    res.status(201).json({ message: "You're on the list! We'll notify you at launch." });
-
-    if (existing) return; // already told the team about this contact
+    res.status(201).json({ already: false, message: "You're on the list! We'll notify you at launch." });
 
     const total = await LaunchSignup.countDocuments();
     void sendWaitlistSignupEmail({ contact: key, role, source, total });
@@ -109,9 +118,20 @@ export const submitPartnerRequest = async (req: Request, res: Response): Promise
       return;
     }
 
+    // Same business shouldn't be able to spam the inbox with duplicate requests.
+    // Dedupe on email — tell them we already have it rather than creating another row.
+    const existing = await PartnerRequest.findOne({ email }).select('_id');
+    if (existing) {
+      res.status(200).json({
+        already: true,
+        message: "We've already received your request — our team will be in touch soon.",
+      });
+      return;
+    }
+
     await PartnerRequest.create({ fullName, company, phone, email, city, partnershipType, message });
 
-    res.status(201).json({ message: "Request sent — we'll be in touch within 3 working days." });
+    res.status(201).json({ already: false, message: "Request sent — we'll be in touch within 3 working days." });
 
     void sendPartnerRequestEmail({ fullName, company, phone, email, city, partnershipType, message });
     void sendAdminNotification({
