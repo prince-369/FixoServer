@@ -63,6 +63,22 @@ const workerSchema = new mongoose_1.Schema({
             url: { type: String, required: true },
             capturedAt: { type: Date, default: Date.now },
         }],
+    videoKycConsentAt: { type: Date, default: null },
+    videoKycAudit: [{
+            decidedAt: { type: Date, default: Date.now },
+            agentId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Admin', default: null },
+            agentName: { type: String, default: '' },
+            result: { type: String, enum: ['completed', 'incomplete'], required: true },
+            reason: { type: String, default: '' },
+            consentAt: { type: Date, default: null },
+            livenessAsked: { type: [String], default: [] },
+            checklist: {
+                liveness: { type: Boolean, default: false },
+                faceMatch: { type: Boolean, default: false },
+                docsMatch: { type: Boolean, default: false },
+                identity: { type: Boolean, default: false },
+            },
+        }],
     profileCompleted: { type: Boolean, default: false },
     location: {
         type: { type: String, enum: ['Point'], default: 'Point' },

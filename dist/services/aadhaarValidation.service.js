@@ -34,11 +34,34 @@ const extractText = async (buffer) => {
     const { data } = await worker.recognize(buffer);
     return data?.text || '';
 };
-// Find any 12-digit group (spaces allowed) that passes the Verhoeff checksum.
-const hasVerhoeffValidNumber = (raw) => {
-    const candidates = raw.match(/[2-9]\d{3}\s?\d{4}\s?\d{4}/g) || [];
-    return candidates.some((c) => (0, verhoeff_1.isValidAadhaarNumber)(c));
+// Characters tesseract commonly misreads for digits on a slightly blurred / low-light
+// scan. We only apply these when hunting for the number, and every candidate still has
+// to pass the Verhoeff checksum + the 12-digit Aadhaar format — so a wrong "correction"
+// simply fails validation rather than creating a false positive.
+const OCR_TO_DIGIT = {
+    O: '0', o: '0', D: '0', Q: '0',
+    I: '1', l: '1', L: '1', i: '1', '|': '1', '!': '1',
+    Z: '2', z: '2',
+    S: '5', s: '5',
+    G: '6',
+    B: '8',
 };
+const digitNormalise = (raw) => raw.replace(/[OoDQIlLi|!ZzSsGB]/g, (ch) => OCR_TO_DIGIT[ch] ?? ch);
+// Find a 12-digit Aadhaar number (spaces allowed) that passes the Verhoeff checksum.
+// Tries the raw OCR text first, then an OCR-confusion-corrected variant, so a genuine
+// card in imperfect light isn't rejected just because a 0 was read as O or 8 as B.
+const findValidAadhaarDigits = (raw) => {
+    for (const variant of [raw, digitNormalise(raw)]) {
+        const candidates = variant.match(/[2-9]\d{3}\s*\d{4}\s*\d{4}/g) || [];
+        for (const c of candidates) {
+            const digits = c.replace(/\D/g, '');
+            if (digits.length === 12 && (0, verhoeff_1.isValidAadhaarNumber)(digits))
+                return digits;
+        }
+    }
+    return undefined;
+};
+const hasVerhoeffValidNumber = (raw) => !!findValidAadhaarDigits(raw);
 const analyse = (raw) => {
     const text = raw.toLowerCase();
     const numberDetected = hasVerhoeffValidNumber(raw);
@@ -50,14 +73,8 @@ const analyse = (raw) => {
 };
 // ── Best-effort extraction of the details printed on the card (for user confirmation) ──
 const extractAadhaarNumber = (raw) => {
-    const candidates = raw.match(/[2-9]\d{3}\s?\d{4}\s?\d{4}/g) || [];
-    for (const c of candidates) {
-        const digits = c.replace(/\D/g, '');
-        if ((0, verhoeff_1.isValidAadhaarNumber)(digits)) {
-            return `${digits.slice(0, 4)} ${digits.slice(4, 8)} ${digits.slice(8, 12)}`;
-        }
-    }
-    return undefined;
+    const digits = findValidAadhaarDigits(raw);
+    return digits ? `${digits.slice(0, 4)} ${digits.slice(4, 8)} ${digits.slice(8, 12)}` : undefined;
 };
 const extractDob = (raw) => {
     const labelled = raw.match(/(?:dob|date of birth|d\.o\.b|जन्म)\s*[:\-]?\s*(\d{2}[/\-.]\d{2}[/\-.]\d{4})/i);
@@ -134,18 +151,21 @@ const validateAadhaarSide = async (buffer, expectedSide) => {
         };
     }
     if (expectedSide === 'front') {
-        if (numberDetected && (hasFront || !hasBack)) {
-            return { valid: true, side: 'front', reason: 'Valid Aadhaar front detected.', numberDetected: true, details };
-        }
-        if (hasBack && !hasFront) {
+        // Clearly the address/back side and nothing front-like → guide them to flip it.
+        if (hasBack && !hasFront && !numberDetected) {
             return { valid: false, side: 'back', reason: 'This looks like the BACK side. Please scan the FRONT.', numberDetected };
+        }
+        // Accept the front when EITHER the 12-digit number reads, OR the front keywords
+        // (Government of India / DOB / gender) are clearly present. A genuine, clear front
+        // shouldn't be blocked just because OCR couldn't lock the number line in slightly
+        // low light or mild blur — the number is still extracted best-effort for dedup.
+        if (numberDetected || hasFront) {
+            return { valid: true, side: 'front', reason: 'Valid Aadhaar front detected.', numberDetected, details };
         }
         return {
             valid: false,
             side: 'unknown',
-            reason: numberDetected
-                ? 'Hold the card steady inside the box.'
-                : 'Aadhaar number not clear — move closer and use good light.',
+            reason: 'Could not read the card clearly — hold the Aadhaar flat, fill the box, and avoid glare.',
             numberDetected,
         };
     }

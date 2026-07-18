@@ -47,6 +47,20 @@ export interface IWorker extends Document {
   videoKycAwaitingResult?: boolean;
   videoKycCallEndedAt?: Date | null;
   ekycCaptures: { url: string; capturedAt: Date }[];
+  // Latest consent — worker ticked the consent box on the pre-call readiness screen.
+  videoKycConsentAt?: Date | null;
+  // Append-only professional audit trail: one entry per completed/incomplete decision,
+  // recording what the agent actually verified on the call (for disputes / compliance).
+  videoKycAudit?: {
+    decidedAt: Date;
+    agentId?: mongoose.Types.ObjectId | null;
+    agentName?: string;
+    result: 'completed' | 'incomplete';
+    reason?: string;
+    consentAt?: Date | null;
+    livenessAsked: string[];
+    checklist: { liveness: boolean; faceMatch: boolean; docsMatch: boolean; identity: boolean };
+  }[];
   profileCompleted: boolean;
   location: {
     type: string;
@@ -109,6 +123,22 @@ const workerSchema = new Schema<IWorker>(
     ekycCaptures: [{
       url: { type: String, required: true },
       capturedAt: { type: Date, default: Date.now },
+    }],
+    videoKycConsentAt: { type: Date, default: null },
+    videoKycAudit: [{
+      decidedAt: { type: Date, default: Date.now },
+      agentId: { type: Schema.Types.ObjectId, ref: 'Admin', default: null },
+      agentName: { type: String, default: '' },
+      result: { type: String, enum: ['completed', 'incomplete'], required: true },
+      reason: { type: String, default: '' },
+      consentAt: { type: Date, default: null },
+      livenessAsked: { type: [String], default: [] },
+      checklist: {
+        liveness: { type: Boolean, default: false },
+        faceMatch: { type: Boolean, default: false },
+        docsMatch: { type: Boolean, default: false },
+        identity: { type: Boolean, default: false },
+      },
     }],
     profileCompleted: { type: Boolean, default: false },
     location: {

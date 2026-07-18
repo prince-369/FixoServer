@@ -41,6 +41,22 @@ export interface IWorker extends Document {
         url: string;
         capturedAt: Date;
     }[];
+    videoKycConsentAt?: Date | null;
+    videoKycAudit?: {
+        decidedAt: Date;
+        agentId?: mongoose.Types.ObjectId | null;
+        agentName?: string;
+        result: 'completed' | 'incomplete';
+        reason?: string;
+        consentAt?: Date | null;
+        livenessAsked: string[];
+        checklist: {
+            liveness: boolean;
+            faceMatch: boolean;
+            docsMatch: boolean;
+            identity: boolean;
+        };
+    }[];
     profileCompleted: boolean;
     location: {
         type: string;

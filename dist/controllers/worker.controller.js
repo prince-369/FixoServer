@@ -8,6 +8,7 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const Worker_1 = __importDefault(require("../models/Worker"));
 const aadhaarValidation_service_1 = require("../services/aadhaarValidation.service");
+const verhoeff_1 = require("../utils/verhoeff");
 const Category_1 = __importDefault(require("../models/Category"));
 const Booking_1 = __importDefault(require("../models/Booking"));
 const workerSkills_1 = require("../utils/workerSkills");
@@ -171,6 +172,21 @@ const reRequestEKYC = async (req, res) => {
         const frontFile = files?.aadhaarFront?.[0];
         const backFile = files?.aadhaarBack?.[0];
         if (frontFile) {
+            // A re-request often carries a corrected/different Aadhaar, so re-derive the
+            // duplicate-detection hash + printed details from the NEW front image.
+            const frontInspect = await (0, aadhaarValidation_service_1.inspectAadhaar)(frontFile.buffer);
+            const details = frontInspect.details;
+            const ocrDigits = details.aadhaarNumber ? (0, aadhaarValidation_service_1.normaliseAadhaarDigits)(details.aadhaarNumber) : '';
+            const manualDigits = (0, aadhaarValidation_service_1.normaliseAadhaarDigits)(String(req.body?.aadhaarNumber || ''));
+            const digits = (0, verhoeff_1.isValidAadhaarNumber)(ocrDigits) ? ocrDigits : (0, verhoeff_1.isValidAadhaarNumber)(manualDigits) ? manualDigits : '';
+            if (digits) {
+                worker.aadhaarNumberHash = (0, aadhaarValidation_service_1.hashAadhaarNumber)(digits);
+                worker.aadhaarNumberLast4 = digits.slice(-4);
+            }
+            if (details.name)
+                worker.aadhaarName = details.name;
+            if (details.dob)
+                worker.aadhaarDob = details.dob;
             const frontUpload = await (0, cloudinary_service_1.uploadBufferToCloudinary)(frontFile.buffer, 'aadhaar');
             worker.aadhaarFront = frontUpload.url;
         }
@@ -338,8 +354,12 @@ const submitOnboardingAadhaar = async (req, res) => {
         // Persist the extracted details (number stored only as a hash) so admins can
         // detect duplicate accounts made with the same Aadhaar.
         const details = frontInspect.details;
-        if (details.aadhaarNumber) {
-            const digits = (0, aadhaarValidation_service_1.normaliseAadhaarDigits)(details.aadhaarNumber);
+        // Number for the duplicate-detection hash: prefer the OCR-read one, else the
+        // number the worker typed in when OCR couldn't read it. Both are Verhoeff-checked.
+        const ocrDigits = details.aadhaarNumber ? (0, aadhaarValidation_service_1.normaliseAadhaarDigits)(details.aadhaarNumber) : '';
+        const manualDigits = (0, aadhaarValidation_service_1.normaliseAadhaarDigits)(String(req.body?.aadhaarNumber || ''));
+        const digits = (0, verhoeff_1.isValidAadhaarNumber)(ocrDigits) ? ocrDigits : (0, verhoeff_1.isValidAadhaarNumber)(manualDigits) ? manualDigits : '';
+        if (digits) {
             worker.aadhaarNumberHash = (0, aadhaarValidation_service_1.hashAadhaarNumber)(digits);
             worker.aadhaarNumberLast4 = digits.slice(-4);
         }

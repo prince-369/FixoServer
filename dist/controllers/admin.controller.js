@@ -275,7 +275,7 @@ exports.getWorkerEKYCDetails = getWorkerEKYCDetails;
 // ─── EKYC: Save Post-Call Video KYC Result ───
 const updateVideoKycResult = async (req, res) => {
     try {
-        const { result, reason } = req.body;
+        const { result, reason, checklist, livenessAsked, agentName } = req.body;
         if (result !== 'completed' && result !== 'incomplete') {
             res.status(400).json({ message: 'Result must be either completed or incomplete' });
             return;
@@ -285,6 +285,27 @@ const updateVideoKycResult = async (req, res) => {
             res.status(404).json({ message: 'Worker not found' });
             return;
         }
+        // Build the audit entry — the professional record of what the agent verified.
+        // agentId is authoritative (from the authenticated session); agentName is a
+        // denormalised label the panel sends for readable history.
+        const auditEntry = {
+            decidedAt: new Date(),
+            agentId: req.user?.id ? new mongoose_1.default.Types.ObjectId(req.user.id) : null,
+            agentName: typeof agentName === 'string' ? agentName.slice(0, 120) : '',
+            result,
+            reason: typeof reason === 'string' ? reason.trim() : '',
+            consentAt: worker.videoKycConsentAt ?? null,
+            livenessAsked: Array.isArray(livenessAsked)
+                ? livenessAsked.filter((a) => typeof a === 'string').slice(0, 20)
+                : [],
+            checklist: {
+                liveness: checklist?.liveness === true,
+                faceMatch: checklist?.faceMatch === true,
+                docsMatch: checklist?.docsMatch === true,
+                identity: checklist?.identity === true,
+            },
+        };
+        worker.videoKycAudit = [...(worker.videoKycAudit ?? []), auditEntry];
         if (result === 'completed') {
             worker.accountStatus = 'ekyc_done';
             worker.ekycRejectionReason = undefined;
@@ -343,6 +364,24 @@ const approveWorker = async (req, res) => {
         if (!worker) {
             res.status(404).json({ message: 'Worker not found' });
             return;
+        }
+        // Server-side backstop for the admin UI's Approve gate: never approve a worker
+        // whose Aadhaar is already active on another account. Blocks only approved/live
+        // duplicates — a rejected duplicate is a legitimate re-application, not fraud.
+        // This enforces "one person, one active account" even if the UI is bypassed.
+        if (worker.aadhaarNumberHash) {
+            const activeDuplicate = await Worker_1.default.findOne({
+                aadhaarNumberHash: worker.aadhaarNumberHash,
+                _id: { $ne: worker._id },
+                accountStatus: { $in: ['approved', 'live'] },
+            }).select('fullName phone accountStatus').lean();
+            if (activeDuplicate) {
+                res.status(409).json({
+                    message: `This Aadhaar is already used by an active account (${activeDuplicate.fullName} · ${activeDuplicate.phone}). Reject this application or resolve the duplicate first.`,
+                    duplicate: activeDuplicate,
+                });
+                return;
+            }
         }
         worker.accountStatus = 'approved';
         worker.isActive = true;

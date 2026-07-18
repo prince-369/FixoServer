@@ -504,6 +504,11 @@ const initializeSocket = (server) => {
                 return;
             }
             (0, metrics_1.recordSocketEvent)('ekyc:worker-preparing');
+            // The worker only reaches "preparing" after ticking the consent box on the
+            // pre-call screen, so this is the moment consent was given. Record it for the
+            // audit trail (fire-and-forget — must not block the call from starting).
+            Worker_1.default.updateOne({ _id: workerId }, { $set: { videoKycConsentAt: new Date() } })
+                .catch((err) => console.error('[eKYC] Failed to record consent:', err));
             const name = workerName || 'Worker';
             const phone = workerPhone || '';
             const seconds = countdownSeconds || 30;
@@ -856,6 +861,12 @@ const initializeSocket = (server) => {
         socket.on('ekyc:capture-result', ({ roomId, imageData }) => {
             socket.to(roomId).emit('ekyc:capture-result', { imageData });
             console.log(`[eKYC] Capture result relayed in room ${roomId}`);
+        });
+        // Admin asks the worker to perform a random liveness action (anti-spoofing:
+        // proves a live person, not a held-up photo or a pre-recorded/looped video).
+        socket.on('ekyc:liveness-action', ({ roomId, action }) => {
+            socket.to(roomId).emit('ekyc:liveness-action', { action: String(action || '').slice(0, 80) });
+            console.log(`[eKYC] Liveness action "${action}" requested in room ${roomId}`);
         });
         // ─── Worker ETA / message to customer (real-time) ───
         socket.on('worker:send-message', ({ bookingId, message }) => {
