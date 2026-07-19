@@ -37,6 +37,8 @@ export interface IWorker extends Document {
     videoKycRetryAvailableAt?: Date | null;
     videoKycAwaitingResult?: boolean;
     videoKycCallEndedAt?: Date | null;
+    videoKycCallAttempts?: number;
+    lastVideoKycCallAt?: Date | null;
     ekycCaptures: {
         url: string;
         capturedAt: Date;

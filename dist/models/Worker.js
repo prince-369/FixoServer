@@ -59,6 +59,8 @@ const workerSchema = new mongoose_1.Schema({
     videoKycRetryAvailableAt: { type: Date, default: null },
     videoKycAwaitingResult: { type: Boolean, default: false },
     videoKycCallEndedAt: { type: Date, default: null },
+    videoKycCallAttempts: { type: Number, default: 0 },
+    lastVideoKycCallAt: { type: Date, default: null },
     ekycCaptures: [{
             url: { type: String, required: true },
             capturedAt: { type: Date, default: Date.now },

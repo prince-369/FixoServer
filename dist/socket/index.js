@@ -539,6 +539,9 @@ const initializeSocket = (server) => {
                 return;
             }
             (0, metrics_1.recordSocketEvent)('ekyc:create-room');
+            // Count this as a call attempt + record when it rang, so admins can see how
+            // many times (and how recently) the worker has tried. Fire-and-forget.
+            Worker_1.default.updateOne({ _id: workerId }, { $inc: { videoKycCallAttempts: 1 }, $set: { lastVideoKycCallAt: new Date() } }).catch((err) => console.error('[eKYC] Failed to record call attempt:', err));
             const roomId = `ekyc:${workerId}`;
             const name = workerName || 'Worker';
             const phone = workerPhone || '';

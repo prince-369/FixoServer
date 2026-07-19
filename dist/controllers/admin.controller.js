@@ -64,6 +64,16 @@ const adminBootstrap_service_1 = require("../services/adminBootstrap.service");
 const aadhaarValidation_service_1 = require("../services/aadhaarValidation.service");
 const verhoeff_1 = require("../utils/verhoeff");
 const VIDEO_KYC_RETRY_COOLDOWN_MS = 3 * 60 * 1000;
+// A worker is "ready for KYC review" only once they've actually finished onboarding —
+// BOTH Aadhaar sides uploaded AND at least one skill selected. A freshly-created
+// account (which sits in 'test' with no Aadhaar/skills) must NOT appear in the KYC
+// queue or its badge; it still shows in the Workers list so admins can see the signup.
+const READY_FOR_KYC_FILTER = {
+    accountStatus: { $in: ['test', 'ekyc_pending', 'ekyc_done'] },
+    aadhaarFront: { $nin: ['', null] },
+    aadhaarBack: { $nin: ['', null] },
+    'skills.0': { $exists: true },
+};
 // ─── Dashboard Cache (2-minute TTL) ───
 let _dashboardCache = null;
 const DASHBOARD_CACHE_TTL_MS = 2 * 60 * 1000;
@@ -81,7 +91,7 @@ const getDashboard = async (_req, res) => {
         const [totalWorkers, activeWorkers, pendingEKYC, pendingWithdrawals, totalCustomers, pendingHelpTickets, todayWorkDone, totalBookings, totalCompleted, totalCancelled, totalInProgress,] = await Promise.all([
             Worker_1.default.countDocuments(),
             Worker_1.default.countDocuments({ isActive: true, accountStatus: 'live' }),
-            Worker_1.default.countDocuments({ accountStatus: { $in: ['test', 'ekyc_pending', 'ekyc_done'] } }),
+            Worker_1.default.countDocuments(READY_FOR_KYC_FILTER),
             Withdrawal_1.default.countDocuments({ status: 'pending' }),
             User_1.default.countDocuments(),
             HelpTicket_1.default.countDocuments({ status: { $in: ['open', 'escalated'] } }),
@@ -204,7 +214,7 @@ exports.getDashboard = getDashboard;
 const getPendingAdminBadges = async (_req, res) => {
     try {
         const [pendingEKYC, pendingWithdrawals, pendingRefunds, pendingSupport, pendingRewardClaims] = await Promise.all([
-            Worker_1.default.countDocuments({ accountStatus: { $in: ['test', 'ekyc_pending', 'ekyc_done'] } }),
+            Worker_1.default.countDocuments(READY_FOR_KYC_FILTER),
             Withdrawal_1.default.countDocuments({ status: 'pending' }),
             Booking_1.default.countDocuments({ paymentStatus: 'refund_pending' }),
             HelpTicket_1.default.countDocuments({ status: { $in: ['open', 'escalated'] } }),
@@ -244,7 +254,7 @@ exports.getAdminBootstrapStatus = getAdminBootstrapStatus;
 const getPendingEKYC = async (_req, res) => {
     try {
         const [workers, approvedCount, rejectedCount] = await Promise.all([
-            Worker_1.default.find({ accountStatus: { $in: ['test', 'ekyc_pending', 'ekyc_done'] } }).sort({ createdAt: -1 }).populate('skills.category', 'name image'),
+            Worker_1.default.find(READY_FOR_KYC_FILTER).sort({ createdAt: -1 }).populate('skills.category', 'name image'),
             Worker_1.default.countDocuments({ accountStatus: { $in: ['approved', 'live'] } }),
             Worker_1.default.countDocuments({ accountStatus: 'rejected' }),
         ]);

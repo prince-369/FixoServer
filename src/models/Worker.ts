@@ -46,6 +46,10 @@ export interface IWorker extends Document {
   // This flag survives admin page reloads/drops so the decision is never lost.
   videoKycAwaitingResult?: boolean;
   videoKycCallEndedAt?: Date | null;
+  // How many times the worker has started a Video KYC call, and when the last one
+  // rang — shown to admins so an unanswered/repeated call is visible.
+  videoKycCallAttempts?: number;
+  lastVideoKycCallAt?: Date | null;
   ekycCaptures: { url: string; capturedAt: Date }[];
   // Latest consent — worker ticked the consent box on the pre-call readiness screen.
   videoKycConsentAt?: Date | null;
@@ -120,6 +124,8 @@ const workerSchema = new Schema<IWorker>(
     videoKycRetryAvailableAt: { type: Date, default: null },
     videoKycAwaitingResult: { type: Boolean, default: false },
     videoKycCallEndedAt: { type: Date, default: null },
+    videoKycCallAttempts: { type: Number, default: 0 },
+    lastVideoKycCallAt: { type: Date, default: null },
     ekycCaptures: [{
       url: { type: String, required: true },
       capturedAt: { type: Date, default: Date.now },
