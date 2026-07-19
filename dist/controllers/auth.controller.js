@@ -1209,12 +1209,20 @@ const verifyVideoKycToken = async (req, res) => {
             res.status(404).json({ message: 'Worker not found' });
             return;
         }
+        // The video-KYC page is opened standalone from a token link (often inside the
+        // app's in-app browser) with NO logged-in session, so it has no JWT for the
+        // realtime socket — whose handshake middleware rejects tokenless connections,
+        // causing "Connection timed out". The verified video-KYC token already proves
+        // this worker's identity, so hand back a short-lived worker access token the
+        // page uses purely to authenticate its socket.
+        const socketToken = (0, generateToken_1.generateAccessToken)({ id: worker._id.toString(), role: 'worker' });
         res.json({
             valid: true,
             workerId: worker._id,
             fullName: worker.fullName,
             phone: worker.phone,
             accountStatus: worker.accountStatus,
+            socketToken,
         });
     }
     catch {
