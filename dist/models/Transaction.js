@@ -54,7 +54,7 @@ const transactionSchema = new mongoose_1.Schema({
         default: 'pending',
     },
 }, { timestamps: true });
-transactionSchema.index({ tid: 1 });
+// `tid` is already indexed by its `unique: true` field definition.
 transactionSchema.index({ user: 1, type: 1 });
 transactionSchema.index({ worker: 1, type: 1 });
 exports.default = mongoose_1.default.model('Transaction', transactionSchema);

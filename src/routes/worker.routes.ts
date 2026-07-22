@@ -8,7 +8,7 @@ import { bidValidation, withdrawalValidation, bankDetailsValidation } from '../u
 import {
   getProfile,
   updateProfile,
-  reRequestEKYC,
+  resubmitVerification,
   validateAadhaarScan,
   submitOnboardingAadhaar,
   submitOnboardingSkills,
@@ -48,7 +48,7 @@ import {
   getHelpTicketDetail,
   appendHelpTicketMessage,
   escalateHelpTicket,
-  generateVideoKycToken,
+  submitVerification,
 } from '../controllers/worker.controller';
 import { getWorkerPromotions, getPromotionHistory, claimPromotionBonus } from '../controllers/rewards.controller';
 
@@ -60,13 +60,14 @@ router.use(blockGuard);
 
 router.get('/profile', getProfile);
 router.put('/profile', uploadSingle, updateProfile);
-router.post('/ekyc/re-request', mutationGuard, uploadAadhaar, reRequestEKYC);
-router.post('/video-kyc-token', mutationGuard, generateVideoKycToken);
 router.post('/complete-profile', uploadSingle, completeProfile);
-// Post-signup onboarding (account-first): upload aadhaar, then pick skills, then KYC.
+// Post-signup onboarding (account-first): aadhaar → skills → verification schedule → submit.
 router.post('/onboarding/aadhaar/validate', uploadScanImage, validateAadhaarScan);
 router.put('/onboarding/aadhaar', mutationGuard, uploadAadhaar, submitOnboardingAadhaar);
 router.put('/onboarding/skills', mutationGuard, submitOnboardingSkills);
+// Manual verification: submit once, resubmit (with editable details) after a rejection.
+router.post('/verification/submit', mutationGuard, submitVerification);
+router.post('/verification/resubmit', mutationGuard, uploadAadhaar, resubmitVerification);
 router.put('/toggle-active', toggleActive);
 router.put('/location', updateLocation);
 router.put('/current-location', updateCurrentLocation);

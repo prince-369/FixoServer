@@ -21,7 +21,7 @@ router.put('/staff/:id', permission_middleware_1.requireSuperAdmin, mutationGuar
 router.delete('/staff/:id', permission_middleware_1.requireSuperAdmin, staff_controller_1.deleteStaff);
 // ─── Per-section permission gates (super admin always passes) ───
 router.use('/dashboard', (0, permission_middleware_1.requirePermission)('dashboard'));
-router.use('/ekyc', (0, permission_middleware_1.requirePermission)('kyc'));
+router.use('/verification', (0, permission_middleware_1.requirePermission)('kyc'));
 router.use('/withdrawals', (0, permission_middleware_1.requirePermission)('withdrawals'));
 router.use('/categories', (0, permission_middleware_1.requirePermission)('categories'));
 router.use('/banners', (0, permission_middleware_1.requirePermission)('banners'));
@@ -41,13 +41,11 @@ router.use('/incentive-analytics', (0, permission_middleware_1.requirePermission
 router.get('/dashboard', admin_controller_1.getDashboard);
 router.get('/bootstrap-status', admin_controller_1.getAdminBootstrapStatus);
 router.get('/pending-badges', admin_controller_1.getPendingAdminBadges);
-// EKYC
-router.get('/ekyc/pending', admin_controller_1.getPendingEKYC);
-router.get('/ekyc/:workerId', admin_controller_1.getWorkerEKYCDetails);
-router.post('/ekyc/:workerId/video-result', mutationGuard, admin_controller_1.updateVideoKycResult);
-router.post('/ekyc/:workerId/approve', mutationGuard, admin_controller_1.approveWorker);
-router.post('/ekyc/:workerId/reject', mutationGuard, admin_controller_1.rejectWorker);
-router.post('/ekyc/:workerId/capture', admin_controller_1.saveEkycCapture);
+// Worker verification queue (manual — admin contacts the worker outside the app)
+router.get('/verification/queue', admin_controller_1.getVerificationQueue);
+router.get('/verification/:workerId', admin_controller_1.getWorkerVerificationDetails);
+router.post('/verification/:workerId/approve', mutationGuard, admin_controller_1.approveWorker);
+router.post('/verification/:workerId/reject', mutationGuard, admin_controller_1.rejectWorker);
 // Withdrawals
 router.get('/withdrawals', admin_controller_1.getWithdrawals);
 router.post('/withdrawals/:id/complete', mutationGuard, admin_controller_1.completeWithdrawal);

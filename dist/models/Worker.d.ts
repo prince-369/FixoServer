@@ -1,6 +1,10 @@
 import mongoose, { Document } from 'mongoose';
 import { type IBlockInfo } from './User';
-export type WorkerAccountStatus = 'test' | 'ekyc_pending' | 'ekyc_done' | 'approved' | 'rejected' | 'live';
+export type WorkerAccountStatus = 'test' | 'live';
+export type WorkerVerificationStatus = 'unsubmitted' | 'pending' | 'approved' | 'rejected' | 'resubmitted';
+export type VerificationSlot = '10:00-13:00' | '13:00-16:00' | '16:00-20:00';
+export declare const VERIFICATION_SLOTS: VerificationSlot[];
+export declare const VERIFICATION_SLOT_LABELS: Record<VerificationSlot, string>;
 export interface IBankDetails {
     holderName: string;
     bankName: string;
@@ -32,33 +36,14 @@ export interface IWorker extends Document {
     aadhaarName?: string;
     aadhaarDob?: string;
     accountStatus: WorkerAccountStatus;
-    ekycRejectionReason?: string;
-    videoKycIncompleteReason?: string;
-    videoKycRetryAvailableAt?: Date | null;
-    videoKycAwaitingResult?: boolean;
-    videoKycCallEndedAt?: Date | null;
-    videoKycCallAttempts?: number;
-    lastVideoKycCallAt?: Date | null;
-    ekycCaptures: {
-        url: string;
-        capturedAt: Date;
-    }[];
-    videoKycConsentAt?: Date | null;
-    videoKycAudit?: {
-        decidedAt: Date;
-        agentId?: mongoose.Types.ObjectId | null;
-        agentName?: string;
-        result: 'completed' | 'incomplete';
-        reason?: string;
-        consentAt?: Date | null;
-        livenessAsked: string[];
-        checklist: {
-            liveness: boolean;
-            faceMatch: boolean;
-            docsMatch: boolean;
-            identity: boolean;
-        };
-    }[];
+    verificationStatus: WorkerVerificationStatus;
+    verificationSlot?: VerificationSlot | null;
+    whatsappNumber?: string;
+    rejectionReason?: string;
+    verifiedBy?: mongoose.Types.ObjectId | null;
+    verifiedAt?: Date | null;
+    verificationSubmittedAt?: Date | null;
+    resubmittedAt?: Date | null;
     profileCompleted: boolean;
     location: {
         type: string;

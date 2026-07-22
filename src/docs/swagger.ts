@@ -13,8 +13,8 @@ const swaggerSpec = {
     { name: 'Auth', description: 'Authentication — register, login, OTP, refresh' },
     { name: 'Customer', description: 'Customer profile, bookings, notifications, support' },
     { name: 'Booking', description: 'Create bookings, bids, payments (customer-facing)' },
-    { name: 'Worker', description: 'Worker profile, work requests, earnings, dues, eKYC' },
-    { name: 'Admin', description: 'Admin dashboard, eKYC review, payouts, categories, content' },
+    { name: 'Worker', description: 'Worker profile, work requests, earnings, dues, verification' },
+    { name: 'Admin', description: 'Admin dashboard, worker verification, payouts, categories, content' },
     { name: 'Rewards & Incentives', description: 'Customer rewards/coupons, worker promotions, and admin incentive management' },
     { name: 'Notifications', description: 'Web push & mobile push subscription management' },
   ],
@@ -113,7 +113,7 @@ const swaggerSpec = {
           phone: { type: 'string' },
           role: { type: 'string' },
           profileImage: { type: 'string' },
-          status: { type: 'string', description: 'Worker: test | ekyc_pending | ekyc_done | approved | live' },
+          status: { type: 'string', description: 'Worker verification: unsubmitted | pending | resubmitted | approved | rejected' },
         },
       },
       // ── Customer ─────────────────────────────────────────────────────
@@ -314,7 +314,7 @@ const swaggerSpec = {
           name: { type: 'string' },
           phone: { type: 'string' },
           profileImage: { type: 'string' },
-          status: { type: 'string', enum: ['test', 'ekyc_pending', 'ekyc_done', 'approved', 'live'] },
+          status: { type: 'string', enum: ['unsubmitted', 'pending', 'resubmitted', 'approved', 'rejected', 'live'] },
           isActive: { type: 'boolean' },
           categories: { type: 'array', items: { type: 'string' } },
           rating: { type: 'number' },
@@ -393,7 +393,7 @@ const swaggerSpec = {
           totalWorkers: { type: 'integer' },
           totalBookings: { type: 'integer' },
           totalRevenue: { type: 'number' },
-          pendingEKYC: { type: 'integer' },
+          pendingVerification: { type: 'integer' },
           pendingWithdrawals: { type: 'integer' },
           pendingRefunds: { type: 'integer' },
           recentBookings: { type: 'array', items: { $ref: '#/components/schemas/Booking' } },
@@ -719,7 +719,7 @@ const swaggerSpec = {
           },
         },
         responses: {
-          201: { description: 'Worker registered, status=test (pending eKYC)', content: { 'application/json': { schema: { $ref: '#/components/schemas/AuthTokens' } } } },
+          201: { description: 'Worker registered, status=test (verification unsubmitted)', content: { 'application/json': { schema: { $ref: '#/components/schemas/AuthTokens' } } } },
           409: { description: 'Phone already registered' },
         },
       },
@@ -1393,10 +1393,36 @@ const swaggerSpec = {
         },
       },
     },
-    '/worker/ekyc/re-request': {
+    '/worker/verification/submit': {
       post: {
         tags: ['Worker'],
-        summary: 'Re-submit Aadhaar documents after rejection (multipart)',
+        summary: 'Submit for manual verification (requires Aadhaar + a confirmed skill)',
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['verificationSlot', 'whatsappNumber'],
+                properties: {
+                  verificationSlot: { type: 'string', enum: ['10:00-13:00', '13:00-16:00', '16:00-20:00'] },
+                  whatsappNumber: { type: 'string', description: '10-digit Indian mobile' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Submitted — verificationStatus becomes pending' },
+          400: { description: 'Onboarding incomplete, or invalid slot / WhatsApp number' },
+        },
+      },
+    },
+    '/worker/verification/resubmit': {
+      post: {
+        tags: ['Worker'],
+        summary: 'Resubmit after a rejection — Aadhaar images are optional (multipart)',
         security: [{ BearerAuth: [] }],
         requestBody: {
           required: true,
@@ -1404,8 +1430,12 @@ const swaggerSpec = {
             'multipart/form-data': {
               schema: {
                 type: 'object',
-                required: ['aadhaarFront', 'aadhaarBack'],
+                required: ['fullName', 'verificationSlot', 'whatsappNumber'],
                 properties: {
+                  fullName: { type: 'string' },
+                  email: { type: 'string' },
+                  verificationSlot: { type: 'string', enum: ['10:00-13:00', '13:00-16:00', '16:00-20:00'] },
+                  whatsappNumber: { type: 'string' },
                   aadhaarFront: { type: 'string', format: 'binary' },
                   aadhaarBack: { type: 'string', format: 'binary' },
                   aadhaarNumber: { type: 'string' },
@@ -1415,7 +1445,7 @@ const swaggerSpec = {
           },
         },
         responses: {
-          200: { description: 'Documents re-submitted, status reset to ekyc_pending' },
+          200: { description: 'Resubmitted — verificationStatus becomes resubmitted' },
         },
       },
     },
@@ -1859,7 +1889,7 @@ const swaggerSpec = {
     '/admin/pending-badges': {
       get: {
         tags: ['Admin'],
-        summary: 'Get pending badge counts (eKYC, withdrawals, refunds, tickets)',
+        summary: 'Get pending badge counts (verification, withdrawals, refunds, tickets)',
         security: [{ BearerAuth: [] }],
         responses: {
           200: {
@@ -1869,7 +1899,7 @@ const swaggerSpec = {
                 schema: {
                   type: 'object',
                   properties: {
-                    pendingEKYC: { type: 'integer' },
+                    pendingVerification: { type: 'integer' },
                     pendingWithdrawals: { type: 'integer' },
                     pendingRefunds: { type: 'integer' },
                     openTickets: { type: 'integer' },
@@ -1881,57 +1911,52 @@ const swaggerSpec = {
         },
       },
     },
-    '/admin/ekyc/pending': {
+    '/admin/verification/queue': {
       get: {
         tags: ['Admin'],
-        summary: 'List workers pending eKYC review',
+        summary: 'Worker verification queue (filter / search / paginate)',
         security: [{ BearerAuth: [] }],
+        parameters: [
+          { name: 'status', in: 'query', schema: { type: 'string', enum: ['pending_all', 'pending', 'resubmitted', 'approved', 'rejected', 'all'] } },
+          { name: 'search', in: 'query', schema: { type: 'string' }, description: 'Name, phone or WhatsApp number' },
+          { name: 'skill', in: 'query', schema: { type: 'string' }, description: 'Category id' },
+          { name: 'from', in: 'query', schema: { type: 'string', format: 'date' }, description: 'Registered on/after' },
+          { name: 'to', in: 'query', schema: { type: 'string', format: 'date' }, description: 'Registered on/before' },
+          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
+        ],
         responses: {
-          200: { description: 'Pending eKYC list', content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/WorkerProfile' } } } } },
+          200: { description: 'Verification queue with per-status counts', content: { 'application/json': { schema: { type: 'object' } } } },
         },
       },
     },
-    '/admin/ekyc/{workerId}': {
+    '/admin/verification/{workerId}': {
       get: {
         tags: ['Admin'],
-        summary: 'Get full eKYC details for a worker',
+        summary: 'Full verification details for a worker (Aadhaar, skills, slot, WhatsApp)',
         security: [{ BearerAuth: [] }],
         parameters: [{ name: 'workerId', in: 'path', required: true, schema: { type: 'string' } }],
         responses: {
-          200: { description: 'eKYC details with Aadhaar images', content: { 'application/json': { schema: { type: 'object' } } } },
+          200: { description: 'Verification details', content: { 'application/json': { schema: { type: 'object' } } } },
         },
       },
     },
-    '/admin/ekyc/{workerId}/video-result': {
+    '/admin/verification/{workerId}/approve': {
       post: {
         tags: ['Admin'],
-        summary: 'Save video KYC call result',
-        security: [{ BearerAuth: [] }],
-        parameters: [{ name: 'workerId', in: 'path', required: true, schema: { type: 'string' } }],
-        requestBody: {
-          required: true,
-          content: { 'application/json': { schema: { type: 'object', required: ['result'], properties: { result: { type: 'string', enum: ['pass', 'fail'] }, notes: { type: 'string' } } } } },
-        },
-        responses: {
-          200: { description: 'Video KYC result saved', content: { 'application/json': { schema: { $ref: '#/components/schemas/MessageResponse' } } } },
-        },
-      },
-    },
-    '/admin/ekyc/{workerId}/approve': {
-      post: {
-        tags: ['Admin'],
-        summary: 'Approve worker eKYC — moves status to approved/live',
+        summary: 'Approve a worker after the manual verification call',
         security: [{ BearerAuth: [] }],
         parameters: [{ name: 'workerId', in: 'path', required: true, schema: { type: 'string' } }],
         responses: {
           200: { description: 'Worker approved', content: { 'application/json': { schema: { $ref: '#/components/schemas/MessageResponse' } } } },
+          409: { description: 'Aadhaar already active on another approved account' },
         },
       },
     },
-    '/admin/ekyc/{workerId}/reject': {
+    '/admin/verification/{workerId}/reject': {
       post: {
         tags: ['Admin'],
-        summary: 'Reject worker eKYC with reason',
+        summary: 'Reject a worker — reason is mandatory and shown to the worker',
         security: [{ BearerAuth: [] }],
         parameters: [{ name: 'workerId', in: 'path', required: true, schema: { type: 'string' } }],
         requestBody: {
@@ -1939,19 +1964,7 @@ const swaggerSpec = {
           content: { 'application/json': { schema: { type: 'object', required: ['reason'], properties: { reason: { type: 'string' } } } } },
         },
         responses: {
-          200: { description: 'Worker rejected, notified via push notification', content: { 'application/json': { schema: { $ref: '#/components/schemas/MessageResponse' } } } },
-        },
-      },
-    },
-    '/admin/ekyc/{workerId}/capture': {
-      post: {
-        tags: ['Admin'],
-        summary: 'Save a video KYC frame capture',
-        security: [{ BearerAuth: [] }],
-        parameters: [{ name: 'workerId', in: 'path', required: true, schema: { type: 'string' } }],
-        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { imageData: { type: 'string', description: 'Base64 image' } } } } } },
-        responses: {
-          200: { description: 'Capture saved', content: { 'application/json': { schema: { $ref: '#/components/schemas/MessageResponse' } } } },
+          200: { description: 'Worker rejected and notified', content: { 'application/json': { schema: { $ref: '#/components/schemas/MessageResponse' } } } },
         },
       },
     },
@@ -2317,7 +2330,7 @@ const swaggerSpec = {
         parameters: [
           { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
           { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
-          { name: 'status', in: 'query', schema: { type: 'string', enum: ['test', 'ekyc_pending', 'ekyc_done', 'approved', 'live'] } },
+          { name: 'status', in: 'query', schema: { type: 'string', enum: ['unsubmitted', 'pending', 'resubmitted', 'approved', 'rejected', 'live'] } },
           { name: 'search', in: 'query', schema: { type: 'string' } },
         ],
         responses: {

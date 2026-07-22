@@ -1,7 +1,11 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
-import jwt, { type SignOptions } from 'jsonwebtoken';
-import Worker, { type IWorkerSkill } from '../models/Worker';
+import Worker, {
+  type IWorkerSkill,
+  type VerificationSlot,
+  VERIFICATION_SLOTS,
+  VERIFICATION_SLOT_LABELS,
+} from '../models/Worker';
 import { validateAadhaarSide, looksLikeAadhaar, inspectAadhaar, hashAadhaarNumber, normaliseAadhaarDigits } from '../services/aadhaarValidation.service';
 import { isValidAadhaarNumber } from '../utils/verhoeff';
 import Category from '../models/Category';
@@ -147,8 +151,35 @@ export const updateProfile = async (req: Request, res: Response): Promise<void> 
   }
 };
 
-// ─── Re-request eKYC after rejection ───
-export const reRequestEKYC = async (req: Request, res: Response): Promise<void> => {
+// ─── Verification helpers ───
+// Indian mobile: 10 digits starting 6-9. Accepts +91/0 prefixes and strips them.
+const normaliseIndianMobile = (raw: unknown): string => {
+  const digits = String(raw ?? '').replace(/\D/g, '');
+  const trimmed = digits.length > 10 ? digits.slice(-10) : digits;
+  return /^[6-9]\d{9}$/.test(trimmed) ? trimmed : '';
+};
+
+const isVerificationSlot = (value: unknown): value is VerificationSlot =>
+  typeof value === 'string' && (VERIFICATION_SLOTS as string[]).includes(value);
+
+// Shared guard for submit + resubmit: the worker must have finished every onboarding
+// step (Aadhaar, at least one confirmed skill) and supplied a slot + WhatsApp number.
+const readVerificationPayload = (
+  body: Record<string, unknown>,
+): { ok: true; slot: VerificationSlot; whatsapp: string } | { ok: false; message: string } => {
+  const slot = body?.verificationSlot;
+  if (!isVerificationSlot(slot)) {
+    return { ok: false, message: 'Please choose a valid verification time slot.' };
+  }
+  const whatsapp = normaliseIndianMobile(body?.whatsappNumber);
+  if (!whatsapp) {
+    return { ok: false, message: 'Enter a valid 10-digit Indian WhatsApp number.' };
+  }
+  return { ok: true, slot, whatsapp };
+};
+
+// ─── Submit for manual verification (end of onboarding) ───
+export const submitVerification = async (req: Request, res: Response): Promise<void> => {
   try {
     const worker = await Worker.findById(req.user!.id);
     if (!worker) {
@@ -156,8 +187,86 @@ export const reRequestEKYC = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    if (worker.accountStatus !== 'rejected') {
-      res.status(400).json({ message: 'eKYC re-request is only allowed for rejected workers' });
+    if (worker.verificationStatus === 'pending' || worker.verificationStatus === 'resubmitted') {
+      res.status(400).json({ message: 'Your verification is already awaiting review.' });
+      return;
+    }
+    if (worker.verificationStatus === 'approved') {
+      res.status(400).json({ message: 'Your account is already verified.' });
+      return;
+    }
+
+    if (!worker.aadhaarFront || !worker.aadhaarBack) {
+      res.status(400).json({ message: 'Please upload your Aadhaar card first.' });
+      return;
+    }
+    if (!worker.skills?.some((s) => s.confirmed)) {
+      res.status(400).json({ message: 'Please select and confirm at least one skill first.' });
+      return;
+    }
+
+    const payload = readVerificationPayload(req.body || {});
+    if (!payload.ok) {
+      res.status(400).json({ message: payload.message });
+      return;
+    }
+
+    worker.verificationSlot = payload.slot;
+    worker.whatsappNumber = payload.whatsapp;
+    worker.verificationStatus = 'pending';
+    worker.verificationSubmittedAt = new Date();
+    worker.rejectionReason = '';
+    await worker.save();
+
+    const populated = await Worker.findById(worker._id).populate('categories');
+
+    notifyUser(worker._id.toString(), 'verification_status_updated', {
+      workerId: worker._id.toString(),
+      verificationStatus: 'pending',
+    });
+
+    await sendNotification({
+      recipientId: worker._id.toString(),
+      recipientModel: 'Worker',
+      type: 'verification_submitted',
+      title: 'Verification Submitted',
+      message: 'Your details are submitted. Our team will contact you on WhatsApp in your chosen time slot.',
+      data: { workerId: worker._id.toString(), verificationSlot: payload.slot },
+    });
+
+    await sendAdminNotification({
+      type: 'verification_pending',
+      title: 'New Worker Verification',
+      message: `${worker.fullName} submitted verification (${VERIFICATION_SLOT_LABELS[payload.slot]}).`,
+      data: {
+        workerId: worker._id.toString(),
+        workerName: worker.fullName,
+        verificationSlot: payload.slot,
+        whatsappNumber: payload.whatsapp,
+      },
+    });
+
+    res.json({
+      message: 'Verification submitted. Our team will contact you in your selected time slot.',
+      worker: withOnboardingFlags(populated),
+    });
+  } catch (error) {
+    console.error('Submit verification error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─── Resubmit verification after rejection ───
+export const resubmitVerification = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const worker = await Worker.findById(req.user!.id);
+    if (!worker) {
+      res.status(404).json({ message: 'Worker not found' });
+      return;
+    }
+
+    if (worker.verificationStatus !== 'rejected') {
+      res.status(400).json({ message: 'Resubmission is only allowed after a rejection.' });
       return;
     }
 
@@ -208,42 +317,65 @@ export const reRequestEKYC = async (req: Request, res: Response): Promise<void> 
       worker.aadhaarBack = backUpload.url;
     }
 
-    const previousReason = worker.ekycRejectionReason || '';
+    // Slot + WhatsApp are editable on resubmission; both remain mandatory.
+    const payload = readVerificationPayload(req.body || {});
+    if (!payload.ok) {
+      res.status(400).json({ message: payload.message });
+      return;
+    }
 
-    // Move worker back into pending review queue.
+    const previousReason = worker.rejectionReason || '';
+
+    // Move the worker back into the admin's verification queue.
+    worker.verificationSlot = payload.slot;
+    worker.whatsappNumber = payload.whatsapp;
+    worker.verificationStatus = 'resubmitted';
+    worker.resubmittedAt = new Date();
+    worker.verificationSubmittedAt = new Date();
+    worker.rejectionReason = '';
+    worker.verifiedBy = null;
+    worker.verifiedAt = null;
     worker.accountStatus = 'test';
     worker.isActive = false;
-    worker.videoKycIncompleteReason = '';
-    worker.videoKycRetryAvailableAt = null;
-    worker.ekycCaptures = [];
 
     await worker.save();
 
     const updatedWorker = await Worker.findById(worker._id).populate('categories');
 
-    notifyUser(worker._id.toString(), 'kyc_status_updated', {
-      workerId: worker._id,
-      status: 're_requested',
+    notifyUser(worker._id.toString(), 'verification_status_updated', {
+      workerId: worker._id.toString(),
+      verificationStatus: 'resubmitted',
       previousReason,
     });
 
+    await sendNotification({
+      recipientId: worker._id.toString(),
+      recipientModel: 'Worker',
+      type: 'verification_resubmitted',
+      title: 'Verification Resubmitted',
+      message: 'Your updated details are submitted. Our team will contact you again in your chosen time slot.',
+      data: { workerId: worker._id.toString(), verificationSlot: payload.slot },
+    });
+
     await sendAdminNotification({
-      type: 'ekyc_rerequest',
-      title: 'Worker Re-requested eKYC',
-      message: `${worker.fullName} has re-requested eKYC after rejection.`,
+      type: 'verification_resubmitted',
+      title: 'Worker Resubmitted Verification',
+      message: `${worker.fullName} resubmitted verification after rejection.`,
       data: {
         workerId: worker._id.toString(),
         workerName: worker.fullName,
         previousReason,
+        verificationSlot: payload.slot,
+        whatsappNumber: payload.whatsapp,
       },
     });
 
     res.json({
-      message: 'Details updated. Your eKYC re-request has been submitted.',
-      worker: updatedWorker,
+      message: 'Details updated. Your verification has been resubmitted.',
+      worker: withOnboardingFlags(updatedWorker),
     });
   } catch (error) {
-    console.error('Re-request eKYC error:', error);
+    console.error('Resubmit verification error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -259,8 +391,8 @@ export const completeProfile = async (req: Request, res: Response): Promise<void
       return;
     }
 
-    if (worker.accountStatus !== 'approved') {
-      res.status(400).json({ message: 'Account must be approved before completing profile' });
+    if (worker.verificationStatus !== 'approved') {
+      res.status(400).json({ message: 'Your account must be verified before completing your profile' });
       return;
     }
 
@@ -302,6 +434,11 @@ const withOnboardingFlags = (w: any) =>
         ...(typeof w.toObject === 'function' ? w.toObject() : w),
         aadhaarSubmitted: Boolean(w.aadhaarFront && w.aadhaarBack),
         skillsCount: Array.isArray(w.skills) ? w.skills.length : 0,
+        // The worker has everything needed to submit for manual verification.
+        readyForVerification:
+          Boolean(w.aadhaarFront && w.aadhaarBack) &&
+          Array.isArray(w.skills) &&
+          w.skills.some((s: { confirmed?: boolean }) => s?.confirmed),
       }
     : w;
 
@@ -2132,39 +2269,3 @@ export const unselectSkill = async (req: Request, res: Response): Promise<void> 
   }
 };
 
-// ─── Generate Video KYC Token (for mobile app to open browser) ───
-export const generateVideoKycToken = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const worker = await Worker.findById(req.user!.id);
-    if (!worker) { res.status(404).json({ message: 'Worker not found' }); return; }
-
-    // Only allow if in ekyc_pending or test status
-    if (!['test', 'ekyc_pending'].includes(worker.accountStatus)) {
-      res.status(400).json({ message: 'Video KYC not available in current status' }); return;
-    }
-
-    // Check cooldown
-    if (worker.videoKycRetryAvailableAt && worker.videoKycRetryAvailableAt > new Date()) {
-      res.status(400).json({
-        message: 'Please wait before retrying Video KYC',
-        retryAvailableAt: worker.videoKycRetryAvailableAt,
-      }); return;
-    }
-
-    // Generate a JWT token valid for 15 minutes (enough for the call)
-    const token = jwt.sign(
-      { id: worker._id.toString(), purpose: 'video-kyc' },
-      env.JWT_SECRET,
-      { expiresIn: '15m' } as SignOptions,
-    );
-
-    // The URL should point to the worker web app's video-kyc page
-    const baseUrl = env.WORKER_CLIENT_URL || env.CLIENT_URLS.find((u) => u.includes('fixoworker')) || env.CLIENT_URLS.find((u) => u.includes(':4000')) || 'https://fixoworker.vercel.app';
-    const url = `${baseUrl}/video-kyc/${token}`;
-
-    res.json({ token, url });
-  } catch (error) {
-    console.error('Generate video KYC token error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};

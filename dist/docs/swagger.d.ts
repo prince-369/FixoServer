@@ -778,7 +778,7 @@ declare const swaggerSpec: {
                     totalRevenue: {
                         type: string;
                     };
-                    pendingEKYC: {
+                    pendingVerification: {
                         type: string;
                     };
                     pendingWithdrawals: {
@@ -3087,7 +3087,45 @@ declare const swaggerSpec: {
                 };
             };
         };
-        '/worker/ekyc/re-request': {
+        '/worker/verification/submit': {
+            post: {
+                tags: string[];
+                summary: string;
+                security: {
+                    BearerAuth: never[];
+                }[];
+                requestBody: {
+                    required: boolean;
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: string;
+                                required: string[];
+                                properties: {
+                                    verificationSlot: {
+                                        type: string;
+                                        enum: string[];
+                                    };
+                                    whatsappNumber: {
+                                        type: string;
+                                        description: string;
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+                responses: {
+                    200: {
+                        description: string;
+                    };
+                    400: {
+                        description: string;
+                    };
+                };
+            };
+        };
+        '/worker/verification/resubmit': {
             post: {
                 tags: string[];
                 summary: string;
@@ -3102,6 +3140,19 @@ declare const swaggerSpec: {
                                 type: string;
                                 required: string[];
                                 properties: {
+                                    fullName: {
+                                        type: string;
+                                    };
+                                    email: {
+                                        type: string;
+                                    };
+                                    verificationSlot: {
+                                        type: string;
+                                        enum: string[];
+                                    };
+                                    whatsappNumber: {
+                                        type: string;
+                                    };
                                     aadhaarFront: {
                                         type: string;
                                         format: string;
@@ -4240,7 +4291,7 @@ declare const swaggerSpec: {
                                 schema: {
                                     type: string;
                                     properties: {
-                                        pendingEKYC: {
+                                        pendingVerification: {
                                             type: string;
                                         };
                                         pendingWithdrawals: {
@@ -4260,13 +4311,54 @@ declare const swaggerSpec: {
                 };
             };
         };
-        '/admin/ekyc/pending': {
+        '/admin/verification/queue': {
             get: {
                 tags: string[];
                 summary: string;
                 security: {
                     BearerAuth: never[];
                 }[];
+                parameters: ({
+                    name: string;
+                    in: string;
+                    schema: {
+                        type: string;
+                        enum: string[];
+                        format?: undefined;
+                        default?: undefined;
+                    };
+                    description?: undefined;
+                } | {
+                    name: string;
+                    in: string;
+                    schema: {
+                        type: string;
+                        enum?: undefined;
+                        format?: undefined;
+                        default?: undefined;
+                    };
+                    description: string;
+                } | {
+                    name: string;
+                    in: string;
+                    schema: {
+                        type: string;
+                        format: string;
+                        enum?: undefined;
+                        default?: undefined;
+                    };
+                    description: string;
+                } | {
+                    name: string;
+                    in: string;
+                    schema: {
+                        type: string;
+                        default: number;
+                        enum?: undefined;
+                        format?: undefined;
+                    };
+                    description?: undefined;
+                })[];
                 responses: {
                     200: {
                         description: string;
@@ -4274,9 +4366,6 @@ declare const swaggerSpec: {
                             'application/json': {
                                 schema: {
                                     type: string;
-                                    items: {
-                                        $ref: string;
-                                    };
                                 };
                             };
                         };
@@ -4284,7 +4373,7 @@ declare const swaggerSpec: {
                 };
             };
         };
-        '/admin/ekyc/{workerId}': {
+        '/admin/verification/{workerId}': {
             get: {
                 tags: string[];
                 summary: string;
@@ -4313,56 +4402,7 @@ declare const swaggerSpec: {
                 };
             };
         };
-        '/admin/ekyc/{workerId}/video-result': {
-            post: {
-                tags: string[];
-                summary: string;
-                security: {
-                    BearerAuth: never[];
-                }[];
-                parameters: {
-                    name: string;
-                    in: string;
-                    required: boolean;
-                    schema: {
-                        type: string;
-                    };
-                }[];
-                requestBody: {
-                    required: boolean;
-                    content: {
-                        'application/json': {
-                            schema: {
-                                type: string;
-                                required: string[];
-                                properties: {
-                                    result: {
-                                        type: string;
-                                        enum: string[];
-                                    };
-                                    notes: {
-                                        type: string;
-                                    };
-                                };
-                            };
-                        };
-                    };
-                };
-                responses: {
-                    200: {
-                        description: string;
-                        content: {
-                            'application/json': {
-                                schema: {
-                                    $ref: string;
-                                };
-                            };
-                        };
-                    };
-                };
-            };
-        };
-        '/admin/ekyc/{workerId}/approve': {
+        '/admin/verification/{workerId}/approve': {
             post: {
                 tags: string[];
                 summary: string;
@@ -4388,10 +4428,13 @@ declare const swaggerSpec: {
                             };
                         };
                     };
+                    409: {
+                        description: string;
+                    };
                 };
             };
         };
-        '/admin/ekyc/{workerId}/reject': {
+        '/admin/verification/{workerId}/reject': {
             post: {
                 tags: string[];
                 summary: string;
@@ -4416,51 +4459,6 @@ declare const swaggerSpec: {
                                 properties: {
                                     reason: {
                                         type: string;
-                                    };
-                                };
-                            };
-                        };
-                    };
-                };
-                responses: {
-                    200: {
-                        description: string;
-                        content: {
-                            'application/json': {
-                                schema: {
-                                    $ref: string;
-                                };
-                            };
-                        };
-                    };
-                };
-            };
-        };
-        '/admin/ekyc/{workerId}/capture': {
-            post: {
-                tags: string[];
-                summary: string;
-                security: {
-                    BearerAuth: never[];
-                }[];
-                parameters: {
-                    name: string;
-                    in: string;
-                    required: boolean;
-                    schema: {
-                        type: string;
-                    };
-                }[];
-                requestBody: {
-                    required: boolean;
-                    content: {
-                        'application/json': {
-                            schema: {
-                                type: string;
-                                properties: {
-                                    imageData: {
-                                        type: string;
-                                        description: string;
                                     };
                                 };
                             };

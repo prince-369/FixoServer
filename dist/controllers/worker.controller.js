@@ -1,12 +1,44 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateVideoKycToken = exports.unselectSkill = exports.bumpSkillExperience = exports.requestSkill = exports.getSkills = exports.escalateHelpTicket = exports.appendHelpTicketMessage = exports.getHelpTicketDetail = exports.getHelpTickets = exports.createHelpTicket = exports.getChatbotQA = exports.deleteNotification = exports.markAllNotificationsRead = exports.markNotificationRead = exports.getNotifications = exports.getWithdrawals = exports.requestWithdrawal = exports.saveBankDetails = exports.getWalletTransactions = exports.getEarningsHistory = exports.getFunds = exports.completeWork = exports.requestCompletionCode = exports.sendMessage = exports.cancelBookingByWorker = exports.rejectBooking = exports.approveBooking = exports.respondToNegotiation = exports.submitBid = exports.getWorkRequestDetail = exports.getWorkRequests = exports.getReviews = exports.getDashboard = exports.updateCurrentLocation = exports.updateLocation = exports.toggleActive = exports.submitOnboardingSkills = exports.submitOnboardingAadhaar = exports.validateAadhaarScan = exports.completeProfile = exports.reRequestEKYC = exports.updateProfile = exports.getProfile = void 0;
+exports.unselectSkill = exports.bumpSkillExperience = exports.requestSkill = exports.getSkills = exports.escalateHelpTicket = exports.appendHelpTicketMessage = exports.getHelpTicketDetail = exports.getHelpTickets = exports.createHelpTicket = exports.getChatbotQA = exports.deleteNotification = exports.markAllNotificationsRead = exports.markNotificationRead = exports.getNotifications = exports.getWithdrawals = exports.requestWithdrawal = exports.saveBankDetails = exports.getWalletTransactions = exports.getEarningsHistory = exports.getFunds = exports.completeWork = exports.requestCompletionCode = exports.sendMessage = exports.cancelBookingByWorker = exports.rejectBooking = exports.approveBooking = exports.respondToNegotiation = exports.submitBid = exports.getWorkRequestDetail = exports.getWorkRequests = exports.getReviews = exports.getDashboard = exports.updateCurrentLocation = exports.updateLocation = exports.toggleActive = exports.submitOnboardingSkills = exports.submitOnboardingAadhaar = exports.validateAadhaarScan = exports.completeProfile = exports.resubmitVerification = exports.submitVerification = exports.updateProfile = exports.getProfile = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
-const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
-const Worker_1 = __importDefault(require("../models/Worker"));
+const Worker_1 = __importStar(require("../models/Worker"));
 const aadhaarValidation_service_1 = require("../services/aadhaarValidation.service");
 const verhoeff_1 = require("../utils/verhoeff");
 const Category_1 = __importDefault(require("../models/Category"));
@@ -141,16 +173,107 @@ const updateProfile = async (req, res) => {
     }
 };
 exports.updateProfile = updateProfile;
-// ─── Re-request eKYC after rejection ───
-const reRequestEKYC = async (req, res) => {
+// ─── Verification helpers ───
+// Indian mobile: 10 digits starting 6-9. Accepts +91/0 prefixes and strips them.
+const normaliseIndianMobile = (raw) => {
+    const digits = String(raw ?? '').replace(/\D/g, '');
+    const trimmed = digits.length > 10 ? digits.slice(-10) : digits;
+    return /^[6-9]\d{9}$/.test(trimmed) ? trimmed : '';
+};
+const isVerificationSlot = (value) => typeof value === 'string' && Worker_1.VERIFICATION_SLOTS.includes(value);
+// Shared guard for submit + resubmit: the worker must have finished every onboarding
+// step (Aadhaar, at least one confirmed skill) and supplied a slot + WhatsApp number.
+const readVerificationPayload = (body) => {
+    const slot = body?.verificationSlot;
+    if (!isVerificationSlot(slot)) {
+        return { ok: false, message: 'Please choose a valid verification time slot.' };
+    }
+    const whatsapp = normaliseIndianMobile(body?.whatsappNumber);
+    if (!whatsapp) {
+        return { ok: false, message: 'Enter a valid 10-digit Indian WhatsApp number.' };
+    }
+    return { ok: true, slot, whatsapp };
+};
+// ─── Submit for manual verification (end of onboarding) ───
+const submitVerification = async (req, res) => {
     try {
         const worker = await Worker_1.default.findById(req.user.id);
         if (!worker) {
             res.status(404).json({ message: 'Worker not found' });
             return;
         }
-        if (worker.accountStatus !== 'rejected') {
-            res.status(400).json({ message: 'eKYC re-request is only allowed for rejected workers' });
+        if (worker.verificationStatus === 'pending' || worker.verificationStatus === 'resubmitted') {
+            res.status(400).json({ message: 'Your verification is already awaiting review.' });
+            return;
+        }
+        if (worker.verificationStatus === 'approved') {
+            res.status(400).json({ message: 'Your account is already verified.' });
+            return;
+        }
+        if (!worker.aadhaarFront || !worker.aadhaarBack) {
+            res.status(400).json({ message: 'Please upload your Aadhaar card first.' });
+            return;
+        }
+        if (!worker.skills?.some((s) => s.confirmed)) {
+            res.status(400).json({ message: 'Please select and confirm at least one skill first.' });
+            return;
+        }
+        const payload = readVerificationPayload(req.body || {});
+        if (!payload.ok) {
+            res.status(400).json({ message: payload.message });
+            return;
+        }
+        worker.verificationSlot = payload.slot;
+        worker.whatsappNumber = payload.whatsapp;
+        worker.verificationStatus = 'pending';
+        worker.verificationSubmittedAt = new Date();
+        worker.rejectionReason = '';
+        await worker.save();
+        const populated = await Worker_1.default.findById(worker._id).populate('categories');
+        (0, socket_1.notifyUser)(worker._id.toString(), 'verification_status_updated', {
+            workerId: worker._id.toString(),
+            verificationStatus: 'pending',
+        });
+        await (0, socket_1.sendNotification)({
+            recipientId: worker._id.toString(),
+            recipientModel: 'Worker',
+            type: 'verification_submitted',
+            title: 'Verification Submitted',
+            message: 'Your details are submitted. Our team will contact you on WhatsApp in your chosen time slot.',
+            data: { workerId: worker._id.toString(), verificationSlot: payload.slot },
+        });
+        await (0, socket_1.sendAdminNotification)({
+            type: 'verification_pending',
+            title: 'New Worker Verification',
+            message: `${worker.fullName} submitted verification (${Worker_1.VERIFICATION_SLOT_LABELS[payload.slot]}).`,
+            data: {
+                workerId: worker._id.toString(),
+                workerName: worker.fullName,
+                verificationSlot: payload.slot,
+                whatsappNumber: payload.whatsapp,
+            },
+        });
+        res.json({
+            message: 'Verification submitted. Our team will contact you in your selected time slot.',
+            worker: withOnboardingFlags(populated),
+        });
+    }
+    catch (error) {
+        console.error('Submit verification error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.submitVerification = submitVerification;
+// ─── Resubmit verification after rejection ───
+const resubmitVerification = async (req, res) => {
+    try {
+        const worker = await Worker_1.default.findById(req.user.id);
+        if (!worker) {
+            res.status(404).json({ message: 'Worker not found' });
+            return;
+        }
+        if (worker.verificationStatus !== 'rejected') {
+            res.status(400).json({ message: 'Resubmission is only allowed after a rejection.' });
             return;
         }
         const files = req.files;
@@ -194,41 +317,62 @@ const reRequestEKYC = async (req, res) => {
             const backUpload = await (0, cloudinary_service_1.uploadBufferToCloudinary)(backFile.buffer, 'aadhaar');
             worker.aadhaarBack = backUpload.url;
         }
-        const previousReason = worker.ekycRejectionReason || '';
-        // Move worker back into pending review queue.
+        // Slot + WhatsApp are editable on resubmission; both remain mandatory.
+        const payload = readVerificationPayload(req.body || {});
+        if (!payload.ok) {
+            res.status(400).json({ message: payload.message });
+            return;
+        }
+        const previousReason = worker.rejectionReason || '';
+        // Move the worker back into the admin's verification queue.
+        worker.verificationSlot = payload.slot;
+        worker.whatsappNumber = payload.whatsapp;
+        worker.verificationStatus = 'resubmitted';
+        worker.resubmittedAt = new Date();
+        worker.verificationSubmittedAt = new Date();
+        worker.rejectionReason = '';
+        worker.verifiedBy = null;
+        worker.verifiedAt = null;
         worker.accountStatus = 'test';
         worker.isActive = false;
-        worker.videoKycIncompleteReason = '';
-        worker.videoKycRetryAvailableAt = null;
-        worker.ekycCaptures = [];
         await worker.save();
         const updatedWorker = await Worker_1.default.findById(worker._id).populate('categories');
-        (0, socket_1.notifyUser)(worker._id.toString(), 'kyc_status_updated', {
-            workerId: worker._id,
-            status: 're_requested',
+        (0, socket_1.notifyUser)(worker._id.toString(), 'verification_status_updated', {
+            workerId: worker._id.toString(),
+            verificationStatus: 'resubmitted',
             previousReason,
         });
+        await (0, socket_1.sendNotification)({
+            recipientId: worker._id.toString(),
+            recipientModel: 'Worker',
+            type: 'verification_resubmitted',
+            title: 'Verification Resubmitted',
+            message: 'Your updated details are submitted. Our team will contact you again in your chosen time slot.',
+            data: { workerId: worker._id.toString(), verificationSlot: payload.slot },
+        });
         await (0, socket_1.sendAdminNotification)({
-            type: 'ekyc_rerequest',
-            title: 'Worker Re-requested eKYC',
-            message: `${worker.fullName} has re-requested eKYC after rejection.`,
+            type: 'verification_resubmitted',
+            title: 'Worker Resubmitted Verification',
+            message: `${worker.fullName} resubmitted verification after rejection.`,
             data: {
                 workerId: worker._id.toString(),
                 workerName: worker.fullName,
                 previousReason,
+                verificationSlot: payload.slot,
+                whatsappNumber: payload.whatsapp,
             },
         });
         res.json({
-            message: 'Details updated. Your eKYC re-request has been submitted.',
-            worker: updatedWorker,
+            message: 'Details updated. Your verification has been resubmitted.',
+            worker: withOnboardingFlags(updatedWorker),
         });
     }
     catch (error) {
-        console.error('Re-request eKYC error:', error);
+        console.error('Resubmit verification error:', error);
         res.status(500).json({ message: 'Server error' });
     }
 };
-exports.reRequestEKYC = reRequestEKYC;
+exports.resubmitVerification = resubmitVerification;
 // ─── Complete Profile ───
 const completeProfile = async (req, res) => {
     try {
@@ -238,8 +382,8 @@ const completeProfile = async (req, res) => {
             res.status(404).json({ message: 'Worker not found' });
             return;
         }
-        if (worker.accountStatus !== 'approved') {
-            res.status(400).json({ message: 'Account must be approved before completing profile' });
+        if (worker.verificationStatus !== 'approved') {
+            res.status(400).json({ message: 'Your account must be verified before completing your profile' });
             return;
         }
         // Build location from lat/lng/address
@@ -278,6 +422,10 @@ const withOnboardingFlags = (w) => w
         ...(typeof w.toObject === 'function' ? w.toObject() : w),
         aadhaarSubmitted: Boolean(w.aadhaarFront && w.aadhaarBack),
         skillsCount: Array.isArray(w.skills) ? w.skills.length : 0,
+        // The worker has everything needed to submit for manual verification.
+        readyForVerification: Boolean(w.aadhaarFront && w.aadhaarBack) &&
+            Array.isArray(w.skills) &&
+            w.skills.some((s) => s?.confirmed),
     }
     : w;
 const parseOnboardingSkills = (raw) => {
@@ -1960,38 +2108,4 @@ const unselectSkill = async (req, res) => {
     }
 };
 exports.unselectSkill = unselectSkill;
-// ─── Generate Video KYC Token (for mobile app to open browser) ───
-const generateVideoKycToken = async (req, res) => {
-    try {
-        const worker = await Worker_1.default.findById(req.user.id);
-        if (!worker) {
-            res.status(404).json({ message: 'Worker not found' });
-            return;
-        }
-        // Only allow if in ekyc_pending or test status
-        if (!['test', 'ekyc_pending'].includes(worker.accountStatus)) {
-            res.status(400).json({ message: 'Video KYC not available in current status' });
-            return;
-        }
-        // Check cooldown
-        if (worker.videoKycRetryAvailableAt && worker.videoKycRetryAvailableAt > new Date()) {
-            res.status(400).json({
-                message: 'Please wait before retrying Video KYC',
-                retryAvailableAt: worker.videoKycRetryAvailableAt,
-            });
-            return;
-        }
-        // Generate a JWT token valid for 15 minutes (enough for the call)
-        const token = jsonwebtoken_1.default.sign({ id: worker._id.toString(), purpose: 'video-kyc' }, env_1.default.JWT_SECRET, { expiresIn: '15m' });
-        // The URL should point to the worker web app's video-kyc page
-        const baseUrl = env_1.default.WORKER_CLIENT_URL || env_1.default.CLIENT_URLS.find((u) => u.includes('fixoworker')) || env_1.default.CLIENT_URLS.find((u) => u.includes(':4000')) || 'https://fixoworker.vercel.app';
-        const url = `${baseUrl}/video-kyc/${token}`;
-        res.json({ token, url });
-    }
-    catch (error) {
-        console.error('Generate video KYC token error:', error);
-        res.status(500).json({ message: 'Server error' });
-    }
-};
-exports.generateVideoKycToken = generateVideoKycToken;
 //# sourceMappingURL=worker.controller.js.map

@@ -58,8 +58,8 @@ const userSchema = new mongoose_1.Schema({
     deactivationOtpHash: { type: String, select: false },
     deactivationOtpExpiresAt: { type: Date, select: false },
 }, { timestamps: true });
-userSchema.index({ email: 1 });
-userSchema.index({ phone: 1 });
+// `email` and `phone` are already indexed by their `unique: true` field definitions —
+// re-declaring them here produced duplicate index definitions.
 userSchema.index({ isActive: 1 });
 exports.default = mongoose_1.default.model('User', userSchema);
 //# sourceMappingURL=User.js.map

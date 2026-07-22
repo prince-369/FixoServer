@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.metricsRegistry = exports.setActiveEkycRooms = exports.recordSocketEvent = exports.recordSocketDisconnected = exports.recordSocketConnected = exports.serveMetrics = exports.metricsMiddleware = void 0;
+exports.metricsRegistry = exports.recordSocketEvent = exports.recordSocketDisconnected = exports.recordSocketConnected = exports.serveMetrics = exports.metricsMiddleware = void 0;
 const prom_client_1 = require("prom-client");
 const env_1 = __importDefault(require("../config/env"));
 const METRICS_PREFIX = 'fixo_';
@@ -53,11 +53,6 @@ const socketEventsTotal = new prom_client_1.Counter({
     name: `${METRICS_PREFIX}socket_events_total`,
     help: 'Total Socket.IO events handled by the server.',
     labelNames: ['event_name'],
-    registers: [metricsRegistry],
-});
-const socketEkycRoomsActive = new prom_client_1.Gauge({
-    name: `${METRICS_PREFIX}socket_ekyc_rooms_active`,
-    help: 'Current active eKYC room count.',
     registers: [metricsRegistry],
 });
 let connectedSocketClientsCount = 0;
@@ -148,10 +143,4 @@ const recordSocketEvent = (eventName) => {
     socketEventsTotal.inc({ event_name: sanitizeLabelValue(eventName) });
 };
 exports.recordSocketEvent = recordSocketEvent;
-const setActiveEkycRooms = (count) => {
-    if (!env_1.default.METRICS_ENABLED)
-        return;
-    socketEkycRoomsActive.set(Math.max(0, count));
-};
-exports.setActiveEkycRooms = setActiveEkycRooms;
 //# sourceMappingURL=metrics.js.map

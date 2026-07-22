@@ -18,7 +18,6 @@ import {
   refresh,
   sendPasswordSetupOtp,
   setPasswordForOAuthUser,
-  verifyVideoKycToken,
 } from '../controllers/auth.controller';
 import { protect } from '../middlewares/auth.middleware';
 import { uploadAadhaar } from '../middlewares/upload.middleware';
@@ -63,8 +62,5 @@ router.get('/me', protect, getMe);
 router.post('/change-password', protect, changePassword);
 router.post('/refresh', refresh);
 router.post('/logout', logout);
-
-// Public — Video KYC token verification (browser page uses this without auth)
-router.get('/video-kyc-verify/:token', verifyVideoKycToken);
 
 export default router;

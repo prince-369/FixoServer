@@ -18,11 +18,6 @@ export declare const notifyWorkers: (workerIds: string[], event: string, data: u
 export declare const notifyRole: (role: string, event: string, data: unknown) => void;
 export declare const notifyBookingRoom: (bookingId: string, event: string, data: unknown) => void;
 export declare const isUserOnline: (userId: string) => boolean;
-export declare const getActiveEKYCRooms: () => Map<string, {
-    workerId: string;
-    adminId?: string;
-    createdAt: Date;
-}>;
 export declare const sendNotification: (params: {
     recipientId: string;
     recipientModel: "User" | "Worker" | "Admin";

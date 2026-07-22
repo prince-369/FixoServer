@@ -36,8 +36,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getWaitlist = exports.personalNotification = exports.broadcastNotification = exports.broadcastToAudience = exports.getCancellationFlags = exports.unblockWorkerAccount = exports.blockWorkerAccount = exports.unblockCustomer = exports.blockCustomer = exports.getWorkerDetail = exports.checkAadhaarDuplicate = exports.getAllWorkers = exports.deleteChatbotQA = exports.updateChatbotQA = exports.createChatbotQA = exports.getChatbotQA = exports.deleteAdminNotification = exports.markAllAdminNotificationsRead = exports.markAdminNotificationRead = exports.getAdminNotifications = exports.rejectRefund = exports.processRefund = exports.getRefunds = exports.replyHelpTicket = exports.resolveHelpTicket = exports.getHelpTickets = exports.getCustomers = exports.reorderBanners = exports.updateBanner = exports.deleteBanner = exports.createBanner = exports.getBanners = exports.deleteCategory = exports.updateCategoryDetails = exports.updateCategory = exports.createCategory = exports.getCategories = exports.declineWithdrawal = exports.completeWithdrawal = exports.getWithdrawals = exports.saveEkycCapture = exports.rejectWorker = exports.approveWorker = exports.updateVideoKycResult = exports.getWorkerEKYCDetails = exports.getPendingEKYC = exports.getAdminBootstrapStatus = exports.getPendingAdminBadges = exports.getDashboard = exports.clearDashboardCache = void 0;
-exports.logSkillCallAttempt = exports.reviewSkill = exports.getSkillRequests = exports.searchNotificationRecipients = exports.markWaitlistReached = void 0;
+exports.searchNotificationRecipients = exports.markWaitlistReached = exports.getWaitlist = exports.personalNotification = exports.broadcastNotification = exports.broadcastToAudience = exports.getCancellationFlags = exports.unblockWorkerAccount = exports.blockWorkerAccount = exports.unblockCustomer = exports.blockCustomer = exports.getWorkerDetail = exports.checkAadhaarDuplicate = exports.getAllWorkers = exports.deleteChatbotQA = exports.updateChatbotQA = exports.createChatbotQA = exports.getChatbotQA = exports.deleteAdminNotification = exports.markAllAdminNotificationsRead = exports.markAdminNotificationRead = exports.getAdminNotifications = exports.rejectRefund = exports.processRefund = exports.getRefunds = exports.replyHelpTicket = exports.resolveHelpTicket = exports.getHelpTickets = exports.getCustomers = exports.reorderBanners = exports.updateBanner = exports.deleteBanner = exports.createBanner = exports.getBanners = exports.deleteCategory = exports.updateCategoryDetails = exports.updateCategory = exports.createCategory = exports.getCategories = exports.declineWithdrawal = exports.completeWithdrawal = exports.getWithdrawals = exports.rejectWorker = exports.approveWorker = exports.getWorkerVerificationDetails = exports.getVerificationQueue = exports.getAdminBootstrapStatus = exports.getPendingAdminBadges = exports.getDashboard = exports.clearDashboardCache = void 0;
+exports.logSkillCallAttempt = exports.reviewSkill = exports.getSkillRequests = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const Worker_1 = __importDefault(require("../models/Worker"));
 const User_1 = __importDefault(require("../models/User"));
@@ -63,16 +63,11 @@ const cloudinary_service_1 = require("../services/cloudinary.service");
 const adminBootstrap_service_1 = require("../services/adminBootstrap.service");
 const aadhaarValidation_service_1 = require("../services/aadhaarValidation.service");
 const verhoeff_1 = require("../utils/verhoeff");
-const VIDEO_KYC_RETRY_COOLDOWN_MS = 3 * 60 * 1000;
-// A worker is "ready for KYC review" only once they've actually finished onboarding —
-// BOTH Aadhaar sides uploaded AND at least one skill selected. A freshly-created
-// account (which sits in 'test' with no Aadhaar/skills) must NOT appear in the KYC
-// queue or its badge; it still shows in the Workers list so admins can see the signup.
-const READY_FOR_KYC_FILTER = {
-    accountStatus: { $in: ['test', 'ekyc_pending', 'ekyc_done'] },
-    aadhaarFront: { $nin: ['', null] },
-    aadhaarBack: { $nin: ['', null] },
-    'skills.0': { $exists: true },
+// Workers awaiting a manual verification decision. A worker only lands here once they
+// have actually submitted (which already requires Aadhaar + a confirmed skill + slot +
+// WhatsApp number), so a freshly-created account never pollutes the queue or its badge.
+const AWAITING_VERIFICATION_FILTER = {
+    verificationStatus: { $in: ['pending', 'resubmitted'] },
 };
 // ─── Dashboard Cache (2-minute TTL) ───
 let _dashboardCache = null;
@@ -88,10 +83,10 @@ const getDashboard = async (_req, res) => {
     try {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        const [totalWorkers, activeWorkers, pendingEKYC, pendingWithdrawals, totalCustomers, pendingHelpTickets, todayWorkDone, totalBookings, totalCompleted, totalCancelled, totalInProgress,] = await Promise.all([
+        const [totalWorkers, activeWorkers, pendingVerification, pendingWithdrawals, totalCustomers, pendingHelpTickets, todayWorkDone, totalBookings, totalCompleted, totalCancelled, totalInProgress,] = await Promise.all([
             Worker_1.default.countDocuments(),
             Worker_1.default.countDocuments({ isActive: true, accountStatus: 'live' }),
-            Worker_1.default.countDocuments(READY_FOR_KYC_FILTER),
+            Worker_1.default.countDocuments(AWAITING_VERIFICATION_FILTER),
             Withdrawal_1.default.countDocuments({ status: 'pending' }),
             User_1.default.countDocuments(),
             HelpTicket_1.default.countDocuments({ status: { $in: ['open', 'escalated'] } }),
@@ -161,13 +156,16 @@ const getDashboard = async (_req, res) => {
             count: p.count,
             value: p.totalAmount,
         }));
-        // --- Donut: Worker status ---
+        // --- Donut: Worker verification status ---
         const workerStatusAgg = await Worker_1.default.aggregate([
-            { $group: { _id: '$accountStatus', count: { $sum: 1 } } },
+            { $group: { _id: '$verificationStatus', count: { $sum: 1 } } },
         ]);
         const workerStatusLabels = {
-            test: 'Test', ekyc_pending: 'eKYC Pending', ekyc_done: 'eKYC Done',
-            approved: 'Approved', live: 'Live', rejected: 'Rejected', suspended: 'Suspended',
+            unsubmitted: 'Onboarding',
+            pending: 'Pending',
+            resubmitted: 'Resubmitted',
+            approved: 'Approved',
+            rejected: 'Rejected',
         };
         const workerStatusDonut = workerStatusAgg.map((w) => ({
             name: workerStatusLabels[w._id] || w._id,
@@ -186,7 +184,7 @@ const getDashboard = async (_req, res) => {
         const responseData = {
             totalWorkers,
             activeWorkers,
-            pendingEKYC,
+            pendingVerification,
             pendingWithdrawals,
             totalCustomers,
             pendingHelpTickets,
@@ -213,17 +211,17 @@ exports.getDashboard = getDashboard;
 // ─── Lightweight Pending Badge Counts ───
 const getPendingAdminBadges = async (_req, res) => {
     try {
-        const [pendingEKYC, pendingWithdrawals, pendingRefunds, pendingSupport, pendingRewardClaims] = await Promise.all([
-            Worker_1.default.countDocuments(READY_FOR_KYC_FILTER),
+        const [pendingVerification, pendingWithdrawals, pendingRefunds, pendingSupport, pendingRewardClaims] = await Promise.all([
+            Worker_1.default.countDocuments(AWAITING_VERIFICATION_FILTER),
             Withdrawal_1.default.countDocuments({ status: 'pending' }),
             Booking_1.default.countDocuments({ paymentStatus: 'refund_pending' }),
             HelpTicket_1.default.countDocuments({ status: { $in: ['open', 'escalated'] } }),
             RewardClaim_1.default.countDocuments({ status: 'pending_approval' }),
         ]);
         const pendingFinance = pendingWithdrawals + pendingRefunds;
-        const totalActionRequired = pendingEKYC + pendingFinance + pendingSupport + pendingRewardClaims;
+        const totalActionRequired = pendingVerification + pendingFinance + pendingSupport + pendingRewardClaims;
         res.json({
-            pendingEKYC,
+            pendingVerification,
             pendingWithdrawals,
             pendingRefunds,
             pendingSupport,
@@ -250,26 +248,94 @@ const getAdminBootstrapStatus = async (_req, res) => {
     }
 };
 exports.getAdminBootstrapStatus = getAdminBootstrapStatus;
-// ─── EKYC: Get Pending Workers ───
-const getPendingEKYC = async (_req, res) => {
+// ─── Verification Queue ───
+// The admin contacts each worker OUTSIDE the app (phone / WhatsApp call). This endpoint
+// only surfaces everything needed to make that call and record the decision.
+const getVerificationQueue = async (req, res) => {
     try {
-        const [workers, approvedCount, rejectedCount] = await Promise.all([
-            Worker_1.default.find(READY_FOR_KYC_FILTER).sort({ createdAt: -1 }).populate('skills.category', 'name image'),
-            Worker_1.default.countDocuments({ accountStatus: { $in: ['approved', 'live'] } }),
-            Worker_1.default.countDocuments({ accountStatus: 'rejected' }),
+        const status = String(req.query.status || 'pending_all');
+        const search = String(req.query.search || '').trim();
+        const skill = String(req.query.skill || '').trim();
+        const from = String(req.query.from || '').trim();
+        const to = String(req.query.to || '').trim();
+        const page = Math.max(1, Number(req.query.page) || 1);
+        const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
+        const filter = {};
+        if (status === 'pending_all') {
+            Object.assign(filter, AWAITING_VERIFICATION_FILTER);
+        }
+        else if (['pending', 'resubmitted', 'approved', 'rejected'].includes(status)) {
+            filter.verificationStatus = status;
+        }
+        else if (status !== 'all') {
+            Object.assign(filter, AWAITING_VERIFICATION_FILTER);
+        }
+        if (search) {
+            const rx = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+            filter.$or = [{ fullName: rx }, { phone: rx }, { whatsappNumber: rx }];
+        }
+        if (skill && mongoose_1.default.isValidObjectId(skill)) {
+            filter['skills.category'] = new mongoose_1.default.Types.ObjectId(skill);
+        }
+        // Registration date range.
+        if (from || to) {
+            const createdAt = {};
+            const fromDate = from ? new Date(from) : null;
+            const toDate = to ? new Date(to) : null;
+            if (fromDate && !Number.isNaN(fromDate.getTime()))
+                createdAt.$gte = fromDate;
+            if (toDate && !Number.isNaN(toDate.getTime())) {
+                toDate.setHours(23, 59, 59, 999);
+                createdAt.$lte = toDate;
+            }
+            if (Object.keys(createdAt).length)
+                filter.createdAt = createdAt;
+        }
+        const [workers, total, counts] = await Promise.all([
+            Worker_1.default.find(filter)
+                // Oldest submission first — whoever has waited longest gets called first.
+                .sort({ verificationSubmittedAt: 1, createdAt: 1 })
+                .skip((page - 1) * limit)
+                .limit(limit)
+                .select('fullName phone whatsappNumber profileImage aadhaarFront aadhaarBack aadhaarNumberLast4 aadhaarName aadhaarDob ' +
+                'skills categories verificationStatus verificationSlot verificationSubmittedAt resubmittedAt rejectionReason ' +
+                'verifiedAt verifiedBy accountStatus isActive createdAt')
+                .populate('skills.category', 'name image')
+                .populate('verifiedBy', 'name email')
+                .lean(),
+            Worker_1.default.countDocuments(filter),
+            Worker_1.default.aggregate([{ $group: { _id: '$verificationStatus', count: { $sum: 1 } } }]),
         ]);
-        res.json({ workers, approvedCount, rejectedCount });
+        const statusCounts = counts.reduce((acc, c) => {
+            acc[c._id || 'unsubmitted'] = c.count;
+            return acc;
+        }, {});
+        res.json({
+            workers,
+            total,
+            page,
+            limit,
+            totalPages: Math.max(1, Math.ceil(total / limit)),
+            counts: {
+                pending: statusCounts.pending || 0,
+                resubmitted: statusCounts.resubmitted || 0,
+                approved: statusCounts.approved || 0,
+                rejected: statusCounts.rejected || 0,
+            },
+        });
     }
     catch (error) {
-        console.error('Get pending EKYC error:', error);
+        console.error('Get verification queue error:', error);
         res.status(500).json({ message: 'Server error' });
     }
 };
-exports.getPendingEKYC = getPendingEKYC;
-// ─── EKYC: Get Worker Details ───
-const getWorkerEKYCDetails = async (req, res) => {
+exports.getVerificationQueue = getVerificationQueue;
+// ─── Verification: single worker detail ───
+const getWorkerVerificationDetails = async (req, res) => {
     try {
-        const worker = await Worker_1.default.findById(req.params.workerId).populate('skills.category', 'name image');
+        const worker = await Worker_1.default.findById(req.params.workerId)
+            .populate('skills.category', 'name image')
+            .populate('verifiedBy', 'name email');
         if (!worker) {
             res.status(404).json({ message: 'Worker not found' });
             return;
@@ -277,97 +343,12 @@ const getWorkerEKYCDetails = async (req, res) => {
         res.json({ worker });
     }
     catch (error) {
-        console.error('Get worker EKYC details error:', error);
+        console.error('Get worker verification details error:', error);
         res.status(500).json({ message: 'Server error' });
     }
 };
-exports.getWorkerEKYCDetails = getWorkerEKYCDetails;
-// ─── EKYC: Save Post-Call Video KYC Result ───
-const updateVideoKycResult = async (req, res) => {
-    try {
-        const { result, reason, checklist, livenessAsked, agentName } = req.body;
-        if (result !== 'completed' && result !== 'incomplete') {
-            res.status(400).json({ message: 'Result must be either completed or incomplete' });
-            return;
-        }
-        const worker = await Worker_1.default.findById(req.params.workerId);
-        if (!worker) {
-            res.status(404).json({ message: 'Worker not found' });
-            return;
-        }
-        // Build the audit entry — the professional record of what the agent verified.
-        // agentId is authoritative (from the authenticated session); agentName is a
-        // denormalised label the panel sends for readable history.
-        const auditEntry = {
-            decidedAt: new Date(),
-            agentId: req.user?.id ? new mongoose_1.default.Types.ObjectId(req.user.id) : null,
-            agentName: typeof agentName === 'string' ? agentName.slice(0, 120) : '',
-            result,
-            reason: typeof reason === 'string' ? reason.trim() : '',
-            consentAt: worker.videoKycConsentAt ?? null,
-            livenessAsked: Array.isArray(livenessAsked)
-                ? livenessAsked.filter((a) => typeof a === 'string').slice(0, 20)
-                : [],
-            checklist: {
-                liveness: checklist?.liveness === true,
-                faceMatch: checklist?.faceMatch === true,
-                docsMatch: checklist?.docsMatch === true,
-                identity: checklist?.identity === true,
-            },
-        };
-        worker.videoKycAudit = [...(worker.videoKycAudit ?? []), auditEntry];
-        if (result === 'completed') {
-            worker.accountStatus = 'ekyc_done';
-            worker.ekycRejectionReason = undefined;
-            worker.videoKycIncompleteReason = '';
-            worker.videoKycRetryAvailableAt = null;
-            worker.videoKycAwaitingResult = false;
-            worker.videoKycCallEndedAt = null;
-            await worker.save();
-            (0, socket_1.notifyUser)(worker._id.toString(), 'kyc_status_updated', {
-                workerId: worker._id,
-                status: 'ekyc_completed',
-                worker,
-            });
-            res.json({
-                message: 'Video KYC marked as complete. Worker moved to verification queue.',
-                worker,
-            });
-            return;
-        }
-        const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
-        if (!trimmedReason) {
-            res.status(400).json({ message: 'Reason is required when marking video KYC incomplete' });
-            return;
-        }
-        const retryAvailableAt = new Date(Date.now() + VIDEO_KYC_RETRY_COOLDOWN_MS);
-        worker.accountStatus = 'ekyc_pending';
-        worker.ekycRejectionReason = undefined;
-        worker.videoKycIncompleteReason = trimmedReason;
-        worker.videoKycRetryAvailableAt = retryAvailableAt;
-        worker.videoKycAwaitingResult = false;
-        worker.videoKycCallEndedAt = null;
-        await worker.save();
-        (0, socket_1.notifyUser)(worker._id.toString(), 'kyc_status_updated', {
-            workerId: worker._id,
-            status: 'ekyc_incomplete',
-            reason: trimmedReason,
-            retryAvailableAt: retryAvailableAt.toISOString(),
-            worker,
-        });
-        res.json({
-            message: 'Video KYC marked incomplete. Worker can retry after cooldown.',
-            worker,
-            retryAvailableAt: retryAvailableAt.toISOString(),
-        });
-    }
-    catch (error) {
-        console.error('Update video KYC result error:', error);
-        res.status(500).json({ message: 'Server error' });
-    }
-};
-exports.updateVideoKycResult = updateVideoKycResult;
-// ─── EKYC: Approve Worker ───
+exports.getWorkerVerificationDetails = getWorkerVerificationDetails;
+// ─── Verification: Approve Worker ───
 const approveWorker = async (req, res) => {
     try {
         const worker = await Worker_1.default.findById(req.params.workerId);
@@ -375,31 +356,34 @@ const approveWorker = async (req, res) => {
             res.status(404).json({ message: 'Worker not found' });
             return;
         }
-        // Server-side backstop for the admin UI's Approve gate: never approve a worker
-        // whose Aadhaar is already active on another account. Blocks only approved/live
-        // duplicates — a rejected duplicate is a legitimate re-application, not fraud.
-        // This enforces "one person, one active account" even if the UI is bypassed.
+        if (worker.verificationStatus === 'approved') {
+            res.status(400).json({ message: 'This worker is already approved.' });
+            return;
+        }
+        // Server-side backstop for the UI's duplicate gate: never approve a worker whose
+        // Aadhaar is already tied to another LIVE application (approved, or still awaiting
+        // review). A duplicate that was rejected is a legitimate re-application, not fraud,
+        // so it does not block. Enforces "one person, one active account" even if the UI
+        // is bypassed.
         if (worker.aadhaarNumberHash) {
             const activeDuplicate = await Worker_1.default.findOne({
                 aadhaarNumberHash: worker.aadhaarNumberHash,
                 _id: { $ne: worker._id },
-                accountStatus: { $in: ['approved', 'live'] },
-            }).select('fullName phone accountStatus').lean();
+                verificationStatus: { $in: ['approved', 'pending', 'resubmitted'] },
+            }).select('fullName phone verificationStatus').lean();
             if (activeDuplicate) {
                 res.status(409).json({
-                    message: `This Aadhaar is already used by an active account (${activeDuplicate.fullName} · ${activeDuplicate.phone}). Reject this application or resolve the duplicate first.`,
+                    message: `This Aadhaar is already used by another account (${activeDuplicate.fullName} · ${activeDuplicate.phone} — ${activeDuplicate.verificationStatus}). Reject that duplicate first, then approve this one.`,
                     duplicate: activeDuplicate,
                 });
                 return;
             }
         }
-        worker.accountStatus = 'approved';
+        worker.verificationStatus = 'approved';
+        worker.verifiedBy = req.user?.id ? new mongoose_1.default.Types.ObjectId(req.user.id) : null;
+        worker.verifiedAt = new Date();
+        worker.rejectionReason = '';
         worker.isActive = true;
-        worker.ekycRejectionReason = undefined;
-        worker.videoKycIncompleteReason = '';
-        worker.videoKycRetryAvailableAt = null;
-        worker.videoKycAwaitingResult = false;
-        worker.videoKycCallEndedAt = null;
         // Approve the skills the worker confirmed at signup; auto-reject the rest.
         (worker.skills || []).forEach((s) => {
             if (s.status === 'pending_kyc') {
@@ -412,13 +396,21 @@ const approveWorker = async (req, res) => {
         (0, workerSkills_1.syncCategoriesFromSkills)(worker);
         await worker.save();
         // Notify worker in real-time so their page updates instantly
-        (0, socket_1.notifyUser)(worker._id.toString(), 'kyc_status_updated', {
-            workerId: worker._id,
-            status: 'approved',
+        (0, socket_1.notifyUser)(worker._id.toString(), 'verification_status_updated', {
+            workerId: worker._id.toString(),
+            verificationStatus: 'approved',
             worker,
         });
+        await (0, socket_1.sendNotification)({
+            recipientId: worker._id.toString(),
+            recipientModel: 'Worker',
+            type: 'verification_approved',
+            title: 'Verification Approved',
+            message: 'Your account is verified. Complete your profile to start receiving jobs.',
+            data: { workerId: worker._id.toString() },
+        });
         (0, exports.clearDashboardCache)();
-        await (0, adminActivity_1.logAdminActivity)(req, { action: 'kyc.approve', category: 'kyc', targetType: 'worker', targetId: String(worker._id) });
+        await (0, adminActivity_1.logAdminActivity)(req, { action: 'verification.approve', category: 'kyc', targetType: 'worker', targetId: String(worker._id) });
         res.json({ message: 'Worker approved', worker });
     }
     catch (error) {
@@ -427,30 +419,42 @@ const approveWorker = async (req, res) => {
     }
 };
 exports.approveWorker = approveWorker;
-// ─── EKYC: Reject Worker ───
+// ─── Verification: Reject Worker (reason is mandatory) ───
 const rejectWorker = async (req, res) => {
     try {
-        const { reason } = req.body;
-        const worker = await Worker_1.default.findByIdAndUpdate(req.params.workerId, {
-            accountStatus: 'rejected',
-            ekycRejectionReason: reason,
-            videoKycIncompleteReason: '',
-            videoKycRetryAvailableAt: null,
-            videoKycAwaitingResult: false,
-            videoKycCallEndedAt: null,
-        }, { new: true });
+        const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+        if (!reason) {
+            res.status(400).json({ message: 'A rejection reason is required.' });
+            return;
+        }
+        const worker = await Worker_1.default.findById(req.params.workerId);
         if (!worker) {
             res.status(404).json({ message: 'Worker not found' });
             return;
         }
+        worker.verificationStatus = 'rejected';
+        worker.rejectionReason = reason.slice(0, 500);
+        worker.verifiedBy = req.user?.id ? new mongoose_1.default.Types.ObjectId(req.user.id) : null;
+        worker.verifiedAt = new Date();
+        worker.accountStatus = 'test';
+        worker.isActive = false;
+        await worker.save();
         // Notify worker in real-time so their page updates instantly
-        (0, socket_1.notifyUser)(worker._id.toString(), 'kyc_status_updated', {
-            workerId: worker._id,
-            status: 'rejected',
-            reason,
+        (0, socket_1.notifyUser)(worker._id.toString(), 'verification_status_updated', {
+            workerId: worker._id.toString(),
+            verificationStatus: 'rejected',
+            rejectionReason: worker.rejectionReason,
+        });
+        await (0, socket_1.sendNotification)({
+            recipientId: worker._id.toString(),
+            recipientModel: 'Worker',
+            type: 'verification_rejected',
+            title: 'Verification Rejected',
+            message: `Your verification was rejected: ${worker.rejectionReason}. Please update your details and submit again.`,
+            data: { workerId: worker._id.toString(), rejectionReason: worker.rejectionReason },
         });
         (0, exports.clearDashboardCache)();
-        await (0, adminActivity_1.logAdminActivity)(req, { action: 'kyc.reject', category: 'kyc', targetType: 'worker', targetId: String(worker._id) });
+        await (0, adminActivity_1.logAdminActivity)(req, { action: 'verification.reject', category: 'kyc', targetType: 'worker', targetId: String(worker._id) });
         res.json({ message: 'Worker rejected', worker });
     }
     catch (error) {
@@ -459,34 +463,6 @@ const rejectWorker = async (req, res) => {
     }
 };
 exports.rejectWorker = rejectWorker;
-// ─── EKYC: Save Capture from Video KYC ───
-const saveEkycCapture = async (req, res) => {
-    try {
-        const { workerId } = req.params;
-        const { imageData } = req.body; // base64 data URL
-        if (!imageData || typeof imageData !== 'string') {
-            res.status(400).json({ message: 'Image data is required' });
-            return;
-        }
-        const worker = await Worker_1.default.findById(workerId);
-        if (!worker) {
-            res.status(404).json({ message: 'Worker not found' });
-            return;
-        }
-        // Convert base64 to buffer and upload to Cloudinary
-        const base64Data = imageData.replace(/^data:image\/\w+;base64,/, '');
-        const buffer = Buffer.from(base64Data, 'base64');
-        const { url } = await (0, cloudinary_service_1.uploadBufferToCloudinary)(buffer, 'ekyc-captures');
-        worker.ekycCaptures.push({ url, capturedAt: new Date() });
-        await worker.save();
-        res.json({ message: 'Capture saved', url });
-    }
-    catch (error) {
-        console.error('Save eKYC capture error:', error);
-        res.status(500).json({ message: 'Server error' });
-    }
-};
-exports.saveEkycCapture = saveEkycCapture;
 // ─── Withdrawals Management ───
 const getWithdrawals = async (_req, res) => {
     try {
@@ -1459,8 +1435,11 @@ const getAllWorkers = async (req, res) => {
     try {
         const { status, search } = req.query;
         const filter = {};
-        if (status && status !== 'all')
-            filter.accountStatus = status;
+        // `status` now filters on the verification lifecycle; 'live' still means a fully
+        // onboarded worker (verified + profile completed).
+        if (status && status !== 'all') {
+            filter[status === 'live' ? 'accountStatus' : 'verificationStatus'] = status;
+        }
         if (search) {
             const s = String(search);
             filter.$or = [
@@ -1469,14 +1448,14 @@ const getAllWorkers = async (req, res) => {
             ];
         }
         const workers = await Worker_1.default.find(filter)
-            .select('fullName phone profileImage accountStatus isActive categories rating totalWorkDone totalEarnings balance block createdAt')
+            .select('fullName phone whatsappNumber profileImage accountStatus verificationStatus isActive categories rating totalWorkDone totalEarnings balance block createdAt')
             .populate('categories', 'name')
             .sort({ createdAt: -1 });
         const [statTotal, statLive, statPending, statRejected] = await Promise.all([
             Worker_1.default.countDocuments(),
             Worker_1.default.countDocuments({ accountStatus: 'live' }),
-            Worker_1.default.countDocuments({ accountStatus: { $in: ['test', 'ekyc_pending', 'ekyc_done'] } }),
-            Worker_1.default.countDocuments({ accountStatus: 'rejected' }),
+            Worker_1.default.countDocuments(AWAITING_VERIFICATION_FILTER),
+            Worker_1.default.countDocuments({ verificationStatus: 'rejected' }),
         ]);
         const stats = { total: statTotal, live: statLive, pending: statPending, rejected: statRejected };
         res.json({ workers, stats });
@@ -1532,7 +1511,7 @@ const checkAadhaarDuplicate = async (req, res) => {
             }
             if (w.aadhaarNumberHash) {
                 const matches = await Worker_1.default.find({ aadhaarNumberHash: w.aadhaarNumberHash, _id: { $ne: w._id } })
-                    .select('fullName phone accountStatus createdAt')
+                    .select('fullName phone accountStatus verificationStatus createdAt')
                     .limit(10)
                     .lean();
                 res.json({
@@ -1567,7 +1546,7 @@ const checkAadhaarDuplicate = async (req, res) => {
             query._id = { $ne: excludeWorkerId };
         }
         const matches = await Worker_1.default.find(query)
-            .select('fullName phone accountStatus createdAt')
+            .select('fullName phone accountStatus verificationStatus createdAt')
             .limit(10)
             .lean();
         res.json({

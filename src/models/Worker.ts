@@ -1,7 +1,28 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { blockSchemaDefinition, type IBlockInfo } from './User';
 
-export type WorkerAccountStatus = 'test' | 'ekyc_pending' | 'ekyc_done' | 'approved' | 'rejected' | 'live';
+// Account lifecycle only. Verification lives in `verificationStatus` — a worker goes
+// 'live' once they are verification-approved AND have completed their profile.
+export type WorkerAccountStatus = 'test' | 'live';
+
+// The single source of truth for the manual verification workflow.
+//  unsubmitted → worker is still onboarding (hasn't submitted for verification yet)
+//  pending     → submitted, waiting for an admin to contact + decide
+//  approved    → admin verified the worker over a call
+//  rejected    → admin rejected with a mandatory reason
+//  resubmitted → worker fixed the rejection reason and submitted again
+export type WorkerVerificationStatus = 'unsubmitted' | 'pending' | 'approved' | 'rejected' | 'resubmitted';
+
+// Preferred window for the admin's manual verification call.
+export type VerificationSlot = '10:00-13:00' | '13:00-16:00' | '16:00-20:00';
+
+export const VERIFICATION_SLOTS: VerificationSlot[] = ['10:00-13:00', '13:00-16:00', '16:00-20:00'];
+
+export const VERIFICATION_SLOT_LABELS: Record<VerificationSlot, string> = {
+  '10:00-13:00': '10:00 AM – 1:00 PM',
+  '13:00-16:00': '1:00 PM – 4:00 PM',
+  '16:00-20:00': '4:00 PM – 8:00 PM',
+};
 
 export interface IBankDetails {
   holderName: string;
@@ -39,32 +60,18 @@ export interface IWorker extends Document {
   aadhaarName?: string;
   aadhaarDob?: string;
   accountStatus: WorkerAccountStatus;
-  ekycRejectionReason?: string;
-  videoKycIncompleteReason?: string;
-  videoKycRetryAvailableAt?: Date | null;
-  // After a live video-KYC call ends, the admin must mark it completed/incomplete.
-  // This flag survives admin page reloads/drops so the decision is never lost.
-  videoKycAwaitingResult?: boolean;
-  videoKycCallEndedAt?: Date | null;
-  // How many times the worker has started a Video KYC call, and when the last one
-  // rang — shown to admins so an unanswered/repeated call is visible.
-  videoKycCallAttempts?: number;
-  lastVideoKycCallAt?: Date | null;
-  ekycCaptures: { url: string; capturedAt: Date }[];
-  // Latest consent — worker ticked the consent box on the pre-call readiness screen.
-  videoKycConsentAt?: Date | null;
-  // Append-only professional audit trail: one entry per completed/incomplete decision,
-  // recording what the agent actually verified on the call (for disputes / compliance).
-  videoKycAudit?: {
-    decidedAt: Date;
-    agentId?: mongoose.Types.ObjectId | null;
-    agentName?: string;
-    result: 'completed' | 'incomplete';
-    reason?: string;
-    consentAt?: Date | null;
-    livenessAsked: string[];
-    checklist: { liveness: boolean; faceMatch: boolean; docsMatch: boolean; identity: boolean };
-  }[];
+  // ── Manual verification workflow ──
+  verificationStatus: WorkerVerificationStatus;
+  // Worker's preferred window for the admin's verification call.
+  verificationSlot?: VerificationSlot | null;
+  // Active WhatsApp number the admin will use to reach the worker (10-digit Indian).
+  whatsappNumber?: string;
+  // Mandatory when the admin rejects — shown to the worker so they can fix and resubmit.
+  rejectionReason?: string;
+  verifiedBy?: mongoose.Types.ObjectId | null;
+  verifiedAt?: Date | null;
+  verificationSubmittedAt?: Date | null;
+  resubmittedAt?: Date | null;
   profileCompleted: boolean;
   location: {
     type: string;
@@ -99,6 +106,19 @@ export interface IWorker extends Document {
   updatedAt: Date;
 }
 
+// Live/dynamic worker location. `coordinates` is required so the subdocument can never
+// exist as an incomplete GeoJSON Point — the whole field is simply absent until the
+// worker reports a position (see `currentLocation` below).
+const currentLocationSchema = new Schema(
+  {
+    type: { type: String, enum: ['Point'], default: 'Point' },
+    coordinates: { type: [Number], required: true },
+    address: { type: String, default: '' },
+    updatedAt: { type: Date, default: null },
+  },
+  { _id: false },
+);
+
 const workerSchema = new Schema<IWorker>(
   {
     fullName: { type: String, required: true, trim: true },
@@ -116,48 +136,36 @@ const workerSchema = new Schema<IWorker>(
     aadhaarDob: { type: String, default: '' },
     accountStatus: {
       type: String,
-      enum: ['test', 'ekyc_pending', 'ekyc_done', 'approved', 'rejected', 'live'],
+      enum: ['test', 'live'],
       default: 'test',
     },
-    ekycRejectionReason: { type: String },
-    videoKycIncompleteReason: { type: String, default: '' },
-    videoKycRetryAvailableAt: { type: Date, default: null },
-    videoKycAwaitingResult: { type: Boolean, default: false },
-    videoKycCallEndedAt: { type: Date, default: null },
-    videoKycCallAttempts: { type: Number, default: 0 },
-    lastVideoKycCallAt: { type: Date, default: null },
-    ekycCaptures: [{
-      url: { type: String, required: true },
-      capturedAt: { type: Date, default: Date.now },
-    }],
-    videoKycConsentAt: { type: Date, default: null },
-    videoKycAudit: [{
-      decidedAt: { type: Date, default: Date.now },
-      agentId: { type: Schema.Types.ObjectId, ref: 'Admin', default: null },
-      agentName: { type: String, default: '' },
-      result: { type: String, enum: ['completed', 'incomplete'], required: true },
-      reason: { type: String, default: '' },
-      consentAt: { type: Date, default: null },
-      livenessAsked: { type: [String], default: [] },
-      checklist: {
-        liveness: { type: Boolean, default: false },
-        faceMatch: { type: Boolean, default: false },
-        docsMatch: { type: Boolean, default: false },
-        identity: { type: Boolean, default: false },
-      },
-    }],
+    verificationStatus: {
+      type: String,
+      enum: ['unsubmitted', 'pending', 'approved', 'rejected', 'resubmitted'],
+      default: 'unsubmitted',
+    },
+    verificationSlot: {
+      type: String,
+      enum: [...VERIFICATION_SLOTS, null],
+      default: null,
+    },
+    whatsappNumber: { type: String, default: '', trim: true },
+    rejectionReason: { type: String, default: '' },
+    verifiedBy: { type: Schema.Types.ObjectId, ref: 'Admin', default: null },
+    verifiedAt: { type: Date, default: null },
+    verificationSubmittedAt: { type: Date, default: null },
+    resubmittedAt: { type: Date, default: null },
     profileCompleted: { type: Boolean, default: false },
     location: {
       type: { type: String, enum: ['Point'], default: 'Point' },
       coordinates: { type: [Number], default: [0, 0] },
       address: { type: String, default: '' },
     },
-    currentLocation: {
-      type: { type: String, enum: ['Point'], default: 'Point' },
-      coordinates: { type: [Number], default: undefined },
-      address: { type: String, default: '' },
-      updatedAt: { type: Date, default: null },
-    },
+    // Defined as a sub-schema with `default: undefined` so the field stays ABSENT
+    // until the worker actually reports a live location. Declaring it inline would
+    // materialise `{ type: 'Point' }` with no coordinates on every insert, which the
+    // 2dsphere index rejects ("Can't extract geo keys … Point must be an array").
+    currentLocation: { type: currentLocationSchema, default: undefined },
     categories: [{ type: Schema.Types.ObjectId, ref: 'Category' }],
     skills: [{
       category: { type: Schema.Types.ObjectId, ref: 'Category', required: true },
@@ -196,9 +204,12 @@ const workerSchema = new Schema<IWorker>(
 workerSchema.index({ aadhaarNumberHash: 1 }, { sparse: true });
 workerSchema.index({ location: '2dsphere' });
 workerSchema.index({ currentLocation: '2dsphere' });
-workerSchema.index({ phone: 1 });
-workerSchema.index({ googleId: 1 });
+// NOTE: `phone` (unique) and `googleId` (sparse) are already indexed by their field
+// definitions above — re-declaring them here created duplicate index definitions that
+// broke `syncIndexes()` with an IndexKeySpecsConflict and spammed startup warnings.
 workerSchema.index({ accountStatus: 1 });
 workerSchema.index({ isActive: 1 });
+// Admin verification queue: filter by status, oldest submission first.
+workerSchema.index({ verificationStatus: 1, verificationSubmittedAt: 1 });
 
 export default mongoose.model<IWorker>('Worker', workerSchema);

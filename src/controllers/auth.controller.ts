@@ -254,12 +254,14 @@ const toWorkerAuthPayload = (worker: {
   phone: string;
   email?: string;
   accountStatus: string;
+  verificationStatus?: string;
+  verificationSlot?: string | null;
+  whatsappNumber?: string;
+  rejectionReason?: string;
   profileCompleted: boolean;
   isActive: boolean;
   balance: number;
   profileImage?: string;
-  videoKycIncompleteReason?: string;
-  videoKycRetryAvailableAt?: Date | null;
   aadhaarFront?: string;
   aadhaarBack?: string;
   skills?: unknown[];
@@ -270,8 +272,10 @@ const toWorkerAuthPayload = (worker: {
   email: worker.email,
   profileImage: worker.profileImage,
   accountStatus: worker.accountStatus,
-  videoKycIncompleteReason: worker.videoKycIncompleteReason,
-  videoKycRetryAvailableAt: worker.videoKycRetryAvailableAt,
+  verificationStatus: worker.verificationStatus,
+  verificationSlot: worker.verificationSlot,
+  whatsappNumber: worker.whatsappNumber,
+  rejectionReason: worker.rejectionReason,
   profileCompleted: worker.profileCompleted,
   isActive: worker.isActive,
   balance: worker.balance,
@@ -1302,35 +1306,3 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
-// ─── Verify Video KYC Token (public endpoint — browser page uses this without auth header) ───
-export const verifyVideoKycToken = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const tokenParam = req.params.token;
-    if (!tokenParam || typeof tokenParam !== 'string') { res.status(400).json({ message: 'Token required' }); return; }
-
-    const decoded = jwt.verify(tokenParam, env.JWT_SECRET) as unknown as { id: string; purpose: string };
-    if (decoded.purpose !== 'video-kyc') { res.status(401).json({ message: 'Invalid token' }); return; }
-
-    const worker = await Worker.findById(decoded.id).select('fullName phone accountStatus videoKycRetryAvailableAt');
-    if (!worker) { res.status(404).json({ message: 'Worker not found' }); return; }
-
-    // The video-KYC page is opened standalone from a token link (often inside the
-    // app's in-app browser) with NO logged-in session, so it has no JWT for the
-    // realtime socket — whose handshake middleware rejects tokenless connections,
-    // causing "Connection timed out". The verified video-KYC token already proves
-    // this worker's identity, so hand back a short-lived worker access token the
-    // page uses purely to authenticate its socket.
-    const socketToken = generateAccessToken({ id: worker._id.toString(), role: 'worker' });
-
-    res.json({
-      valid: true,
-      workerId: worker._id,
-      fullName: worker.fullName,
-      phone: worker.phone,
-      accountStatus: worker.accountStatus,
-      socketToken,
-    });
-  } catch {
-    res.status(401).json({ message: 'Token expired or invalid' });
-  }
-};

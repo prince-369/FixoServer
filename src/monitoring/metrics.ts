@@ -65,12 +65,6 @@ const socketEventsTotal = new Counter({
   registers: [metricsRegistry],
 });
 
-const socketEkycRoomsActive = new Gauge({
-  name: `${METRICS_PREFIX}socket_ekyc_rooms_active`,
-  help: 'Current active eKYC room count.',
-  registers: [metricsRegistry],
-});
-
 let connectedSocketClientsCount = 0;
 
 const normalizeRoutePath = (path: string): string => {
@@ -170,11 +164,6 @@ export const recordSocketDisconnected = (reason = 'unknown'): void => {
 export const recordSocketEvent = (eventName: string): void => {
   if (!env.METRICS_ENABLED) return;
   socketEventsTotal.inc({ event_name: sanitizeLabelValue(eventName) });
-};
-
-export const setActiveEkycRooms = (count: number): void => {
-  if (!env.METRICS_ENABLED) return;
-  socketEkycRoomsActive.set(Math.max(0, count));
 };
 
 export { metricsRegistry };

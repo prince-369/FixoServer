@@ -31,7 +31,7 @@ exports.PERMISSIONS = [
     { key: 'reward_claims', label: 'Reward Claims', scope: 'customer', route: '/admin/reward-claims' },
     // Worker side
     { key: 'workers', label: 'Workers', scope: 'worker', route: '/admin/workers' },
-    { key: 'kyc', label: 'KYC Verification', scope: 'worker', route: '/admin/ekyc' },
+    { key: 'kyc', label: 'Worker Verification', scope: 'worker', route: '/admin/verification' },
     { key: 'withdrawals', label: 'Withdrawals', scope: 'worker', route: '/admin/withdrawals' },
     { key: 'worker_dues', label: 'Cash Tracking / Dues', scope: 'worker', route: '/admin/worker-dues' },
     { key: 'support_worker', label: 'Worker Support', scope: 'worker' },
@@ -78,7 +78,7 @@ exports.ROLES = [
     {
         role: 'kyc_officer',
         label: 'KYC Verification Officer',
-        description: 'Reviews Aadhaar / PAN / selfie / video KYC and approves or rejects.',
+        description: 'Reviews Aadhaar and worker details, calls the worker, then approves or rejects.',
         defaults: ['kyc', 'workers', 'skill_review'],
     },
     {

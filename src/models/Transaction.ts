@@ -42,7 +42,7 @@ const transactionSchema = new Schema<ITransaction>(
   { timestamps: true }
 );
 
-transactionSchema.index({ tid: 1 });
+// `tid` is already indexed by its `unique: true` field definition.
 transactionSchema.index({ user: 1, type: 1 });
 transactionSchema.index({ worker: 1, type: 1 });
 

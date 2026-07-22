@@ -33,8 +33,24 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.VERIFICATION_SLOT_LABELS = exports.VERIFICATION_SLOTS = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
 const User_1 = require("./User");
+exports.VERIFICATION_SLOTS = ['10:00-13:00', '13:00-16:00', '16:00-20:00'];
+exports.VERIFICATION_SLOT_LABELS = {
+    '10:00-13:00': '10:00 AM – 1:00 PM',
+    '13:00-16:00': '1:00 PM – 4:00 PM',
+    '16:00-20:00': '4:00 PM – 8:00 PM',
+};
+// Live/dynamic worker location. `coordinates` is required so the subdocument can never
+// exist as an incomplete GeoJSON Point — the whole field is simply absent until the
+// worker reports a position (see `currentLocation` below).
+const currentLocationSchema = new mongoose_1.Schema({
+    type: { type: String, enum: ['Point'], default: 'Point' },
+    coordinates: { type: [Number], required: true },
+    address: { type: String, default: '' },
+    updatedAt: { type: Date, default: null },
+}, { _id: false });
 const workerSchema = new mongoose_1.Schema({
     fullName: { type: String, required: true, trim: true },
     phone: { type: String, required: true, unique: true, trim: true },
@@ -51,48 +67,36 @@ const workerSchema = new mongoose_1.Schema({
     aadhaarDob: { type: String, default: '' },
     accountStatus: {
         type: String,
-        enum: ['test', 'ekyc_pending', 'ekyc_done', 'approved', 'rejected', 'live'],
+        enum: ['test', 'live'],
         default: 'test',
     },
-    ekycRejectionReason: { type: String },
-    videoKycIncompleteReason: { type: String, default: '' },
-    videoKycRetryAvailableAt: { type: Date, default: null },
-    videoKycAwaitingResult: { type: Boolean, default: false },
-    videoKycCallEndedAt: { type: Date, default: null },
-    videoKycCallAttempts: { type: Number, default: 0 },
-    lastVideoKycCallAt: { type: Date, default: null },
-    ekycCaptures: [{
-            url: { type: String, required: true },
-            capturedAt: { type: Date, default: Date.now },
-        }],
-    videoKycConsentAt: { type: Date, default: null },
-    videoKycAudit: [{
-            decidedAt: { type: Date, default: Date.now },
-            agentId: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Admin', default: null },
-            agentName: { type: String, default: '' },
-            result: { type: String, enum: ['completed', 'incomplete'], required: true },
-            reason: { type: String, default: '' },
-            consentAt: { type: Date, default: null },
-            livenessAsked: { type: [String], default: [] },
-            checklist: {
-                liveness: { type: Boolean, default: false },
-                faceMatch: { type: Boolean, default: false },
-                docsMatch: { type: Boolean, default: false },
-                identity: { type: Boolean, default: false },
-            },
-        }],
+    verificationStatus: {
+        type: String,
+        enum: ['unsubmitted', 'pending', 'approved', 'rejected', 'resubmitted'],
+        default: 'unsubmitted',
+    },
+    verificationSlot: {
+        type: String,
+        enum: [...exports.VERIFICATION_SLOTS, null],
+        default: null,
+    },
+    whatsappNumber: { type: String, default: '', trim: true },
+    rejectionReason: { type: String, default: '' },
+    verifiedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Admin', default: null },
+    verifiedAt: { type: Date, default: null },
+    verificationSubmittedAt: { type: Date, default: null },
+    resubmittedAt: { type: Date, default: null },
     profileCompleted: { type: Boolean, default: false },
     location: {
         type: { type: String, enum: ['Point'], default: 'Point' },
         coordinates: { type: [Number], default: [0, 0] },
         address: { type: String, default: '' },
     },
-    currentLocation: {
-        type: { type: String, enum: ['Point'], default: 'Point' },
-        coordinates: { type: [Number], default: undefined },
-        address: { type: String, default: '' },
-        updatedAt: { type: Date, default: null },
-    },
+    // Defined as a sub-schema with `default: undefined` so the field stays ABSENT
+    // until the worker actually reports a live location. Declaring it inline would
+    // materialise `{ type: 'Point' }` with no coordinates on every insert, which the
+    // 2dsphere index rejects ("Can't extract geo keys … Point must be an array").
+    currentLocation: { type: currentLocationSchema, default: undefined },
     categories: [{ type: mongoose_1.Schema.Types.ObjectId, ref: 'Category' }],
     skills: [{
             category: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Category', required: true },
@@ -128,9 +132,12 @@ const workerSchema = new mongoose_1.Schema({
 workerSchema.index({ aadhaarNumberHash: 1 }, { sparse: true });
 workerSchema.index({ location: '2dsphere' });
 workerSchema.index({ currentLocation: '2dsphere' });
-workerSchema.index({ phone: 1 });
-workerSchema.index({ googleId: 1 });
+// NOTE: `phone` (unique) and `googleId` (sparse) are already indexed by their field
+// definitions above — re-declaring them here created duplicate index definitions that
+// broke `syncIndexes()` with an IndexKeySpecsConflict and spammed startup warnings.
 workerSchema.index({ accountStatus: 1 });
 workerSchema.index({ isActive: 1 });
+// Admin verification queue: filter by status, oldest submission first.
+workerSchema.index({ verificationStatus: 1, verificationSubmittedAt: 1 });
 exports.default = mongoose_1.default.model('Worker', workerSchema);
 //# sourceMappingURL=Worker.js.map

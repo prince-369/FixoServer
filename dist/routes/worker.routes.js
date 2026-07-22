@@ -15,13 +15,14 @@ router.use(auth_middleware_1.protect, (0, auth_middleware_1.authorize)('worker')
 router.use(block_middleware_1.blockGuard);
 router.get('/profile', worker_controller_1.getProfile);
 router.put('/profile', upload_middleware_1.uploadSingle, worker_controller_1.updateProfile);
-router.post('/ekyc/re-request', mutationGuard, upload_middleware_1.uploadAadhaar, worker_controller_1.reRequestEKYC);
-router.post('/video-kyc-token', mutationGuard, worker_controller_1.generateVideoKycToken);
 router.post('/complete-profile', upload_middleware_1.uploadSingle, worker_controller_1.completeProfile);
-// Post-signup onboarding (account-first): upload aadhaar, then pick skills, then KYC.
+// Post-signup onboarding (account-first): aadhaar → skills → verification schedule → submit.
 router.post('/onboarding/aadhaar/validate', upload_middleware_1.uploadScanImage, worker_controller_1.validateAadhaarScan);
 router.put('/onboarding/aadhaar', mutationGuard, upload_middleware_1.uploadAadhaar, worker_controller_1.submitOnboardingAadhaar);
 router.put('/onboarding/skills', mutationGuard, worker_controller_1.submitOnboardingSkills);
+// Manual verification: submit once, resubmit (with editable details) after a rejection.
+router.post('/verification/submit', mutationGuard, worker_controller_1.submitVerification);
+router.post('/verification/resubmit', mutationGuard, upload_middleware_1.uploadAadhaar, worker_controller_1.resubmitVerification);
 router.put('/toggle-active', worker_controller_1.toggleActive);
 router.put('/location', worker_controller_1.updateLocation);
 router.put('/current-location', worker_controller_1.updateCurrentLocation);

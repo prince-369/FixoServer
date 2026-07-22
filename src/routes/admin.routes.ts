@@ -10,13 +10,11 @@ import {
   getDashboard,
   getAdminBootstrapStatus,
   getPendingAdminBadges,
-  getPendingEKYC,
-  getWorkerEKYCDetails,
-  updateVideoKycResult,
+  getVerificationQueue,
+  getWorkerVerificationDetails,
   approveWorker,
   checkAadhaarDuplicate,
   rejectWorker,
-  saveEkycCapture,
   getWithdrawals,
   completeWithdrawal,
   declineWithdrawal,
@@ -103,7 +101,7 @@ router.delete('/staff/:id', requireSuperAdmin, deleteStaff);
 
 // ─── Per-section permission gates (super admin always passes) ───
 router.use('/dashboard', requirePermission('dashboard'));
-router.use('/ekyc', requirePermission('kyc'));
+router.use('/verification', requirePermission('kyc'));
 router.use('/withdrawals', requirePermission('withdrawals'));
 router.use('/categories', requirePermission('categories'));
 router.use('/banners', requirePermission('banners'));
@@ -125,13 +123,11 @@ router.get('/dashboard', getDashboard);
 router.get('/bootstrap-status', getAdminBootstrapStatus);
 router.get('/pending-badges', getPendingAdminBadges);
 
-// EKYC
-router.get('/ekyc/pending', getPendingEKYC);
-router.get('/ekyc/:workerId', getWorkerEKYCDetails);
-router.post('/ekyc/:workerId/video-result', mutationGuard, updateVideoKycResult);
-router.post('/ekyc/:workerId/approve', mutationGuard, approveWorker);
-router.post('/ekyc/:workerId/reject', mutationGuard, rejectWorker);
-router.post('/ekyc/:workerId/capture', saveEkycCapture);
+// Worker verification queue (manual — admin contacts the worker outside the app)
+router.get('/verification/queue', getVerificationQueue);
+router.get('/verification/:workerId', getWorkerVerificationDetails);
+router.post('/verification/:workerId/approve', mutationGuard, approveWorker);
+router.post('/verification/:workerId/reject', mutationGuard, rejectWorker);
 
 // Withdrawals
 router.get('/withdrawals', getWithdrawals);

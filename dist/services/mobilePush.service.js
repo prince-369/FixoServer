@@ -81,14 +81,14 @@ const buildNotificationUrl = (recipientModel, type, data) => {
     const bookingId = typeof data?.bookingId === 'string' ? data.bookingId : '';
     const ticketId = typeof data?.ticketId === 'string' ? data.ticketId : '';
     if (recipientModel === 'Admin') {
-        if (type.startsWith('ekyc_'))
-            return '/admin/ekyc';
+        if (type.startsWith('verification_'))
+            return '/admin/verification';
         if (ticketId)
             return '/admin/help-support';
         return '/admin/notifications';
     }
     if (recipientModel === 'Worker') {
-        if (type === 'ekyc_admin_available')
+        if (type.startsWith('verification_'))
             return '/worker/complete-profile';
         if (ticketId)
             return '/worker/help-support';

@@ -36,11 +36,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.verifyVideoKycToken = exports.logout = exports.refresh = exports.setPasswordForOAuthUser = exports.sendPasswordSetupOtp = exports.getMe = exports.changePassword = exports.resetPassword = exports.verifyOTPHandler = exports.forgotPassword = exports.loginAdmin = exports.loginWorker = exports.registerWorker = exports.registerWorkerWithGoogle = exports.googleAuthWorker = exports.loginCustomer = exports.completeGoogleRegistration = exports.googleAuthCustomer = exports.registerCustomer = void 0;
+exports.logout = exports.refresh = exports.setPasswordForOAuthUser = exports.sendPasswordSetupOtp = exports.getMe = exports.changePassword = exports.resetPassword = exports.verifyOTPHandler = exports.forgotPassword = exports.loginAdmin = exports.loginWorker = exports.registerWorker = exports.registerWorkerWithGoogle = exports.googleAuthWorker = exports.loginCustomer = exports.completeGoogleRegistration = exports.googleAuthCustomer = exports.registerCustomer = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const crypto_1 = __importDefault(require("crypto"));
 const axios_1 = __importDefault(require("axios"));
-const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const User_1 = __importDefault(require("../models/User"));
 const Worker_1 = __importDefault(require("../models/Worker"));
 const Admin_1 = __importDefault(require("../models/Admin"));
@@ -221,8 +220,10 @@ const toWorkerAuthPayload = (worker) => ({
     email: worker.email,
     profileImage: worker.profileImage,
     accountStatus: worker.accountStatus,
-    videoKycIncompleteReason: worker.videoKycIncompleteReason,
-    videoKycRetryAvailableAt: worker.videoKycRetryAvailableAt,
+    verificationStatus: worker.verificationStatus,
+    verificationSlot: worker.verificationSlot,
+    whatsappNumber: worker.whatsappNumber,
+    rejectionReason: worker.rejectionReason,
     profileCompleted: worker.profileCompleted,
     isActive: worker.isActive,
     balance: worker.balance,
@@ -1191,43 +1192,4 @@ const logout = async (req, res) => {
     }
 };
 exports.logout = logout;
-// ─── Verify Video KYC Token (public endpoint — browser page uses this without auth header) ───
-const verifyVideoKycToken = async (req, res) => {
-    try {
-        const tokenParam = req.params.token;
-        if (!tokenParam || typeof tokenParam !== 'string') {
-            res.status(400).json({ message: 'Token required' });
-            return;
-        }
-        const decoded = jsonwebtoken_1.default.verify(tokenParam, env_1.default.JWT_SECRET);
-        if (decoded.purpose !== 'video-kyc') {
-            res.status(401).json({ message: 'Invalid token' });
-            return;
-        }
-        const worker = await Worker_1.default.findById(decoded.id).select('fullName phone accountStatus videoKycRetryAvailableAt');
-        if (!worker) {
-            res.status(404).json({ message: 'Worker not found' });
-            return;
-        }
-        // The video-KYC page is opened standalone from a token link (often inside the
-        // app's in-app browser) with NO logged-in session, so it has no JWT for the
-        // realtime socket — whose handshake middleware rejects tokenless connections,
-        // causing "Connection timed out". The verified video-KYC token already proves
-        // this worker's identity, so hand back a short-lived worker access token the
-        // page uses purely to authenticate its socket.
-        const socketToken = (0, generateToken_1.generateAccessToken)({ id: worker._id.toString(), role: 'worker' });
-        res.json({
-            valid: true,
-            workerId: worker._id,
-            fullName: worker.fullName,
-            phone: worker.phone,
-            accountStatus: worker.accountStatus,
-            socketToken,
-        });
-    }
-    catch {
-        res.status(401).json({ message: 'Token expired or invalid' });
-    }
-};
-exports.verifyVideoKycToken = verifyVideoKycToken;
 //# sourceMappingURL=auth.controller.js.map
