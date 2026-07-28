@@ -12,6 +12,7 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const crypto_1 = require("crypto");
 const swagger_ui_express_1 = __importDefault(require("swagger-ui-express"));
 const env_1 = __importDefault(require("./config/env"));
+const logger_1 = __importDefault(require("./utils/logger"));
 const error_middleware_1 = require("./middlewares/error.middleware");
 const rateLimit_middleware_1 = require("./middlewares/rateLimit.middleware");
 const metrics_1 = require("./monitoring/metrics");
@@ -65,15 +66,18 @@ app.use((req, res, next) => {
     res.on('finish', () => {
         const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1000000;
         if (res.statusCode >= 500 || elapsedMs >= env_1.default.SLOW_REQUEST_THRESHOLD_MS) {
-            console.log(JSON.stringify({
-                level: res.statusCode >= 500 ? 'error' : 'warn',
+            // `req.path` is the pathname WITHOUT the query string (which can carry tokens).
+            const meta = {
                 requestId,
                 method: req.method,
-                path: req.originalUrl,
+                path: req.path,
                 statusCode: res.statusCode,
                 durationMs: Math.round(elapsedMs * 100) / 100,
-                ip: req.ip,
-            }));
+            };
+            if (res.statusCode >= 500)
+                logger_1.default.error('Request failed', meta);
+            else
+                logger_1.default.warn('Slow request', meta);
         }
     });
     res.setTimeout(env_1.default.REQUEST_TIMEOUT_MS, () => {

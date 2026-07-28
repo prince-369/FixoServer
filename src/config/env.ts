@@ -36,6 +36,10 @@ interface EnvConfig {
   MUTATION_RATE_LIMIT_MAX: number;
   IDEMPOTENCY_TTL_MS: number;
   REDIS_URL: string;
+  // Tri-state: undefined = backward-compatible (adapter enabled when REDIS_URL exists);
+  // true = attempt adapter (requires REDIS_URL, else in-memory + one warning);
+  // false = adapter disabled regardless of REDIS_URL (rate-limit Redis unaffected).
+  SOCKET_REDIS_ENABLED: boolean | undefined;
   SOCKET_PING_INTERVAL_MS: number;
   SOCKET_PING_TIMEOUT_MS: number;
   SOCKET_MAX_HTTP_BUFFER_SIZE: number;
@@ -71,6 +75,9 @@ interface EnvConfig {
   MAPCN_ROUTING_URL: string;
   JOB_STALE_BOOKING_MINUTES: number;
   JOB_CLEANUP_INTERVAL_MS: number;
+  // Effective log threshold. `src/utils/logger.ts` is authoritative and reads
+  // process.env directly; this exposes the same resolved value for reference/tooling.
+  LOG_LEVEL: 'debug' | 'info' | 'warn' | 'error' | 'silent';
 }
 
 const getRequiredEnv = (name: keyof NodeJS.ProcessEnv): string => {
@@ -105,6 +112,20 @@ const parseBooleanEnv = (name: keyof NodeJS.ProcessEnv, fallback: boolean): bool
   if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
   if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
   return fallback;
+};
+
+/**
+ * Strict tri-state boolean flag. Absent/empty → `undefined` (caller applies its own
+ * backward-compatible default); only the exact lowercase literals "true"/"false" are
+ * accepted; anything else throws a clear configuration error at startup.
+ */
+export const parseStrictBooleanEnv = (name: keyof NodeJS.ProcessEnv): boolean | undefined => {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === '') return undefined;
+  const value = raw.trim();
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  throw new Error(`Invalid ${String(name)}="${raw}". Expected exactly "true" or "false".`);
 };
 
 // The marketing site (Fixo-Landing-Page) posts the waitlist + partner forms here.
@@ -169,6 +190,17 @@ const getEnvOrDefault = (
 };
 
 const nodeEnv = (process.env.NODE_ENV as NodeEnv) || 'development';
+
+// Mirrors the resolution in src/utils/logger.ts: explicit LOG_LEVEL wins, else
+// production/test default to 'warn' and development defaults to 'debug'.
+const resolveLogLevel = (): EnvConfig['LOG_LEVEL'] => {
+  const raw = (process.env.LOG_LEVEL || '').trim().toLowerCase();
+  if (['debug', 'info', 'warn', 'error', 'silent'].includes(raw)) {
+    return raw as EnvConfig['LOG_LEVEL'];
+  }
+  return nodeEnv === 'development' ? 'debug' : 'warn';
+};
+
 const clientUrl = getEnvOrDefault('CLIENT_URL', 'http://localhost:3000', { requiredInProduction: true });
 const googleClientIds = parseGoogleClientIds();
 
@@ -207,6 +239,7 @@ const env: EnvConfig = {
   MUTATION_RATE_LIMIT_MAX: parseNumberEnv('MUTATION_RATE_LIMIT_MAX', 150, { min: 10 }),
   IDEMPOTENCY_TTL_MS: parseNumberEnv('IDEMPOTENCY_TTL_MS', 15_000, { min: 3_000 }),
   REDIS_URL: process.env.REDIS_URL || '',
+  SOCKET_REDIS_ENABLED: parseStrictBooleanEnv('SOCKET_REDIS_ENABLED'),
   SOCKET_PING_INTERVAL_MS: parseNumberEnv('SOCKET_PING_INTERVAL_MS', 20_000, { min: 5_000 }),
   SOCKET_PING_TIMEOUT_MS: parseNumberEnv('SOCKET_PING_TIMEOUT_MS', 25_000, { min: 5_000 }),
   SOCKET_MAX_HTTP_BUFFER_SIZE: parseNumberEnv('SOCKET_MAX_HTTP_BUFFER_SIZE', 1_000_000, { min: 100_000 }),
@@ -243,6 +276,7 @@ const env: EnvConfig = {
   MAPCN_ROUTING_URL: process.env.MAPCN_ROUTING_URL || 'https://router.project-osrm.org/route/v1/driving',
   JOB_STALE_BOOKING_MINUTES: parseNumberEnv('JOB_STALE_BOOKING_MINUTES', 30, { min: 1, max: 120 }),
   JOB_CLEANUP_INTERVAL_MS: parseNumberEnv('JOB_CLEANUP_INTERVAL_MS', 60_000, { min: 5_000 }),
+  LOG_LEVEL: resolveLogLevel(),
 };
 
 export default env;

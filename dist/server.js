@@ -12,6 +12,7 @@ const env_1 = __importDefault(require("./config/env"));
 const bookingCleanup_1 = require("./jobs/bookingCleanup");
 const rateLimit_middleware_1 = require("./middlewares/rateLimit.middleware");
 const adminBootstrap_service_1 = require("./services/adminBootstrap.service");
+const logger_1 = __importDefault(require("./utils/logger"));
 const server = http_1.default.createServer(app_1.default);
 let cleanupTimer = null;
 let shuttingDown = false;
@@ -33,19 +34,20 @@ const start = async () => {
     }, env_1.default.JOB_CLEANUP_INTERVAL_MS);
     cleanupTimer.unref();
     server.listen(env_1.default.PORT, () => {
-        console.log(`Fixo server running on port ${env_1.default.PORT}`);
-        console.log(`Environment: ${env_1.default.NODE_ENV}`);
-        console.log(`Trusted origins: ${env_1.default.CLIENT_URLS.join(', ')}`);
-        console.log(`Google OAuth client IDs loaded: ${env_1.default.GOOGLE_CLIENT_IDS.length ? env_1.default.GOOGLE_CLIENT_IDS.join(', ') : '(none)'}`);
+        logger_1.default.info('Fixo server started', { port: env_1.default.PORT, env: env_1.default.NODE_ENV });
+        logger_1.default.debug('Startup config', {
+            trustedOrigins: env_1.default.CLIENT_URLS,
+            googleClientIdCount: env_1.default.GOOGLE_CLIENT_IDS.length,
+        });
     });
 };
 const gracefulShutdown = async (reason) => {
     if (shuttingDown)
         return;
     shuttingDown = true;
-    console.warn(`Shutting down server (${reason})`);
+    logger_1.default.warn('Server shutting down', { reason });
     const hardTimeout = setTimeout(() => {
-        console.error('Forced shutdown after timeout');
+        logger_1.default.error('Forced shutdown after timeout');
         process.exit(1);
     }, 15000);
     hardTimeout.unref();
@@ -64,13 +66,13 @@ const gracefulShutdown = async (reason) => {
         process.exit(0);
     }
     catch (error) {
-        console.error('Graceful shutdown failed:', error);
+        logger_1.default.error('Graceful shutdown failed', { err: error });
         clearTimeout(hardTimeout);
         process.exit(1);
     }
 };
 start().catch((error) => {
-    console.error('Failed to start server:', error);
+    logger_1.default.error('Failed to start server', { err: error });
     process.exit(1);
 });
 process.on('SIGINT', () => {
@@ -80,11 +82,11 @@ process.on('SIGTERM', () => {
     void gracefulShutdown('SIGTERM');
 });
 process.on('unhandledRejection', (reason) => {
-    console.error('Unhandled promise rejection:', reason);
+    logger_1.default.error('Unhandled promise rejection', { err: reason });
     void gracefulShutdown('unhandledRejection');
 });
 process.on('uncaughtException', (error) => {
-    console.error('Uncaught exception:', error);
+    logger_1.default.error('Uncaught exception', { err: error });
     void gracefulShutdown('uncaughtException');
 });
 //# sourceMappingURL=server.js.map

@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.markSignupNotified = exports.updatePartnerRequestStatus = exports.getPartnerRequests = exports.getLaunchWaitlist = exports.submitPartnerRequest = exports.joinLaunchWaitlist = void 0;
+const logger_1 = __importDefault(require("../utils/logger"));
 const LaunchSignup_1 = __importDefault(require("../models/LaunchSignup"));
 const PartnerRequest_1 = __importDefault(require("../models/PartnerRequest"));
 const email_service_1 = require("../services/email.service");
@@ -79,7 +80,7 @@ const joinLaunchWaitlist = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Join launch waitlist error:', error);
+        logger_1.default.error('Join launch waitlist error:', { err: error });
         if (!res.headersSent)
             res.status(500).json({ message: 'Could not sign you up. Please try again.' });
     }
@@ -129,7 +130,7 @@ const submitPartnerRequest = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Submit partner request error:', error);
+        logger_1.default.error('Submit partner request error:', { err: error });
         if (!res.headersSent)
             res.status(500).json({ message: 'Could not send your request. Please try again.' });
     }
@@ -166,7 +167,7 @@ const getLaunchWaitlist = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Get launch waitlist error:', error);
+        logger_1.default.error('Get launch waitlist error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -196,7 +197,7 @@ const getPartnerRequests = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Get partner requests error:', error);
+        logger_1.default.error('Get partner requests error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -217,7 +218,7 @@ const updatePartnerRequestStatus = async (req, res) => {
         res.json({ message: 'Status updated', item });
     }
     catch (error) {
-        console.error('Update partner request status error:', error);
+        logger_1.default.error('Update partner request status error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -234,7 +235,7 @@ const markSignupNotified = async (req, res) => {
         res.json({ message: 'Updated', item });
     }
     catch (error) {
-        console.error('Mark signup notified error:', error);
+        logger_1.default.error('Mark signup notified error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };

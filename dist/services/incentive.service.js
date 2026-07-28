@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.recordCouponRedemption = exports.validateAndPriceCoupon = exports.claimWorkerBonusTier = exports.notifyUnlockedBonusTiers = exports.getCustomerEligibleCount = exports.audit = void 0;
+const logger_1 = __importDefault(require("../utils/logger"));
 const Booking_1 = __importDefault(require("../models/Booking"));
 const Transaction_1 = __importDefault(require("../models/Transaction"));
 const CouponCampaign_1 = __importDefault(require("../models/CouponCampaign"));
@@ -32,7 +33,7 @@ const audit = async (params) => {
     }
     catch (error) {
         // Audit must never break a business flow.
-        console.error('Incentive audit error:', error);
+        logger_1.default.error('Incentive audit failed', { err: error });
     }
 };
 exports.audit = audit;
@@ -104,7 +105,7 @@ const notifyUnlockedBonusTiers = async (worker) => {
         }
     }
     catch (error) {
-        console.error('notifyUnlockedBonusTiers error:', error);
+        logger_1.default.error('notifyUnlockedBonusTiers failed', { err: error });
     }
 };
 exports.notifyUnlockedBonusTiers = notifyUnlockedBonusTiers;
@@ -242,7 +243,7 @@ const recordCouponRedemption = async (params) => {
     catch (err) {
         if (err.code === 11000)
             return; // already recorded for this booking
-        console.error('recordCouponRedemption error:', err);
+        logger_1.default.error('recordCouponRedemption failed', { err });
         return;
     }
     // Atomically bump the global counters, but ONLY while the coupon is still

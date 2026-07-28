@@ -1,6 +1,7 @@
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getMessaging, type MulticastMessage } from 'firebase-admin/messaging';
 import env from '../config/env';
+import logger from '../utils/logger';
 import MobilePushToken from '../models/MobilePushToken';
 
 type RecipientModel = 'User' | 'Worker' | 'Admin';
@@ -77,7 +78,7 @@ const ensureFirebaseConfigured = (): boolean => {
   const serviceAccount = getServiceAccountConfig();
   if (!serviceAccount) {
     if (!firebaseConfigWarningShown) {
-      console.warn('Mobile push is enabled but Firebase credentials are missing. Skipping mobile push delivery.');
+      logger.warn('Mobile push enabled but Firebase credentials missing; skipping delivery');
       firebaseConfigWarningShown = true;
     }
     return false;
@@ -97,7 +98,7 @@ const ensureFirebaseConfigured = (): boolean => {
     firebaseConfigured = true;
     return true;
   } catch (error) {
-    console.error('Failed to initialize Firebase Admin for mobile push:', error);
+    logger.error('Failed to initialize Firebase Admin for mobile push', { err: error });
     return false;
   }
 };
@@ -220,7 +221,8 @@ export const sendMobilePushNotification = async (params: NotificationMobilePushP
         inactiveTokens.push(token);
       }
 
-      console.error('Mobile push send error:', code, response.error?.message || 'Unknown error');
+      // FCM error code is the safe diagnostic; the raw message isn't logged.
+      logger.warn('Mobile push send failed', { code });
     });
   }
 

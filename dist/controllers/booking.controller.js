@@ -13,6 +13,7 @@ const generatePin_1 = require("../utils/generatePin");
 const generateTID_1 = require("../utils/generateTID");
 const Transaction_1 = __importDefault(require("../models/Transaction"));
 const socket_1 = require("../socket");
+const logger_1 = __importDefault(require("../utils/logger"));
 const incentive_service_1 = require("../services/incentive.service");
 const RAZORPAY_SUCCESS_EVENTS = new Set(['payment.captured', 'order.paid']);
 const WORKER_SEARCH_RADIUS_METERS = 10000;
@@ -45,21 +46,33 @@ const isGeoIndexMissingError = (error) => {
         message.includes('unable to find index') ||
         message.includes('2dsphere index'));
 };
+// Eligibility parity with /worker/work-requests: an eligible worker's effective location
+// is `currentLocation ?? location`. A single $near query can only target one indexed
+// field, and $or+$near is illegal — so we run two indexed queries and merge:
+//   Q1: workers WITH a live currentLocation, matched on the currentLocation 2dsphere.
+//   Q2: workers WITHOUT currentLocation, matched on the registered location 2dsphere.
+// Both apply the same eligibility filters. No new index; both fields are already 2dsphere.
 const findNearbyWorkers = async (categoryId, coordinates) => {
-    return Worker_1.default.find({
-        accountStatus: 'live',
-        isActive: true,
-        categories: categoryId,
-        location: {
+    const base = { accountStatus: 'live', isActive: true, categories: categoryId };
+    const near = (field) => ({
+        [field]: {
             $nearSphere: {
-                $geometry: {
-                    type: 'Point',
-                    coordinates,
-                },
+                $geometry: { type: 'Point', coordinates },
                 $maxDistance: WORKER_SEARCH_RADIUS_METERS,
             },
         },
-    }).select('_id fullName');
+    });
+    const [withCurrent, withoutCurrent] = await Promise.all([
+        Worker_1.default.find({ ...base, ...near('currentLocation'), 'currentLocation.coordinates': { $exists: true } })
+            .select('_id fullName').lean(),
+        Worker_1.default.find({ ...base, ...near('location'), 'currentLocation.coordinates': { $exists: false } })
+            .select('_id fullName').lean(),
+    ]);
+    const merged = new Map();
+    [...withCurrent, ...withoutCurrent].forEach((w) => {
+        merged.set(String(w._id), { _id: w._id, fullName: w.fullName || '' });
+    });
+    return [...merged.values()];
 };
 const resolveMatchingWorkers = async (categoryId, coordinates) => {
     try {
@@ -69,13 +82,13 @@ const resolveMatchingWorkers = async (categoryId, coordinates) => {
         if (!isGeoIndexMissingError(error)) {
             throw error;
         }
-        console.error('Geo index missing for worker location. Attempting self-heal.', error);
+        logger_1.default.error('Geo index missing for worker location. Attempting self-heal.', { err: error });
         try {
             await Worker_1.default.collection.createIndex({ location: '2dsphere' }, { name: 'location_2dsphere' });
             return await findNearbyWorkers(categoryId, coordinates);
         }
         catch (retryError) {
-            console.error('Geo index self-heal failed. Proceeding without worker notifications.', retryError);
+            logger_1.default.error('Geo index self-heal failed. Proceeding without worker notifications.', { err: retryError });
             return [];
         }
     }
@@ -126,16 +139,16 @@ const resolveWorkerAvailabilitySummary = async (categoryId, coordinates) => {
     }
     catch (error) {
         if (!isGeoIndexMissingError(error)) {
-            console.error('Primary availability summary query failed. Falling back to manual distance scan.', error);
+            logger_1.default.error('Primary availability summary query failed. Falling back to manual distance scan.', { err: error });
             return computeWorkerAvailabilitySummaryFallback(categoryId, coordinates);
         }
-        console.error('Geo index missing while fetching worker availability summary. Attempting self-heal.', error);
+        logger_1.default.error('Geo index missing while fetching worker availability summary. Attempting self-heal.', { err: error });
         try {
             await Worker_1.default.collection.createIndex({ location: '2dsphere' }, { name: 'location_2dsphere' });
             return await fetchWorkerAvailabilitySummary(categoryId, coordinates);
         }
         catch (retryError) {
-            console.error('Geo index self-heal failed while fetching worker availability summary. Falling back to manual distance scan.', retryError);
+            logger_1.default.error('Geo index self-heal failed while fetching worker availability summary. Falling back to manual distance scan.', { err: retryError });
             return computeWorkerAvailabilitySummaryFallback(categoryId, coordinates);
         }
     }
@@ -166,7 +179,7 @@ const getWorkerAvailabilitySummary = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Get worker availability summary error:', error);
+        logger_1.default.error('Get worker availability summary error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -331,15 +344,39 @@ const createBooking = async (req, res) => {
             matchingWorkers = await resolveMatchingWorkers(String(category), coordinates);
         }
         catch (workerLookupError) {
-            console.error('Worker lookup failed after booking creation. Returning success without notifications.', workerLookupError);
+            logger_1.default.error('Worker lookup failed after booking creation. Returning success without notifications.', { err: workerLookupError });
         }
         const populated = await Booking_1.default.findById(booking._id)
             .populate('category', 'name slug image');
+        // Minimal available-job card for the broadcast — only what the worker's pre-bid card
+        // renders. Deliberately omits customer identity, payment method/status, razorpay,
+        // refund/completion/review and other unrelated booking fields. (Address + coordinates
+        // + voice note are kept because the current card shows distance, the locality and a
+        // voice-note player before a bid is placed.)
+        const cat = populated?.category;
+        const jobCard = populated ? {
+            _id: populated._id,
+            status: populated.status,
+            category: cat && typeof cat === 'object'
+                ? { _id: cat._id, name: cat.name, slug: cat.slug, image: cat.image }
+                : cat,
+            workDescription: populated.workDescription,
+            customerLocation: populated.customerLocation
+                ? { type: 'Point', coordinates: populated.customerLocation.coordinates, address: populated.customerLocation.address }
+                : undefined,
+            amount: populated.amount,
+            voiceNote: populated.voiceNote?.url
+                ? { url: populated.voiceNote.url, durationSec: populated.voiceNote.durationSec }
+                : undefined,
+            timeSlot: populated.timeSlot,
+            scheduledAt: populated.scheduledAt,
+            createdAt: populated.createdAt,
+        } : null;
         // Real-time: Notify matching workers about new work request
         const workerIds = matchingWorkers.map((w) => w._id.toString());
         if (workerIds.length > 0) {
             (0, socket_1.notifyWorkers)(workerIds, 'new_job_request', {
-                booking: populated,
+                booking: jobCard,
                 bookingId: booking._id,
                 status: booking.status,
                 message: `New ${populated?.category?.name || 'service'} request nearby!`,
@@ -361,7 +398,7 @@ const createBooking = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Create booking error:', error);
+        logger_1.default.error('Create booking error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -386,7 +423,7 @@ const getBookingBids = async (req, res) => {
         res.json({ bids: activeBids });
     }
     catch (error) {
-        console.error('Get booking bids error:', error);
+        logger_1.default.error('Get booking bids error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -470,7 +507,7 @@ const acceptBid = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Accept bid error:', error);
+        logger_1.default.error('Accept bid error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -522,7 +559,7 @@ const counterBid = async (req, res) => {
         res.json({ message: 'Counter offer sent', bid });
     }
     catch (error) {
-        console.error('Counter bid error:', error);
+        logger_1.default.error('Counter bid error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -606,7 +643,7 @@ const initiatePayment = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Initiate payment error:', error);
+        logger_1.default.error('Initiate payment error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -637,7 +674,7 @@ const verifyBookingPayment = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Verify payment error:', error);
+        logger_1.default.error('Verify payment error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -675,7 +712,7 @@ const reconcileBookingPayment = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Reconcile payment error:', error);
+        logger_1.default.error('Reconcile payment error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -720,7 +757,7 @@ const handleRazorpayWebhook = async (req, res) => {
         res.status(200).json({ received: true, reconciled: true, alreadyFinalized });
     }
     catch (error) {
-        console.error('Razorpay webhook error:', error);
+        logger_1.default.error('Razorpay webhook error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };

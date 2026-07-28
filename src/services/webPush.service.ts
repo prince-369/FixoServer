@@ -1,5 +1,6 @@
 import webpush from 'web-push';
 import env from '../config/env';
+import logger from '../utils/logger';
 import PushSubscription from '../models/PushSubscription';
 
 type RecipientModel = 'User' | 'Worker' | 'Admin';
@@ -39,7 +40,7 @@ const ensureVapidConfigured = (): boolean => {
     vapidConfigured = true;
     return true;
   } catch (error) {
-    console.error('Failed to configure web push VAPID details:', error);
+    logger.error('Failed to configure web push VAPID details', { err: error });
     return false;
   }
 };
@@ -130,7 +131,7 @@ export const sendWebPushNotification = async (params: NotificationPushParams): P
         if ([404, 410].includes(statusCode)) {
           endpointsToDeactivate.push(subscription.endpoint);
         }
-        console.error('Web push send error:', error?.message || error);
+        logger.warn('Web push send failed', { err: error });
       }
     })
   );

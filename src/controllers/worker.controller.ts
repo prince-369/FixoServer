@@ -23,7 +23,8 @@ import { generateTicketNumber } from '../services/ticketNumber.service';
 import { removeBookingVoiceNote } from '../services/bookingVoice.service';
 import { verifyPayment } from '../services/payment.service';
 import env from '../config/env';
-import { notifyUser, notifyBookingRoom, notifyRole, sendNotification, sendAdminNotification } from '../socket';
+import { notifyUser, notifyBookingRoom, notifyRole, sendNotification, sendAdminNotification, emitNotificationUnreadCount, notifyVerificationStatus } from '../socket';
+import logger from '../utils/logger';
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const WORKER_SEARCH_RADIUS_METERS = 10_000;
@@ -86,7 +87,10 @@ const findAvailableBookingsForWorker = async (worker: any, findingWorkersSince: 
   })
     .populate('category', 'name slug image')
     .populate('customer', 'fullName')
-    .sort({ createdAt: -1 });
+    .sort({ createdAt: -1 })
+    // Plain objects: getWorkRequests only spreads these into the JSON response + attaches
+    // myBid; no Mongoose document methods/virtuals are used downstream.
+    .lean();
 };
 
 const resolveAvailableBookingsForWorker = async (worker: any, findingWorkersSince: Date) => {
@@ -97,7 +101,7 @@ const resolveAvailableBookingsForWorker = async (worker: any, findingWorkersSinc
       throw error;
     }
 
-    console.error('Booking geo index missing for work requests. Attempting self-heal.', error);
+    logger.error('Booking geo index missing for work requests. Attempting self-heal.', { err: error });
     try {
       await Booking.collection.createIndex(
         { customerLocation: '2dsphere' },
@@ -105,7 +109,7 @@ const resolveAvailableBookingsForWorker = async (worker: any, findingWorkersSinc
       );
       return await findAvailableBookingsForWorker(worker, findingWorkersSince);
     } catch (retryError) {
-      console.error('Booking geo index self-heal failed. Returning without available bookings.', retryError);
+      logger.error('Booking geo index self-heal failed. Returning without available bookings.', { err: retryError });
       return [];
     }
   }
@@ -121,7 +125,7 @@ export const getProfile = async (req: Request, res: Response): Promise<void> => 
     }
     res.json({ worker });
   } catch (error) {
-    console.error('Get worker profile error:', error);
+    logger.error('Get worker profile error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -146,7 +150,7 @@ export const updateProfile = async (req: Request, res: Response): Promise<void> 
     const worker = await Worker.findByIdAndUpdate(req.user!.id, updateData, { new: true }).populate('categories');
     res.json({ message: 'Profile updated', worker });
   } catch (error) {
-    console.error('Update worker profile error:', error);
+    logger.error('Update worker profile error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -220,10 +224,7 @@ export const submitVerification = async (req: Request, res: Response): Promise<v
 
     const populated = await Worker.findById(worker._id).populate('categories');
 
-    notifyUser(worker._id.toString(), 'verification_status_updated', {
-      workerId: worker._id.toString(),
-      verificationStatus: 'pending',
-    });
+    notifyVerificationStatus(worker, 'pending');
 
     await sendNotification({
       recipientId: worker._id.toString(),
@@ -251,7 +252,7 @@ export const submitVerification = async (req: Request, res: Response): Promise<v
       worker: withOnboardingFlags(populated),
     });
   } catch (error) {
-    console.error('Submit verification error:', error);
+    logger.error('Submit verification error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -342,11 +343,7 @@ export const resubmitVerification = async (req: Request, res: Response): Promise
 
     const updatedWorker = await Worker.findById(worker._id).populate('categories');
 
-    notifyUser(worker._id.toString(), 'verification_status_updated', {
-      workerId: worker._id.toString(),
-      verificationStatus: 'resubmitted',
-      previousReason,
-    });
+    notifyVerificationStatus(worker, 'resubmitted');
 
     await sendNotification({
       recipientId: worker._id.toString(),
@@ -375,7 +372,7 @@ export const resubmitVerification = async (req: Request, res: Response): Promise
       worker: withOnboardingFlags(updatedWorker),
     });
   } catch (error) {
-    console.error('Resubmit verification error:', error);
+    logger.error('Resubmit verification error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -422,7 +419,7 @@ export const completeProfile = async (req: Request, res: Response): Promise<void
     const populated = await Worker.findById(worker._id).populate('categories');
     res.json({ message: 'Profile completed! You are now live.', worker: populated });
   } catch (error) {
-    console.error('Complete profile error:', error);
+    logger.error('Complete profile error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -475,7 +472,7 @@ export const validateAadhaarScan = async (req: Request, res: Response): Promise<
     const result = await validateAadhaarSide(file.buffer, side);
     res.json(result);
   } catch (error) {
-    console.error('Validate aadhaar scan error:', error);
+    logger.error('Validate aadhaar scan error:', { err: error });
     res.status(500).json({ message: 'Could not validate image' });
   }
 };
@@ -534,7 +531,7 @@ export const submitOnboardingAadhaar = async (req: Request, res: Response): Prom
     const populated = await Worker.findById(worker._id).populate('categories');
     res.json({ message: 'Aadhaar uploaded successfully.', worker: withOnboardingFlags(populated) });
   } catch (error) {
-    console.error('Submit onboarding aadhaar error:', error);
+    logger.error('Submit onboarding aadhaar error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -569,7 +566,7 @@ export const submitOnboardingSkills = async (req: Request, res: Response): Promi
     const populated = await Worker.findById(worker._id).populate('categories');
     res.json({ message: 'Skills saved successfully.', worker: withOnboardingFlags(populated) });
   } catch (error) {
-    console.error('Submit onboarding skills error:', error);
+    logger.error('Submit onboarding skills error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -601,7 +598,7 @@ export const toggleActive = async (req: Request, res: Response): Promise<void> =
 
     res.json({ message: `You are now ${worker.isActive ? 'Active' : 'Inactive'}`, isActive: worker.isActive });
   } catch (error) {
-    console.error('Toggle active error:', error);
+    logger.error('Toggle active error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -618,7 +615,7 @@ export const updateLocation = async (req: Request, res: Response): Promise<void>
     );
     res.json({ message: 'Location updated', location: worker?.location });
   } catch (error) {
-    console.error('Update location error:', error);
+    logger.error('Update location error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -640,7 +637,7 @@ export const updateCurrentLocation = async (req: Request, res: Response): Promis
     });
     res.json({ message: 'Live location updated' });
   } catch (error) {
-    console.error('Update current location error:', error);
+    logger.error('Update current location error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -834,7 +831,7 @@ export const getDashboard = async (req: Request, res: Response): Promise<void> =
       monthlyEarnings,
     });
   } catch (error) {
-    console.error('Get dashboard error:', error);
+    logger.error('Get dashboard error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -885,7 +882,7 @@ export const getReviews = async (req: Request, res: Response): Promise<void> => 
       reviews,
     });
   } catch (error) {
-    console.error('Get reviews error:', error);
+    logger.error('Get reviews error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -893,7 +890,21 @@ export const getReviews = async (req: Request, res: Response): Promise<void> => 
 // ─── Get Work Requests ───
 export const getWorkRequests = async (req: Request, res: Response): Promise<void> => {
   try {
-    const worker = await Worker.findById(req.user!.id);
+    // Backward-compatible scope. Omitted → full response (available + active + completed),
+    // the unchanged contract. `available` → only the available list (+ this worker's bids)
+    // for the high-frequency real-time fallback. Any other value is rejected.
+    const scopeRaw = req.query.scope;
+    const scope = scopeRaw === undefined ? 'full' : String(scopeRaw);
+    if (scope !== 'full' && scope !== 'available') {
+      res.status(400).json({ message: "Invalid scope. Use 'available' or omit for the full list." });
+      return;
+    }
+
+    // Only the fields getWorkRequests genuinely reads (eligibility + geo + categories).
+    // Lean + select: no document methods/virtuals/save are used on this worker.
+    const worker = await Worker.findById(req.user!.id)
+      .select('categories currentLocation location accountStatus isActive')
+      .lean();
     if (!worker) {
       res.status(404).json({ message: 'Worker not found' });
       return;
@@ -904,32 +915,44 @@ export const getWorkRequests = async (req: Request, res: Response): Promise<void
     const findingWorkersSince = new Date(Date.now() - env.JOB_STALE_BOOKING_MINUTES * 60 * 1000);
     const workerCoordinates = toCoordinateTuple(worker.currentLocation?.coordinates) || toCoordinateTuple(worker.location?.coordinates);
     const hasCategories = Array.isArray(worker.categories) && worker.categories.length > 0;
+    // Eligibility parity with creation-time matching (findNearbyWorkers): only a live,
+    // online worker is matched for new jobs, so only such a worker sees the available
+    // pool here. Their own active/completed jobs (below) are unaffected by this.
+    const eligibleForAvailable = worker.accountStatus === 'live' && worker.isActive === true;
 
     let availableBookings: any[] = [];
-    if (!hasCategories || !workerCoordinates) {
-      availableBookings = [];
-    } else {
-      // Force normalized tuple so geo query always receives numeric lng/lat.
-      worker.location.coordinates = workerCoordinates;
+    if (eligibleForAvailable && hasCategories && workerCoordinates) {
+      // Minimal geo-worker shape (normalized tuple so the query always gets numeric lng/lat).
+      const geoWorker = { categories: worker.categories, location: { coordinates: workerCoordinates } };
       try {
-        availableBookings = await resolveAvailableBookingsForWorker(worker, findingWorkersSince);
+        availableBookings = await resolveAvailableBookingsForWorker(geoWorker, findingWorkersSince);
       } catch (availableError) {
-        console.error('Available booking lookup failed. Returning active/completed requests only.', availableError);
+        logger.error('Available booking lookup failed. Returning active/completed requests only.', { err: availableError });
         availableBookings = [];
       }
     }
 
-    // Check which ones this worker already bid on
-    const existingBids = await WorkBid.find({
-      worker: req.user!.id,
-      booking: { $in: availableBookings.map((b) => b._id) },
-    });
-    const bidMap = new Map(existingBids.map((b) => [b.booking.toString(), b]));
+    // Check which ones this worker already bid on. Lean: myBid is spread into JSON as-is.
+    // Skip the round-trip entirely when there are no available bookings to match.
+    const existingBids = availableBookings.length
+      ? await WorkBid.find({
+          worker: req.user!.id,
+          booking: { $in: availableBookings.map((b) => b._id) },
+        }).lean()
+      : [];
+    const bidMap = new Map(existingBids.map((b) => [String(b.booking), b]));
 
     const available = availableBookings.map((booking) => ({
-      ...booking.toObject(),
-      myBid: bidMap.get(booking._id.toString()) || null,
+      ...booking,
+      myBid: bidMap.get(String(booking._id)) || null,
     }));
+
+    // scope=available: return ONLY the available list (+ bids). Active/completed personal
+    // history is deliberately NOT queried on this hot path.
+    if (scope === 'available') {
+      res.json({ requests: available });
+      return;
+    }
 
     // 2) Active bookings — assigned to this worker, in progress
     const activeBookings = await Booking.find({
@@ -938,7 +961,8 @@ export const getWorkRequests = async (req: Request, res: Response): Promise<void
     })
       .populate('category', 'name slug image')
       .populate('customer', 'fullName phone')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
     // 3) Completed/cancelled bookings for this worker
     const completedBookings = await Booking.find({
@@ -948,13 +972,14 @@ export const getWorkRequests = async (req: Request, res: Response): Promise<void
       .populate('category', 'name slug image')
       .populate('customer', 'fullName')
       .sort({ createdAt: -1 })
-      .limit(20);
+      .limit(20)
+      .lean();
 
-    const requests = [...available, ...activeBookings.map((b) => b.toObject()), ...completedBookings.map((b) => b.toObject())];
+    const requests = [...available, ...activeBookings, ...completedBookings];
 
     res.json({ requests });
   } catch (error) {
-    console.error('Get work requests error:', error);
+    logger.error('Get work requests error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1011,7 +1036,7 @@ export const getWorkRequestDetail = async (req: Request, res: Response): Promise
       },
     });
   } catch (error) {
-    console.error('Get work request detail error:', error);
+    logger.error('Get work request detail error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1020,6 +1045,7 @@ export const getWorkRequestDetail = async (req: Request, res: Response): Promise
 export const submitBid = async (req: Request, res: Response): Promise<void> => {
   try {
     const { priceOffered } = req.body;
+    const bidMessage = typeof req.body?.message === 'string' ? req.body.message.trim().slice(0, 500) : '';
     const bookingIdParam = req.params.bookingId;
     const bookingId = Array.isArray(bookingIdParam) ? bookingIdParam[0] : bookingIdParam;
     if (!bookingId) {
@@ -1043,6 +1069,7 @@ export const submitBid = async (req: Request, res: Response): Promise<void> => {
     if (existingBid) {
       if (existingBid.status === 'rejected') {
         existingBid.priceOffered = priceOffered;
+        existingBid.message = bidMessage;
         existingBid.status = 'pending';
         await existingBid.save();
 
@@ -1089,6 +1116,7 @@ export const submitBid = async (req: Request, res: Response): Promise<void> => {
       booking: bookingId,
       worker: req.user!.id,
       priceOffered,
+      message: bidMessage,
     });
 
     if (booking.status === 'finding_workers') {
@@ -1123,7 +1151,7 @@ export const submitBid = async (req: Request, res: Response): Promise<void> => {
     });
     res.status(201).json({ message: 'Bid submitted', bid });
   } catch (error) {
-    console.error('Submit bid error:', error);
+    logger.error('Submit bid error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1184,7 +1212,7 @@ export const respondToNegotiation = async (req: Request, res: Response): Promise
 
     res.json({ message: 'Response sent', bid });
   } catch (error) {
-    console.error('Respond to negotiation error:', error);
+    logger.error('Respond to negotiation error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1255,7 +1283,7 @@ export const approveBooking = async (req: Request, res: Response): Promise<void>
 
     res.json({ message: 'Booking approved. Customer will proceed to payment.', booking });
   } catch (error) {
-    console.error('Approve booking error:', error);
+    logger.error('Approve booking error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1321,7 +1349,7 @@ export const rejectBooking = async (req: Request, res: Response): Promise<void> 
 
     res.json({ message: 'Booking rejected', booking });
   } catch (error) {
-    console.error('Reject booking error:', error);
+    logger.error('Reject booking error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1380,7 +1408,7 @@ export const cancelBookingByWorker = async (req: Request, res: Response): Promis
 
     res.json({ message: 'Booking cancelled', booking });
   } catch (error) {
-    console.error('Worker cancel booking error:', error);
+    logger.error('Worker cancel booking error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1413,7 +1441,7 @@ export const sendMessage = async (req: Request, res: Response): Promise<void> =>
 
     res.json({ message: 'Message sent to customer' });
   } catch (error) {
-    console.error('Send message error:', error);
+    logger.error('Send message error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1473,7 +1501,7 @@ export const requestCompletionCode = async (req: Request, res: Response): Promis
       booking,
     });
   } catch (error) {
-    console.error('Request completion code error:', error);
+    logger.error('Request completion code error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1637,7 +1665,7 @@ export const completeWork = async (req: Request, res: Response): Promise<void> =
       newBalance,
     });
   } catch (error) {
-    console.error('Complete work error:', error);
+    logger.error('Complete work error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1657,7 +1685,7 @@ export const getFunds = async (req: Request, res: Response): Promise<void> => {
       bankDetails: worker.bankDetails,
     });
   } catch (error) {
-    console.error('Get funds error:', error);
+    logger.error('Get funds error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1674,7 +1702,7 @@ export const getEarningsHistory = async (req: Request, res: Response): Promise<v
 
     res.json({ transactions });
   } catch (error) {
-    console.error('Get earnings history error:', error);
+    logger.error('Get earnings history error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1725,7 +1753,7 @@ export const getWalletTransactions = async (req: Request, res: Response): Promis
       withdrawals,
     });
   } catch (error) {
-    console.error('Get wallet transactions error:', error);
+    logger.error('Get wallet transactions error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1743,7 +1771,7 @@ export const saveBankDetails = async (req: Request, res: Response): Promise<void
 
     res.json({ message: 'Bank details saved', bankDetails: worker?.bankDetails });
   } catch (error) {
-    console.error('Save bank details error:', error);
+    logger.error('Save bank details error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1839,7 +1867,7 @@ export const requestWithdrawal = async (req: Request, res: Response): Promise<vo
       withdrawal,
     });
   } catch (error) {
-    console.error('Request withdrawal error:', error);
+    logger.error('Request withdrawal error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1852,7 +1880,7 @@ export const getWithdrawals = async (req: Request, res: Response): Promise<void>
 
     res.json({ withdrawals });
   } catch (error) {
-    console.error('Get withdrawals error:', error);
+    logger.error('Get withdrawals error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1866,7 +1894,7 @@ export const getNotifications = async (req: Request, res: Response): Promise<voi
 
     res.json({ notifications });
   } catch (error) {
-    console.error('Get notifications error:', error);
+    logger.error('Get notifications error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1878,9 +1906,11 @@ export const markNotificationRead = async (req: Request, res: Response): Promise
       { _id: req.params.id, recipient: req.user!.id },
       { isRead: true }
     );
+    // Push the fresh badge count only after the write succeeded (best-effort).
+    void emitNotificationUnreadCount(req.user!.id, 'Worker');
     res.json({ message: 'Marked as read' });
   } catch (error) {
-    console.error('Mark notification read error:', error);
+    logger.error('Mark notification read error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1892,9 +1922,10 @@ export const markAllNotificationsRead = async (req: Request, res: Response): Pro
       { recipient: req.user!.id, recipientModel: 'Worker', isRead: false },
       { isRead: true }
     );
+    void emitNotificationUnreadCount(req.user!.id, 'Worker');
     res.json({ message: 'All marked as read' });
   } catch (error) {
-    console.error('Mark all read error:', error);
+    logger.error('Mark all read error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1903,6 +1934,7 @@ export const markAllNotificationsRead = async (req: Request, res: Response): Pro
 export const deleteNotification = async (req: Request, res: Response): Promise<void> => {
   try {
     await Notification.findOneAndDelete({ _id: req.params.id, recipient: req.user!.id });
+    void emitNotificationUnreadCount(req.user!.id, 'Worker');
     res.json({ message: 'Deleted' });
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
@@ -1933,7 +1965,7 @@ export const getChatbotQA = async (req: Request, res: Response): Promise<void> =
 
     res.json({ qas, categories });
   } catch (error) {
-    console.error('Get chatbot QA error:', error);
+    logger.error('Get chatbot QA error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1992,7 +2024,7 @@ export const createHelpTicket = async (req: Request, res: Response): Promise<voi
 
     res.status(201).json({ message: 'Ticket created', ticket });
   } catch (error) {
-    console.error('Create help ticket error:', error);
+    logger.error('Create help ticket error:', { err: error });
 
     if (
       error &&
@@ -2047,7 +2079,7 @@ export const getHelpTickets = async (req: Request, res: Response): Promise<void>
       },
     });
   } catch (error) {
-    console.error('Get help tickets error:', error);
+    logger.error('Get help tickets error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -2062,7 +2094,7 @@ export const getHelpTicketDetail = async (req: Request, res: Response): Promise<
     }
     res.json({ ticket });
   } catch (error) {
-    console.error('Get ticket detail error:', error);
+    logger.error('Get ticket detail error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -2103,7 +2135,7 @@ export const appendHelpTicketMessage = async (req: Request, res: Response): Prom
 
     res.json({ message: 'Message sent', ticket });
   } catch (error) {
-    console.error('Append help ticket message error:', error);
+    logger.error('Append help ticket message error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -2145,7 +2177,7 @@ export const escalateHelpTicket = async (req: Request, res: Response): Promise<v
 
     res.json({ message: 'Ticket escalated', ticket });
   } catch (error) {
-    console.error('Escalate help ticket error:', error);
+    logger.error('Escalate help ticket error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -2166,7 +2198,7 @@ export const getSkills = async (req: Request, res: Response): Promise<void> => {
       canEditExperience: accountAgeMonths(worker.createdAt) >= 6,
     });
   } catch (error) {
-    console.error('Get skills error:', error);
+    logger.error('Get skills error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -2219,7 +2251,7 @@ export const requestSkill = async (req: Request, res: Response): Promise<void> =
 
     res.status(201).json({ message: 'Skill request submitted for review. Our team will verify on a call.' });
   } catch (error) {
-    console.error('Request skill error:', error);
+    logger.error('Request skill error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -2246,7 +2278,7 @@ export const bumpSkillExperience = async (req: Request, res: Response): Promise<
     await worker.save();
     res.json({ message: 'Experience updated (+6 months)', experienceYears: skill.experienceYears });
   } catch (error) {
-    console.error('Bump experience error:', error);
+    logger.error('Bump experience error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -2264,7 +2296,7 @@ export const unselectSkill = async (req: Request, res: Response): Promise<void> 
     await worker.save();
     res.json({ message: 'Skill removed. To add it again you will go through verification.' });
   } catch (error) {
-    console.error('Unselect skill error:', error);
+    logger.error('Unselect skill error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };

@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import env from './env';
+import logger from '../utils/logger';
 import Worker from '../models/Worker';
 import Booking from '../models/Booking';
 
@@ -10,7 +11,7 @@ const ensureOperationalIndexes = async (): Promise<void> => {
       { name: 'location_2dsphere' }
     );
   } catch (error) {
-    console.error('Failed to ensure worker location geo index:', error);
+    logger.error('Failed to ensure worker location geo index', { err: error });
   }
 
   try {
@@ -19,7 +20,7 @@ const ensureOperationalIndexes = async (): Promise<void> => {
       { name: 'customerLocation_2dsphere' }
     );
   } catch (error) {
-    console.error('Failed to ensure booking customer location geo index:', error);
+    logger.error('Failed to ensure booking customer location geo index', { err: error });
   }
 };
 
@@ -37,18 +38,18 @@ const connectDB = async (): Promise<void> => {
     });
 
     mongoose.connection.on('error', (error) => {
-      console.error('MongoDB runtime error:', error);
+      logger.error('MongoDB runtime error', { err: error });
     });
 
     mongoose.connection.on('disconnected', () => {
-      console.warn('MongoDB disconnected');
+      logger.warn('MongoDB disconnected');
     });
 
     await ensureOperationalIndexes();
 
-    console.log(`MongoDB Connected: ${conn.connection.host}`);
+    logger.info('MongoDB connected', { host: conn.connection.host });
   } catch (error) {
-    console.error('MongoDB connection error:', error);
+    logger.error('MongoDB connection failed', { err: error });
     process.exit(1);
   }
 };

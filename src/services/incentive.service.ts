@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import logger from '../utils/logger';
 import Booking from '../models/Booking';
 import Transaction from '../models/Transaction';
 import CouponCampaign, { ICouponCampaign } from '../models/CouponCampaign';
@@ -36,7 +37,7 @@ export const audit = async (params: {
     });
   } catch (error) {
     // Audit must never break a business flow.
-    console.error('Incentive audit error:', error);
+    logger.error('Incentive audit failed', { err: error });
   }
 };
 
@@ -110,7 +111,7 @@ export const notifyUnlockedBonusTiers = async (worker: IWorker): Promise<void> =
       }
     }
   } catch (error) {
-    console.error('notifyUnlockedBonusTiers error:', error);
+    logger.error('notifyUnlockedBonusTiers failed', { err: error });
   }
 };
 
@@ -275,7 +276,7 @@ export const recordCouponRedemption = async (params: {
     });
   } catch (err: unknown) {
     if ((err as { code?: number }).code === 11000) return; // already recorded for this booking
-    console.error('recordCouponRedemption error:', err);
+    logger.error('recordCouponRedemption failed', { err });
     return;
   }
 

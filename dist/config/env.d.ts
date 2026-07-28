@@ -32,6 +32,7 @@ interface EnvConfig {
     MUTATION_RATE_LIMIT_MAX: number;
     IDEMPOTENCY_TTL_MS: number;
     REDIS_URL: string;
+    SOCKET_REDIS_ENABLED: boolean | undefined;
     SOCKET_PING_INTERVAL_MS: number;
     SOCKET_PING_TIMEOUT_MS: number;
     SOCKET_MAX_HTTP_BUFFER_SIZE: number;
@@ -67,7 +68,14 @@ interface EnvConfig {
     MAPCN_ROUTING_URL: string;
     JOB_STALE_BOOKING_MINUTES: number;
     JOB_CLEANUP_INTERVAL_MS: number;
+    LOG_LEVEL: 'debug' | 'info' | 'warn' | 'error' | 'silent';
 }
+/**
+ * Strict tri-state boolean flag. Absent/empty → `undefined` (caller applies its own
+ * backward-compatible default); only the exact lowercase literals "true"/"false" are
+ * accepted; anything else throws a clear configuration error at startup.
+ */
+export declare const parseStrictBooleanEnv: (name: keyof NodeJS.ProcessEnv) => boolean | undefined;
 declare const env: EnvConfig;
 export default env;
 //# sourceMappingURL=env.d.ts.map

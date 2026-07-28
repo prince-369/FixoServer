@@ -6,6 +6,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.sendPasswordSetupOtpEmail = exports.sendAccountDeactivationOtpEmail = exports.sendPasswordResetEmail = exports.sendPartnerRequestEmail = exports.sendWaitlistSignupEmail = void 0;
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const env_1 = __importDefault(require("../config/env"));
+const logger_1 = __importDefault(require("../utils/logger"));
+const mask_1 = require("../utils/mask");
 const transporter = nodemailer_1.default.createTransport({
     host: env_1.default.SMTP_HOST,
     port: env_1.default.SMTP_PORT,
@@ -41,7 +43,7 @@ const shell = (title, accent, rows, footer) => `
 const sendWaitlistSignupEmail = async (data) => {
     try {
         if (!env_1.default.SMTP_USER) {
-            console.log(`[DEV] Waitlist signup → ${env_1.default.SUPPORT_EMAIL}:`, data);
+            logger_1.default.debug('Waitlist signup captured (email provider not configured)', { role: data.role, source: data.source });
             return true;
         }
         await transporter.sendMail({
@@ -59,7 +61,7 @@ const sendWaitlistSignupEmail = async (data) => {
         return true;
     }
     catch (error) {
-        console.error('Waitlist signup email error:', error);
+        logger_1.default.error('Waitlist signup email failed', { err: error });
         return false;
     }
 };
@@ -68,7 +70,7 @@ exports.sendWaitlistSignupEmail = sendWaitlistSignupEmail;
 const sendPartnerRequestEmail = async (data) => {
     try {
         if (!env_1.default.SMTP_USER) {
-            console.log(`[DEV] Partner request → ${env_1.default.SUPPORT_EMAIL}:`, data);
+            logger_1.default.debug('Partner request captured (email provider not configured)', { partnershipType: data.partnershipType, city: data.city });
             return true;
         }
         await transporter.sendMail({
@@ -89,7 +91,7 @@ const sendPartnerRequestEmail = async (data) => {
         return true;
     }
     catch (error) {
-        console.error('Partner request email error:', error);
+        logger_1.default.error('Partner request email failed', { err: error });
         return false;
     }
 };
@@ -100,7 +102,8 @@ const sendPasswordResetEmail = async (email, resetToken, role) => {
         const baseUrl = role === 'worker' ? env_1.default.WORKER_CLIENT_URL : env_1.default.CLIENT_URL;
         const resetUrl = `${baseUrl}/reset-password?token=${resetToken}`;
         if (!env_1.default.SMTP_USER) {
-            console.log(`[DEV] Password reset link for ${email}: ${resetUrl}`);
+            // Never log the reset link/token. Provider not configured → treat as a no-op success.
+            logger_1.default.debug('Password reset email skipped (provider not configured)', { recipientMasked: (0, mask_1.maskEmail)(email) });
             return true;
         }
         await transporter.sendMail({
@@ -120,7 +123,7 @@ const sendPasswordResetEmail = async (email, resetToken, role) => {
         return true;
     }
     catch (error) {
-        console.error('Email send error:', error);
+        logger_1.default.error('Password reset email failed', { err: error, recipientMasked: (0, mask_1.maskEmail)(email) });
         return false;
     }
 };
@@ -128,7 +131,8 @@ exports.sendPasswordResetEmail = sendPasswordResetEmail;
 const sendAccountDeactivationOtpEmail = async (email, otp, name) => {
     try {
         if (!env_1.default.SMTP_USER) {
-            console.log(`[DEV] Account deactivation OTP for ${email}: ${otp}`);
+            // Never log the OTP. Provider not configured → treat as a no-op success.
+            logger_1.default.debug('Deactivation OTP email skipped (provider not configured)', { recipientMasked: (0, mask_1.maskEmail)(email) });
             return true;
         }
         await transporter.sendMail({
@@ -152,7 +156,7 @@ const sendAccountDeactivationOtpEmail = async (email, otp, name) => {
         return true;
     }
     catch (error) {
-        console.error('Account deactivation OTP email error:', error);
+        logger_1.default.error('Deactivation OTP email failed', { err: error, recipientMasked: (0, mask_1.maskEmail)(email) });
         return false;
     }
 };
@@ -160,7 +164,8 @@ exports.sendAccountDeactivationOtpEmail = sendAccountDeactivationOtpEmail;
 const sendPasswordSetupOtpEmail = async (email, otp, name) => {
     try {
         if (!env_1.default.SMTP_USER) {
-            console.log(`[DEV] Password setup OTP for ${email}: ${otp}`);
+            // Never log the OTP. Provider not configured → treat as a no-op success.
+            logger_1.default.debug('Password setup OTP email skipped (provider not configured)', { recipientMasked: (0, mask_1.maskEmail)(email) });
             return true;
         }
         await transporter.sendMail({
@@ -184,7 +189,7 @@ const sendPasswordSetupOtpEmail = async (email, otp, name) => {
         return true;
     }
     catch (error) {
-        console.error('Password setup OTP email error:', error);
+        logger_1.default.error('Password setup OTP email failed', { err: error, recipientMasked: (0, mask_1.maskEmail)(email) });
         return false;
     }
 };

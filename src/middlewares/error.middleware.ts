@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { validationResult } from 'express-validator';
 import multer from 'multer';
 import env from '../config/env';
+import logger from '../utils/logger';
 
 interface AppError extends Error {
   statusCode?: number;
@@ -28,14 +29,13 @@ export const errorHandler = (err: Error, req: Request, res: Response, _next: Nex
   const requestId = String(res.locals.requestId || 'unknown-request');
   const appError = err as AppError;
 
-  console.error(JSON.stringify({
-    level: 'error',
+  // `req.path` omits the query string (which can carry tokens); `err` preserves stack/code.
+  logger.error('Unhandled request error', {
     requestId,
     method: req.method,
-    path: req.originalUrl,
-    message: appError.message,
-    stack: appError.stack,
-  }));
+    path: req.path,
+    err: appError,
+  });
 
   if (appError.message === 'CORS origin not allowed') {
     res.status(403).json({ message: 'Request origin is not allowed', requestId });

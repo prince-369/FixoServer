@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import logger from '../utils/logger';
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import Admin from '../models/Admin';
@@ -43,7 +44,7 @@ export const listStaff = async (_req: Request, res: Response): Promise<void> => 
 
     res.json({ staff: result });
   } catch (error) {
-    console.error('List staff error:', error);
+    logger.error('List staff error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -82,7 +83,7 @@ export const createStaff = async (req: Request, res: Response): Promise<void> =>
       staff: { _id: staff._id, name: staff.name, email: staff.email, role: staff.role, permissions: finalPerms, isActive: true },
     });
   } catch (error) {
-    console.error('Create staff error:', error);
+    logger.error('Create staff error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -124,7 +125,7 @@ export const updateStaff = async (req: Request, res: Response): Promise<void> =>
       staff: { _id: staff._id, name: staff.name, email: staff.email, role: staff.role, permissions: effectivePermissions(staff as any), isActive: staff.isActive },
     });
   } catch (error) {
-    console.error('Update staff error:', error);
+    logger.error('Update staff error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -145,7 +146,7 @@ export const deleteStaff = async (req: Request, res: Response): Promise<void> =>
     await staff.deleteOne();
     res.json({ message: 'Staff removed' });
   } catch (error) {
-    console.error('Delete staff error:', error);
+    logger.error('Delete staff error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -181,7 +182,7 @@ export const getStaffActivity = async (req: Request, res: Response): Promise<voi
 
     res.json({ summary: byStaff, recent });
   } catch (error) {
-    console.error('Get staff activity error:', error);
+    logger.error('Get staff activity error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };

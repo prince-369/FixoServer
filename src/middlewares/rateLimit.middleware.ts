@@ -4,6 +4,7 @@ import Redis from 'ioredis';
 import type { RedisOptions } from 'ioredis';
 import { RedisStore } from 'rate-limit-redis';
 import env from '../config/env';
+import logger from '../utils/logger';
 
 const RATE_LIMIT_MESSAGE = { message: 'Too many requests. Please try again shortly.' };
 
@@ -101,7 +102,7 @@ const waitForClientReady = async (client: Redis, timeoutMs = 2_000): Promise<boo
 
 const attachRedisLogging = (client: Redis): void => {
   client.on('error', (error) => {
-    console.error('Rate limit Redis error:', error);
+    logger.error('Rate limit Redis error', { err: error });
   });
 };
 
@@ -116,13 +117,14 @@ const getOrCreateRedisClient = (): Redis | null => {
   void redisClient.connect().catch(async (error) => {
     const alternateRedisUrl = toAlternateRedisScheme(activeRedisUrl);
     if (!alternateRedisUrl || !isLikelyProtocolMismatch(error)) {
-      console.error('Rate limit Redis connect failed. Falling back to local memory store.', error);
+      logger.warn('Rate limit Redis connect failed; falling back to local memory store', { err: error });
       redisClient?.disconnect();
       redisClient = null;
       return;
     }
 
-    console.warn(`Rate limit Redis TLS mismatch for ${activeRedisUrl}. Retrying with ${alternateRedisUrl}.`);
+    // Do not log the Redis URLs — they can contain credentials.
+    logger.warn('Rate limit Redis TLS/protocol mismatch; retrying with alternate scheme');
     redisClient?.disconnect();
 
     activeRedisUrl = alternateRedisUrl;
@@ -132,7 +134,7 @@ const getOrCreateRedisClient = (): Redis | null => {
     try {
       await redisClient.connect();
     } catch (retryError) {
-      console.error('Rate limit Redis connect retry failed. Falling back to local memory store.', retryError);
+      logger.warn('Rate limit Redis connect retry failed; falling back to local memory store', { err: retryError });
       redisClient?.disconnect();
       redisClient = null;
     }
@@ -169,7 +171,7 @@ const getRateLimitStore = (prefix: string): RedisStore | undefined => {
           // Let rate-limit-redis reload scripts on NOSCRIPT and retry internally.
           throw error;
         }
-        console.error('Rate limit Redis command failed. Using local limiter reply fallback.', error);
+        logger.warn('Rate limit Redis command failed; using local limiter reply fallback', { err: error });
         return buildLocalRateLimitReply(command, args);
       }
     },

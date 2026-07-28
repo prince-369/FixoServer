@@ -10,6 +10,10 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # Structured-logger threshold. `warn` is already the production default; set here
+      # explicitly so debug/info noise stays suppressed and the level is auditable.
+      - key: LOG_LEVEL
+        value: warn
       - key: TRUST_PROXY
         value: "true"
       - key: CLIENT_URL
@@ -40,8 +44,15 @@ services:
         sync: false
       - key: SMTP_PASS
         sync: false
+      # Redis stays configured (dashboard secret) for distributed rate limiting.
       - key: REDIS_URL
         sync: false
+      # Single-instance deployment → Socket.IO Redis adapter DISABLED (in-memory rooms).
+      # Rate-limit Redis is UNAFFECTED by this flag. Before scaling instances above 1:
+      # set this to "true", confirm a shared REDIS_URL, add sticky sessions if polling
+      # transport stays on, validate cross-instance events, keep Redis rate limiting on.
+      - key: SOCKET_REDIS_ENABLED
+        value: "false"
       - key: WEB_PUSH_ENABLED
         value: "true"
       - key: WEB_PUSH_PUBLIC_KEY

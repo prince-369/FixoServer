@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.removeBookingVoiceNote = void 0;
 const Booking_1 = __importDefault(require("../models/Booking"));
+const logger_1 = __importDefault(require("../utils/logger"));
 const cloudinary_service_1 = require("./cloudinary.service");
 const removeBookingVoiceNote = async (booking) => {
     const publicId = booking.voiceNote?.publicId?.trim();
@@ -16,7 +17,7 @@ const removeBookingVoiceNote = async (booking) => {
         return true;
     }
     catch (error) {
-        console.error('Voice note cleanup failed:', error);
+        logger_1.default.warn('Voice note cleanup failed', { err: error });
         return false;
     }
 };

@@ -1,6 +1,7 @@
 import Booking from '../models/Booking';
 import { notifyUser, sendNotification } from '../socket';
 import env from '../config/env';
+import logger from '../utils/logger';
 import { deleteFromCloudinary } from '../services/cloudinary.service';
 
 /**
@@ -51,12 +52,12 @@ export const cancelStaleBookings = async (): Promise<number> => {
     }
 
     if (cancelledCount > 0) {
-      console.log(`Auto-cancelled ${cancelledCount} stale booking(s)`);
+      logger.info('Auto-cancelled stale bookings', { count: cancelledCount });
     }
 
     return cancelledCount;
   } catch (error) {
-    console.error('Stale booking cleanup error:', error);
+    logger.error('Stale booking cleanup failed', { err: error });
     return 0;
   }
 };
@@ -115,12 +116,12 @@ export const notifyDueScheduledBookings = async (): Promise<number> => {
     }
 
     if (notifiedCount > 0) {
-      console.log(`Notified ${notifiedCount} scheduled booking(s) whose time arrived`);
+      logger.info('Notified due scheduled bookings', { count: notifiedCount });
     }
 
     return notifiedCount;
   } catch (error) {
-    console.error('Scheduled booking notify error:', error);
+    logger.error('Scheduled booking notify failed', { err: error });
     return 0;
   }
 };
@@ -146,7 +147,8 @@ export const cleanupClosedBookingVoiceNotes = async (): Promise<number> => {
       try {
         await deleteFromCloudinary(booking.voiceNote.publicId, 'video');
       } catch (error) {
-        console.error('Failed to delete closed-booking voice note from Cloudinary:', error);
+        // Recoverable: the next cleanup run retries this deletion.
+        logger.warn('Failed to delete closed-booking voice note from Cloudinary', { err: error });
       }
 
       await Booking.updateOne({ _id: booking._id }, { $unset: { voiceNote: 1 } });
@@ -154,12 +156,12 @@ export const cleanupClosedBookingVoiceNotes = async (): Promise<number> => {
     }
 
     if (cleanedCount > 0) {
-      console.log(`Cleaned ${cleanedCount} closed-booking voice note(s)`);
+      logger.info('Cleaned closed-booking voice notes', { count: cleanedCount });
     }
 
     return cleanedCount;
   } catch (error) {
-    console.error('Closed booking voice note cleanup error:', error);
+    logger.error('Closed booking voice note cleanup failed', { err: error });
     return 0;
   }
 };

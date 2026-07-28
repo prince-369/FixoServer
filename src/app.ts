@@ -7,6 +7,7 @@ import mongoose from 'mongoose';
 import { randomUUID } from 'crypto';
 import swaggerUi from 'swagger-ui-express';
 import env from './config/env';
+import logger from './utils/logger';
 import { errorHandler } from './middlewares/error.middleware';
 import { apiLimiter, authLimiter, mutationLimiter } from './middlewares/rateLimit.middleware';
 import { metricsMiddleware, serveMetrics } from './monitoring/metrics';
@@ -69,15 +70,16 @@ app.use((req, res, next) => {
   res.on('finish', () => {
     const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
     if (res.statusCode >= 500 || elapsedMs >= env.SLOW_REQUEST_THRESHOLD_MS) {
-      console.log(JSON.stringify({
-        level: res.statusCode >= 500 ? 'error' : 'warn',
+      // `req.path` is the pathname WITHOUT the query string (which can carry tokens).
+      const meta = {
         requestId,
         method: req.method,
-        path: req.originalUrl,
+        path: req.path,
         statusCode: res.statusCode,
         durationMs: Math.round(elapsedMs * 100) / 100,
-        ip: req.ip,
-      }));
+      };
+      if (res.statusCode >= 500) logger.error('Request failed', meta);
+      else logger.warn('Slow request', meta);
     }
   });
 

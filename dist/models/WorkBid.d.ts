@@ -11,6 +11,7 @@ export interface IWorkBid extends Document {
     booking: mongoose.Types.ObjectId;
     worker: mongoose.Types.ObjectId;
     priceOffered: number;
+    message: string;
     status: BidStatus;
     negotiationStatus: NegotiationStatus;
     negotiations: INegotiationEntry[];

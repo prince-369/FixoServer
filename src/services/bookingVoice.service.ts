@@ -1,4 +1,5 @@
 import Booking from '../models/Booking';
+import logger from '../utils/logger';
 import { deleteFromCloudinary } from './cloudinary.service';
 
 export const removeBookingVoiceNote = async (booking: {
@@ -13,7 +14,7 @@ export const removeBookingVoiceNote = async (booking: {
     await Booking.updateOne({ _id: booking._id as any }, { $unset: { voiceNote: 1 } });
     return true;
   } catch (error) {
-    console.error('Voice note cleanup failed:', error);
+    logger.warn('Voice note cleanup failed', { err: error });
     return false;
   }
 };

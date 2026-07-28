@@ -1,5 +1,7 @@
 import bcrypt from 'bcryptjs';
 import Admin from '../models/Admin';
+import logger from '../utils/logger';
+import { maskEmail } from '../utils/mask';
 
 const sanitizeEnvValue = (value: string): string => value.trim().replace(/^['"]+|['"]+$/g, '').trim();
 
@@ -20,7 +22,7 @@ export const syncSeedAdminCredentials = async (): Promise<void> => {
   const seedPassword = getSeedAdminPassword();
 
   if (!seedEmail || !seedPassword) {
-    console.log('[INFO] Admin bootstrap sync skipped. Set ADMIN_SEED_EMAIL and ADMIN_SEED_PASSWORD in env.');
+    logger.info('Admin bootstrap sync skipped (ADMIN_SEED_EMAIL/ADMIN_SEED_PASSWORD not set)');
     return;
   }
 
@@ -31,7 +33,7 @@ export const syncSeedAdminCredentials = async (): Promise<void> => {
     { upsert: true, returnDocument: 'after', sort: { createdAt: 1 }, setDefaultsOnInsert: true }
   );
 
-  console.log(`[OK] Admin credentials synced from env for ${admin?.email || seedEmail}`);
+  logger.info('Admin credentials synced from env', { recipientMasked: maskEmail(admin?.email || seedEmail) });
 };
 
 export const getSeedAdminBootstrapStatus = async (): Promise<{

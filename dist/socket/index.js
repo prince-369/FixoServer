@@ -3,11 +3,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.closeSocketServer = exports.sendAdminNotification = exports.sendNotification = exports.isUserOnline = exports.notifyBookingRoom = exports.notifyRole = exports.notifyWorkers = exports.notifyActiveWorkers = exports.notifyUser = exports.getIO = exports.initializeSocket = exports.authenticateHandshake = void 0;
+exports.closeSocketServer = exports.sendAdminNotification = exports.sendNotification = exports.emitNotificationUnreadCount = exports.isUserOnline = exports.notifyBookingRoom = exports.notifyRole = exports.notifyWorkers = exports.notifyActiveWorkers = exports.notifyVerificationStatus = exports.notifyUser = exports.getIO = exports.initializeSocket = exports.authenticateHandshake = exports.resolveSocketAdapter = void 0;
 const socket_io_1 = require("socket.io");
 const ioredis_1 = __importDefault(require("ioredis"));
 const redis_adapter_1 = require("@socket.io/redis-adapter");
 const env_1 = __importDefault(require("../config/env"));
+const logger_1 = __importDefault(require("../utils/logger"));
 const Notification_1 = __importDefault(require("../models/Notification"));
 const Admin_1 = __importDefault(require("../models/Admin"));
 const generateToken_1 = require("../utils/generateToken");
@@ -55,17 +56,43 @@ const connectedUsers = new Map();
 const userSocketMap = new Map();
 // Multi-tab support: userId -> all active socketIds
 const userSocketsMap = new Map();
+/**
+ * Resolve whether the Socket.IO Redis adapter should run, given REDIS_URL and the explicit
+ * SOCKET_REDIS_ENABLED flag. Pure + exported for tests.
+ *
+ *   flag undefined → backward-compatible: enabled iff REDIS_URL is present
+ *   flag false     → disabled regardless of REDIS_URL
+ *   flag true      → enabled; 'enabled-without-redis' when REDIS_URL is absent
+ */
+const resolveSocketAdapter = (redisUrl, socketRedisEnabled) => {
+    const shouldUse = socketRedisEnabled === undefined ? Boolean(redisUrl) : socketRedisEnabled;
+    if (!shouldUse)
+        return 'disabled';
+    return redisUrl ? 'enabled' : 'enabled-without-redis';
+};
+exports.resolveSocketAdapter = resolveSocketAdapter;
 const setupSocketRedisAdapter = async () => {
-    if (!env_1.default.REDIS_URL || !isSocketInitialized)
+    if (!isSocketInitialized)
         return;
+    const mode = (0, exports.resolveSocketAdapter)(env_1.default.REDIS_URL, env_1.default.SOCKET_REDIS_ENABLED);
+    if (mode === 'disabled') {
+        // Adapter off → normal in-memory Socket.IO rooms. No pub/sub Redis clients are created.
+        return;
+    }
+    if (mode === 'enabled-without-redis') {
+        // Explicitly enabled but no REDIS_URL → one safe warning (no credentials), in-memory rooms.
+        logger_1.default.warn('SOCKET_REDIS_ENABLED=true but REDIS_URL is not set; using in-memory Socket.IO rooms');
+        return;
+    }
+    // mode === 'enabled' → REDIS_URL is guaranteed present below.
     const connectAdapterWithUrl = async (redisUrl) => {
         redisPubClient = new ioredis_1.default(redisUrl, buildRedisOptions(redisUrl));
         redisSubClient = redisPubClient.duplicate();
         redisPubClient.on('error', (error) => {
-            console.error('Socket Redis pub client error:', error);
+            logger_1.default.error('Socket Redis pub client error', { err: error });
         });
         redisSubClient.on('error', (error) => {
-            console.error('Socket Redis sub client error:', error);
+            logger_1.default.error('Socket Redis sub client error', { err: error });
         });
         await redisPubClient.connect();
         await redisSubClient.connect();
@@ -86,23 +113,25 @@ const setupSocketRedisAdapter = async () => {
     catch (error) {
         const alternateRedisUrl = toAlternateRedisScheme(env_1.default.REDIS_URL);
         if (!alternateRedisUrl || !isLikelyProtocolMismatch(error)) {
-            console.error('Failed to initialize Socket Redis adapter. Continuing without adapter.', error);
+            // Recoverable: the app keeps running without the Redis adapter (single-node mode).
+            logger_1.default.warn('Socket Redis adapter init failed; continuing without adapter', { err: error });
             resetAdapterClients();
             return;
         }
-        console.warn(`Socket Redis TLS mismatch for ${env_1.default.REDIS_URL}. Retrying with ${alternateRedisUrl}.`);
+        // Do NOT log the Redis URLs — they can contain credentials.
+        logger_1.default.warn('Socket Redis TLS/protocol mismatch; retrying with alternate scheme');
         resetAdapterClients();
         try {
             await connectAdapterWithUrl(alternateRedisUrl);
         }
         catch (retryError) {
-            console.error('Failed to initialize Socket Redis adapter. Continuing without adapter.', retryError);
+            logger_1.default.warn('Socket Redis adapter init failed after retry; continuing without adapter', { err: retryError });
             resetAdapterClients();
             return;
         }
     }
     io.adapter((0, redis_adapter_1.createAdapter)(redisPubClient, redisSubClient));
-    console.log('Socket Redis adapter enabled');
+    logger_1.default.info('Socket Redis adapter enabled');
 };
 // Authenticate a Socket.IO handshake from its access token.
 // Returns the verified identity, or null when no valid token is presented.
@@ -164,7 +193,7 @@ const initializeSocket = (server) => {
         next();
     });
     io.on('connection', (socket) => {
-        console.log(`Socket connected: ${socket.id}`);
+        logger_1.default.debug('Socket connected', { socketId: socket.id });
         (0, metrics_1.recordSocketConnected)(socket.conn.transport.name || 'unknown');
         const registerSocketUser = (userId, role) => {
             connectedUsers.set(socket.id, { userId, role });
@@ -176,7 +205,7 @@ const initializeSocket = (server) => {
             userSocketMap.set(userId, socket.id);
             socket.join(`user:${userId}`);
             socket.join(`role:${role}`);
-            console.log(`User registered: ${userId} (${role})`);
+            logger_1.default.debug('Socket user registered', { userId, role });
         };
         const authData = socket.data.auth;
         if (authData?.id && authData?.role) {
@@ -268,7 +297,7 @@ const initializeSocket = (server) => {
             }
             connectedUsers.delete(socket.id);
             (0, metrics_1.recordSocketDisconnected)(reason || 'unknown');
-            console.log(`Socket disconnected: ${socket.id}`);
+            logger_1.default.debug('Socket disconnected', { socketId: socket.id });
         });
     });
     return io;
@@ -287,6 +316,38 @@ const notifyUser = (userId, event, data) => {
     }
 };
 exports.notifyUser = notifyUser;
+/**
+ * Emit the canonical, minimal `verification_status_updated` event to `user:<workerId>`.
+ *
+ * Deliberately ships ONLY what the worker client needs to gate its UI — never the worker
+ * document, Aadhaar fields, document URLs, WhatsApp number, verifiedBy or admin notes.
+ * `updatedAt` is the worker's post-save timestamp: the monotonic version marker clients
+ * use to reject stale API responses. Must be called AFTER a successful `worker.save()`.
+ *
+ * Realtime delivery is best-effort: a failure here must never fail the admin/worker action,
+ * so everything is wrapped and logged without sensitive fields (fallback polling self-heals).
+ */
+const notifyVerificationStatus = (worker, status) => {
+    const workerId = String(worker?._id ?? '');
+    try {
+        if (!workerId)
+            return;
+        (0, exports.notifyUser)(workerId, 'verification_status_updated', {
+            workerId,
+            verificationStatus: status,
+            accountStatus: worker.accountStatus === 'live' ? 'live' : 'test',
+            // Rejected carries the worker-facing reason; every other transition explicitly
+            // CLEARS any stale reason with null.
+            rejectionReason: status === 'rejected' ? (worker.rejectionReason || '') : null,
+            updatedAt: worker.updatedAt ? new Date(worker.updatedAt).toISOString() : new Date().toISOString(),
+        });
+    }
+    catch (err) {
+        // Best-effort realtime delivery; fallback polling self-heals, so this is a warning.
+        logger_1.default.warn('verification_status emit failed', { workerId, status, err });
+    }
+};
+exports.notifyVerificationStatus = notifyVerificationStatus;
 // Send notification to all active workers
 const notifyActiveWorkers = (event, data) => {
     if (isSocketInitialized) {
@@ -336,6 +397,35 @@ const getAdminIds = async () => {
     };
     return ids;
 };
+/**
+ * Emit the recipient's current unread-notification count to their own socket room.
+ *
+ * Count-only payload `{ count }` (a normalized non-negative integer) — no notification
+ * content, so nothing sensitive crosses the wire. Scoped strictly to `user:<recipientId>`,
+ * and only for real end users (customers/workers); Admin badges are out of scope.
+ *
+ * Best-effort: if counting fails it logs and returns without throwing, so it can never
+ * break the caller's primary action — the client's 3-minute fallback self-heals.
+ */
+const emitNotificationUnreadCount = async (recipientId, recipientModel) => {
+    if (!isSocketInitialized)
+        return;
+    if (recipientModel !== 'User' && recipientModel !== 'Worker')
+        return;
+    try {
+        const raw = await Notification_1.default.countDocuments({
+            recipient: recipientId,
+            recipientModel,
+            isRead: false,
+        });
+        const count = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0;
+        io.to(`user:${recipientId}`).emit('badge:notif-count', { count });
+    }
+    catch (error) {
+        logger_1.default.warn('emitNotificationUnreadCount failed (fallback poll will self-heal)', { err: error });
+    }
+};
+exports.emitNotificationUnreadCount = emitNotificationUnreadCount;
 // ─── Create notification in DB + emit via socket in one call ───
 const sendNotification = async (params) => {
     try {
@@ -373,13 +463,16 @@ const sendNotification = async (params) => {
             data: params.data,
             createdAt: notification.createdAt,
         };
+        // Push the recipient's fresh unread count (badge). Gated to User/Worker inside the
+        // helper, so admin fan-out via sendAdminNotification does not emit counts.
+        await (0, exports.emitNotificationUnreadCount)(params.recipientId, params.recipientModel);
         await Promise.allSettled([
             (0, webPush_service_1.sendWebPushNotification)(pushPayload),
             (0, mobilePush_service_1.sendMobilePushNotification)(pushPayload),
         ]);
     }
     catch (error) {
-        console.error('sendNotification error:', error);
+        logger_1.default.error('sendNotification failed', { err: error });
     }
 };
 exports.sendNotification = sendNotification;
@@ -397,7 +490,7 @@ const sendAdminNotification = async (params) => {
         })));
     }
     catch (error) {
-        console.error('sendAdminNotification error:', error);
+        logger_1.default.error('sendAdminNotification failed', { err: error });
     }
 };
 exports.sendAdminNotification = sendAdminNotification;

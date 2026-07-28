@@ -58,6 +58,7 @@ const cloudinary_service_1 = require("../services/cloudinary.service");
 const email_service_1 = require("../services/email.service");
 const bookingVoice_service_1 = require("../services/bookingVoice.service");
 const socket_1 = require("../socket");
+const logger_1 = __importDefault(require("../utils/logger"));
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const DEACTIVATION_OTP_TTL_MINUTES = 10;
 const hashDeactivationOtp = (userId, otp) => crypto_1.default.createHash('sha256').update(`${userId}:${otp}`).digest('hex');
@@ -73,7 +74,7 @@ const getProfile = async (req, res) => {
         res.json({ user });
     }
     catch (error) {
-        console.error('Get profile error:', error);
+        logger_1.default.error('Get profile error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -95,7 +96,7 @@ const updateProfile = async (req, res) => {
         res.json({ message: 'Profile updated', user });
     }
     catch (error) {
-        console.error('Update profile error:', error);
+        logger_1.default.error('Update profile error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -139,7 +140,7 @@ const deleteAccount = async (req, res) => {
         res.json({ message: 'Account deleted successfully' });
     }
     catch (error) {
-        console.error('Delete account error:', error);
+        logger_1.default.error('Delete account error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -174,7 +175,7 @@ const sendDeactivateAccountOtp = async (req, res) => {
         res.json({ message: 'OTP sent to your email address.' });
     }
     catch (error) {
-        console.error('Send deactivation OTP error:', error);
+        logger_1.default.error('Send deactivation OTP error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -234,7 +235,7 @@ const confirmDeactivateAccount = async (req, res) => {
         res.json({ message: 'Account deactivated successfully.' });
     }
     catch (error) {
-        console.error('Confirm deactivate account error:', error);
+        logger_1.default.error('Confirm deactivate account error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -246,7 +247,7 @@ const getCategories = async (_req, res) => {
         res.json({ categories });
     }
     catch (error) {
-        console.error('Get categories error:', error);
+        logger_1.default.error('Get categories error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -271,7 +272,7 @@ const getServiceAvailability = async (req, res) => {
         res.json({ available: count > 0, workerCount: count });
     }
     catch (error) {
-        console.error('Service availability error:', error);
+        logger_1.default.error('Service availability error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -306,7 +307,7 @@ const joinWaitlist = async (req, res) => {
         res.status(201).json({ message: 'Added to waitlist' });
     }
     catch (error) {
-        console.error('Join waitlist error:', error);
+        logger_1.default.error('Join waitlist error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -332,7 +333,7 @@ const getCategoryDetail = async (req, res) => {
         res.json({ category });
     }
     catch (error) {
-        console.error('Get category detail error:', error);
+        logger_1.default.error('Get category detail error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -363,7 +364,7 @@ const getBanners = async (_req, res) => {
         res.json({ banners });
     }
     catch (error) {
-        console.error('Get banners error:', error);
+        logger_1.default.error('Get banners error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -389,7 +390,7 @@ const getBookings = async (req, res) => {
         res.json({ bookings });
     }
     catch (error) {
-        console.error('Get bookings error:', error);
+        logger_1.default.error('Get bookings error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -420,7 +421,7 @@ const getBookingDetail = async (req, res) => {
         res.json({ booking, workerBusy });
     }
     catch (error) {
-        console.error('Get booking detail error:', error);
+        logger_1.default.error('Get booking detail error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -466,7 +467,7 @@ const revealCompletionCode = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Reveal completion code error:', error);
+        logger_1.default.error('Reveal completion code error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -490,7 +491,7 @@ const getTransactions = async (req, res) => {
         res.json({ transactions: sanitizedTransactions });
     }
     catch (error) {
-        console.error('Get transactions error:', error);
+        logger_1.default.error('Get transactions error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -590,7 +591,7 @@ const cancelBooking = async (req, res) => {
         res.json({ message: 'Booking cancelled', booking });
     }
     catch (error) {
-        console.error('Cancel booking error:', error);
+        logger_1.default.error('Cancel booking error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -626,7 +627,7 @@ const submitRefundDetails = async (req, res) => {
         res.json({ message: 'Refund details submitted. Refund will be processed within 3-10 business days.' });
     }
     catch (error) {
-        console.error('Submit refund details error:', error);
+        logger_1.default.error('Submit refund details error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -683,7 +684,7 @@ const submitReview = async (req, res) => {
         res.json({ message: 'Review submitted', review: booking.review });
     }
     catch (error) {
-        console.error('Submit review error:', error);
+        logger_1.default.error('Submit review error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -697,7 +698,7 @@ const getNotifications = async (req, res) => {
         res.json({ notifications });
     }
     catch (error) {
-        console.error('Get notifications error:', error);
+        logger_1.default.error('Get notifications error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -706,10 +707,12 @@ exports.getNotifications = getNotifications;
 const markNotificationRead = async (req, res) => {
     try {
         await Notification_1.default.findOneAndUpdate({ _id: req.params.id, recipient: req.user.id }, { isRead: true });
+        // Push the fresh badge count only after the write succeeded (best-effort).
+        void (0, socket_1.emitNotificationUnreadCount)(req.user.id, 'User');
         res.json({ message: 'Marked as read' });
     }
     catch (error) {
-        console.error('Mark notification read error:', error);
+        logger_1.default.error('Mark notification read error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -718,10 +721,11 @@ exports.markNotificationRead = markNotificationRead;
 const markAllNotificationsRead = async (req, res) => {
     try {
         await Notification_1.default.updateMany({ recipient: req.user.id, recipientModel: 'User', isRead: false }, { isRead: true });
+        void (0, socket_1.emitNotificationUnreadCount)(req.user.id, 'User');
         res.json({ message: 'All marked as read' });
     }
     catch (error) {
-        console.error('Mark all read error:', error);
+        logger_1.default.error('Mark all read error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -730,6 +734,7 @@ exports.markAllNotificationsRead = markAllNotificationsRead;
 const deleteNotification = async (req, res) => {
     try {
         await Notification_1.default.findOneAndDelete({ _id: req.params.id, recipient: req.user.id });
+        void (0, socket_1.emitNotificationUnreadCount)(req.user.id, 'User');
         res.json({ message: 'Deleted' });
     }
     catch (error) {
@@ -762,7 +767,7 @@ const getChatbotQA = async (req, res) => {
         res.json({ qas, categories });
     }
     catch (error) {
-        console.error('Get chatbot QA error:', error);
+        logger_1.default.error('Get chatbot QA error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -814,7 +819,7 @@ const createHelpTicket = async (req, res) => {
         res.status(201).json({ message: 'Ticket created', ticket });
     }
     catch (error) {
-        console.error('Create help ticket error:', error);
+        logger_1.default.error('Create help ticket error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -854,7 +859,7 @@ const getHelpTickets = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Get help tickets error:', error);
+        logger_1.default.error('Get help tickets error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -870,7 +875,7 @@ const getHelpTicketDetail = async (req, res) => {
         res.json({ ticket });
     }
     catch (error) {
-        console.error('Get ticket detail error:', error);
+        logger_1.default.error('Get ticket detail error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -905,7 +910,7 @@ const appendHelpTicketMessage = async (req, res) => {
         res.json({ message: 'Message sent', ticket });
     }
     catch (error) {
-        console.error('Append help ticket message error:', error);
+        logger_1.default.error('Append help ticket message error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -943,7 +948,7 @@ const escalateHelpTicket = async (req, res) => {
         res.json({ message: 'Ticket escalated', ticket });
     }
     catch (error) {
-        console.error('Escalate help ticket error:', error);
+        logger_1.default.error('Escalate help ticket error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };

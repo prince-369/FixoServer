@@ -14,6 +14,8 @@ export interface IWorkBid extends Document {
   booking: mongoose.Types.ObjectId;
   worker: mongoose.Types.ObjectId;
   priceOffered: number;
+  // Optional note the worker attached to their initial bid (e.g. "5 years experience").
+  message: string;
   status: BidStatus;
   negotiationStatus: NegotiationStatus;
   negotiations: INegotiationEntry[];
@@ -26,6 +28,7 @@ const workBidSchema = new Schema<IWorkBid>(
     booking: { type: Schema.Types.ObjectId, ref: 'Booking', required: true },
     worker: { type: Schema.Types.ObjectId, ref: 'Worker', required: true },
     priceOffered: { type: Number, required: true, min: 1 },
+    message: { type: String, default: '', maxlength: 500 },
     status: {
       type: String,
       enum: ['pending', 'accepted', 'rejected'],

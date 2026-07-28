@@ -2,6 +2,8 @@ import crypto from 'crypto';
 import twilio from 'twilio';
 import env from '../config/env';
 import OtpCode from '../models/OtpCode';
+import logger from '../utils/logger';
+import { maskPhone } from '../utils/mask';
 
 const OTP_EXPIRY_MINUTES = 10;
 const OTP_PURPOSE = 'password-reset';
@@ -79,7 +81,7 @@ export const verifyOTP = async (phone: string, otp: string): Promise<OtpVerifyRe
 
 export const sendOTP = async (phone: string, otp: string): Promise<boolean> => {
   if (!env.TWILIO_ACCOUNT_SID || !env.TWILIO_AUTH_TOKEN || !env.TWILIO_PHONE_NUMBER) {
-    console.error('[SMS] Twilio credentials missing. OTP was not sent.');
+    logger.warn('SMS provider not configured; OTP not sent', { provider: 'twilio' });
     return false;
   }
 
@@ -92,11 +94,16 @@ export const sendOTP = async (phone: string, otp: string): Promise<boolean> => {
       to: `+91${phone}`,
     });
 
-    console.log(`[SMS] OTP sent successfully to ${phone}`);
+    logger.debug('OTP SMS sent', { provider: 'twilio', recipientMasked: maskPhone(phone) });
     return true;
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown SMS provider error';
-    console.error('[SMS] Twilio Error:', message);
+    // Twilio error messages can echo the recipient number, so log only the safe code +
+    // masked recipient — never the raw provider message.
+    logger.error('OTP SMS send failed', {
+      provider: 'twilio',
+      code: (error as { code?: string | number })?.code,
+      recipientMasked: maskPhone(phone),
+    });
     return false;
   }
 };

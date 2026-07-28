@@ -50,6 +50,7 @@ const HelpTicket_1 = __importDefault(require("../models/HelpTicket"));
 const RewardClaim_1 = __importDefault(require("../models/RewardClaim"));
 const ChatbotQA_1 = __importDefault(require("../models/ChatbotQA"));
 const socket_1 = require("../socket");
+const logger_1 = __importDefault(require("../utils/logger"));
 const adminActivity_1 = require("../utils/adminActivity");
 const userBlock_1 = require("../utils/userBlock");
 const MobilePushToken_1 = __importDefault(require("../models/MobilePushToken"));
@@ -203,7 +204,7 @@ const getDashboard = async (_req, res) => {
         res.json(responseData);
     }
     catch (error) {
-        console.error('Admin dashboard error:', error);
+        logger_1.default.error('Admin dashboard error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -231,7 +232,7 @@ const getPendingAdminBadges = async (_req, res) => {
         });
     }
     catch (error) {
-        console.error('Pending admin badges error:', error);
+        logger_1.default.error('Pending admin badges error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -243,7 +244,7 @@ const getAdminBootstrapStatus = async (_req, res) => {
         res.json(status);
     }
     catch (error) {
-        console.error('Admin bootstrap status error:', error);
+        logger_1.default.error('Admin bootstrap status error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -325,7 +326,7 @@ const getVerificationQueue = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Get verification queue error:', error);
+        logger_1.default.error('Get verification queue error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -343,7 +344,7 @@ const getWorkerVerificationDetails = async (req, res) => {
         res.json({ worker });
     }
     catch (error) {
-        console.error('Get worker verification details error:', error);
+        logger_1.default.error('Get worker verification details error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -395,12 +396,8 @@ const approveWorker = async (req, res) => {
         });
         (0, workerSkills_1.syncCategoriesFromSkills)(worker);
         await worker.save();
-        // Notify worker in real-time so their page updates instantly
-        (0, socket_1.notifyUser)(worker._id.toString(), 'verification_status_updated', {
-            workerId: worker._id.toString(),
-            verificationStatus: 'approved',
-            worker,
-        });
+        // Notify worker in real-time so their page updates instantly (minimal, safe payload).
+        (0, socket_1.notifyVerificationStatus)(worker, 'approved');
         await (0, socket_1.sendNotification)({
             recipientId: worker._id.toString(),
             recipientModel: 'Worker',
@@ -414,7 +411,7 @@ const approveWorker = async (req, res) => {
         res.json({ message: 'Worker approved', worker });
     }
     catch (error) {
-        console.error('Approve worker error:', error);
+        logger_1.default.error('Approve worker error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -439,12 +436,8 @@ const rejectWorker = async (req, res) => {
         worker.accountStatus = 'test';
         worker.isActive = false;
         await worker.save();
-        // Notify worker in real-time so their page updates instantly
-        (0, socket_1.notifyUser)(worker._id.toString(), 'verification_status_updated', {
-            workerId: worker._id.toString(),
-            verificationStatus: 'rejected',
-            rejectionReason: worker.rejectionReason,
-        });
+        // Notify worker in real-time so their page updates instantly (minimal, safe payload).
+        (0, socket_1.notifyVerificationStatus)(worker, 'rejected');
         await (0, socket_1.sendNotification)({
             recipientId: worker._id.toString(),
             recipientModel: 'Worker',
@@ -458,7 +451,7 @@ const rejectWorker = async (req, res) => {
         res.json({ message: 'Worker rejected', worker });
     }
     catch (error) {
-        console.error('Reject worker error:', error);
+        logger_1.default.error('Reject worker error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -472,7 +465,7 @@ const getWithdrawals = async (_req, res) => {
         res.json({ withdrawals });
     }
     catch (error) {
-        console.error('Get withdrawals error:', error);
+        logger_1.default.error('Get withdrawals error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -511,7 +504,7 @@ const completeWithdrawal = async (req, res) => {
         res.json({ message: 'Withdrawal completed', withdrawal });
     }
     catch (error) {
-        console.error('Complete withdrawal error:', error);
+        logger_1.default.error('Complete withdrawal error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -563,7 +556,7 @@ const declineWithdrawal = async (req, res) => {
         res.json({ message: 'Withdrawal declined, amount refunded to worker', withdrawal });
     }
     catch (error) {
-        console.error('Decline withdrawal error:', error);
+        logger_1.default.error('Decline withdrawal error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -600,7 +593,7 @@ const createCategory = async (req, res) => {
         res.status(201).json({ message: 'Category created', category });
     }
     catch (error) {
-        console.error('Create category error:', error);
+        logger_1.default.error('Create category error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -632,7 +625,7 @@ const updateCategory = async (req, res) => {
         res.json({ message: 'Category updated', category });
     }
     catch (error) {
-        console.error('Update category error:', error);
+        logger_1.default.error('Update category error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -662,7 +655,7 @@ const updateCategoryDetails = async (req, res) => {
         res.json({ message: 'Category details updated', category });
     }
     catch (error) {
-        console.error('Update category details error:', error);
+        logger_1.default.error('Update category details error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -676,7 +669,7 @@ const deleteCategory = async (req, res) => {
         res.json({ message: 'Category deleted' });
     }
     catch (error) {
-        console.error('Delete category error:', error);
+        logger_1.default.error('Delete category error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -832,7 +825,7 @@ const createBanner = async (req, res) => {
         res.status(201).json({ message: 'Banner created', banner });
     }
     catch (error) {
-        console.error('Create banner error:', error);
+        logger_1.default.error('Create banner error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -854,7 +847,7 @@ const deleteBanner = async (req, res) => {
         res.json({ message: 'Banner deleted' });
     }
     catch (error) {
-        console.error('Delete banner error:', error);
+        logger_1.default.error('Delete banner error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -929,7 +922,7 @@ const updateBanner = async (req, res) => {
         res.json({ message: 'Banner updated', banner });
     }
     catch (error) {
-        console.error('Update banner error:', error);
+        logger_1.default.error('Update banner error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -957,7 +950,7 @@ const reorderBanners = async (req, res) => {
         res.json({ message: 'Banners reordered', banners });
     }
     catch (error) {
-        console.error('Reorder banners error:', error);
+        logger_1.default.error('Reorder banners error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -1021,7 +1014,7 @@ const getCustomers = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Get customers error:', error);
+        logger_1.default.error('Get customers error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -1134,7 +1127,7 @@ const getHelpTickets = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Get help tickets error:', error);
+        logger_1.default.error('Get help tickets error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -1160,7 +1153,7 @@ const resolveHelpTicket = async (req, res) => {
         res.json({ message: 'Ticket resolved', ticket });
     }
     catch (error) {
-        console.error('Resolve help ticket error:', error);
+        logger_1.default.error('Resolve help ticket error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -1200,7 +1193,7 @@ const replyHelpTicket = async (req, res) => {
         res.json({ message: 'Reply sent', ticket: ticketForAdmin || ticket });
     }
     catch (error) {
-        console.error('Reply help ticket error:', error);
+        logger_1.default.error('Reply help ticket error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -1239,7 +1232,7 @@ const getRefunds = async (_req, res) => {
         res.json({ refunds: enrichedRefunds });
     }
     catch (error) {
-        console.error('Get refunds error:', error);
+        logger_1.default.error('Get refunds error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -1287,7 +1280,7 @@ const processRefund = async (req, res) => {
         res.json({ message: 'Refund processed', booking });
     }
     catch (error) {
-        console.error('Process refund error:', error);
+        logger_1.default.error('Process refund error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -1329,7 +1322,7 @@ const rejectRefund = async (req, res) => {
         res.json({ message: 'Refund rejected', booking });
     }
     catch (error) {
-        console.error('Reject refund error:', error);
+        logger_1.default.error('Reject refund error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -1343,7 +1336,7 @@ const getAdminNotifications = async (req, res) => {
         res.json({ notifications });
     }
     catch (error) {
-        console.error('Get admin notifications error:', error);
+        logger_1.default.error('Get admin notifications error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -1461,7 +1454,7 @@ const getAllWorkers = async (req, res) => {
         res.json({ workers, stats });
     }
     catch (error) {
-        console.error('Get all workers error:', error);
+        logger_1.default.error('Get all workers error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -1558,7 +1551,7 @@ const checkAadhaarDuplicate = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Check aadhaar duplicate error:', error);
+        logger_1.default.error('Check aadhaar duplicate error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -1615,7 +1608,7 @@ const getWorkerDetail = async (req, res) => {
         res.json({ worker, bookings, bookingStats, reviewBookings, transactions, withdrawals });
     }
     catch (error) {
-        console.error('Get worker detail error:', error);
+        logger_1.default.error('Get worker detail error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -1662,7 +1655,7 @@ const blockCustomer = async (req, res) => {
         res.json({ message: `Customer blocked for ${hours} hours`, block: (0, userBlock_1.blockPayload)(user.block) });
     }
     catch (error) {
-        console.error('Block customer error:', error);
+        logger_1.default.error('Block customer error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -1681,7 +1674,7 @@ const unblockCustomer = async (req, res) => {
         res.json({ message: 'Customer unblocked' });
     }
     catch (error) {
-        console.error('Unblock customer error:', error);
+        logger_1.default.error('Unblock customer error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -1706,7 +1699,7 @@ const blockWorkerAccount = async (req, res) => {
         res.json({ message: `Worker blocked for ${hours} hours`, block: (0, userBlock_1.blockPayload)(worker.block) });
     }
     catch (error) {
-        console.error('Block worker error:', error);
+        logger_1.default.error('Block worker error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -1725,7 +1718,7 @@ const unblockWorkerAccount = async (req, res) => {
         res.json({ message: 'Worker unblocked' });
     }
     catch (error) {
-        console.error('Unblock worker error:', error);
+        logger_1.default.error('Unblock worker error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -1773,7 +1766,7 @@ const getCancellationFlags = async (req, res) => {
         res.json({ window: { hours, min }, customers, workers: flaggedWorkers });
     }
     catch (error) {
-        console.error('Get cancellation flags error:', error);
+        logger_1.default.error('Get cancellation flags error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -1799,7 +1792,7 @@ const broadcastPushToTokenHolders = async (recipientModel, title, message, data)
         }
     }
     catch (error) {
-        console.error('Broadcast push fan-out error:', error);
+        logger_1.default.error('Broadcast push fan-out error:', { err: error });
     }
 };
 // Core broadcast: in-app (bulk) + live socket + background push fan-out.
@@ -1836,7 +1829,7 @@ const broadcastNotification = async (req, res) => {
         res.json({ message: `Notification sent to ${count} ${audience}s`, count });
     }
     catch (error) {
-        console.error('Broadcast notification error:', error);
+        logger_1.default.error('Broadcast notification error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -1863,7 +1856,7 @@ const personalNotification = async (req, res) => {
         res.json({ message: 'Notification sent' });
     }
     catch (error) {
-        console.error('Personal notification error:', error);
+        logger_1.default.error('Personal notification error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -1880,7 +1873,7 @@ const getWaitlist = async (req, res) => {
         res.json({ waitlist, stats: { pending: pendingCount, reached: reachedCount } });
     }
     catch (error) {
-        console.error('Get waitlist error:', error);
+        logger_1.default.error('Get waitlist error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -1906,7 +1899,7 @@ const markWaitlistReached = async (req, res) => {
         res.json({ message: 'Marked as reached & customer notified' });
     }
     catch (error) {
-        console.error('Mark waitlist reached error:', error);
+        logger_1.default.error('Mark waitlist reached error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -1930,7 +1923,7 @@ const searchNotificationRecipients = async (req, res) => {
         res.json({ recipients });
     }
     catch (error) {
-        console.error('Search recipients error:', error);
+        logger_1.default.error('Search recipients error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -1950,7 +1943,7 @@ const getSkillRequests = async (_req, res) => {
         res.json({ workers });
     }
     catch (error) {
-        console.error('Get skill requests error:', error);
+        logger_1.default.error('Get skill requests error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -1992,7 +1985,7 @@ const reviewSkill = async (req, res) => {
         res.json({ message: decision === 'approve' ? 'Skill approved' : 'Skill rejected' });
     }
     catch (error) {
-        console.error('Review skill error:', error);
+        logger_1.default.error('Review skill error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -2024,7 +2017,7 @@ const logSkillCallAttempt = async (req, res) => {
         res.json({ message: autoRejected ? 'Auto-rejected after 3 attempts' : 'Call attempt logged', callAttempts: skill.callAttempts, autoRejected });
     }
     catch (error) {
-        console.error('Skill call attempt error:', error);
+        logger_1.default.error('Skill call attempt error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };

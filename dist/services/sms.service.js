@@ -8,6 +8,8 @@ const crypto_1 = __importDefault(require("crypto"));
 const twilio_1 = __importDefault(require("twilio"));
 const env_1 = __importDefault(require("../config/env"));
 const OtpCode_1 = __importDefault(require("../models/OtpCode"));
+const logger_1 = __importDefault(require("../utils/logger"));
+const mask_1 = require("../utils/mask");
 const OTP_EXPIRY_MINUTES = 10;
 const OTP_PURPOSE = 'password-reset';
 // After this many wrong guesses the OTP is invalidated and a new one must be
@@ -66,7 +68,7 @@ const verifyOTP = async (phone, otp) => {
 exports.verifyOTP = verifyOTP;
 const sendOTP = async (phone, otp) => {
     if (!env_1.default.TWILIO_ACCOUNT_SID || !env_1.default.TWILIO_AUTH_TOKEN || !env_1.default.TWILIO_PHONE_NUMBER) {
-        console.error('[SMS] Twilio credentials missing. OTP was not sent.');
+        logger_1.default.warn('SMS provider not configured; OTP not sent', { provider: 'twilio' });
         return false;
     }
     try {
@@ -76,12 +78,17 @@ const sendOTP = async (phone, otp) => {
             from: env_1.default.TWILIO_PHONE_NUMBER,
             to: `+91${phone}`,
         });
-        console.log(`[SMS] OTP sent successfully to ${phone}`);
+        logger_1.default.debug('OTP SMS sent', { provider: 'twilio', recipientMasked: (0, mask_1.maskPhone)(phone) });
         return true;
     }
     catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown SMS provider error';
-        console.error('[SMS] Twilio Error:', message);
+        // Twilio error messages can echo the recipient number, so log only the safe code +
+        // masked recipient — never the raw provider message.
+        logger_1.default.error('OTP SMS send failed', {
+            provider: 'twilio',
+            code: error?.code,
+            recipientMasked: (0, mask_1.maskPhone)(phone),
+        });
         return false;
     }
 };

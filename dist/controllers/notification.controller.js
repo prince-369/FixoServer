@@ -7,6 +7,7 @@ exports.unregisterAllMobilePushTokens = exports.unregisterMobilePushToken = expo
 const PushSubscription_1 = __importDefault(require("../models/PushSubscription"));
 const MobilePushToken_1 = __importDefault(require("../models/MobilePushToken"));
 const webPush_service_1 = require("../services/webPush.service");
+const logger_1 = __importDefault(require("../utils/logger"));
 const toRecipientModel = (role) => {
     if (role === 'customer')
         return 'User';
@@ -70,7 +71,7 @@ const subscribePush = async (req, res) => {
         res.json({ message: 'Push subscription saved successfully.' });
     }
     catch (error) {
-        console.error('Subscribe push error:', error);
+        logger_1.default.error('Subscribe push error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -95,7 +96,7 @@ const unsubscribePush = async (req, res) => {
         res.json({ message: 'Push subscription removed.' });
     }
     catch (error) {
-        console.error('Unsubscribe push error:', error);
+        logger_1.default.error('Unsubscribe push error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -116,7 +117,7 @@ const unsubscribeAllPush = async (req, res) => {
         res.json({ message: 'All push subscriptions removed for this user.' });
     }
     catch (error) {
-        console.error('Unsubscribe all push error:', error);
+        logger_1.default.error('Unsubscribe all push error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -150,7 +151,7 @@ const registerMobilePushToken = async (req, res) => {
         res.json({ message: 'Mobile push token saved successfully.' });
     }
     catch (error) {
-        console.error('Register mobile push token error:', error);
+        logger_1.default.error('Register mobile push token error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -175,7 +176,7 @@ const unregisterMobilePushToken = async (req, res) => {
         res.json({ message: 'Mobile push token removed.' });
     }
     catch (error) {
-        console.error('Unregister mobile push token error:', error);
+        logger_1.default.error('Unregister mobile push token error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -196,7 +197,7 @@ const unregisterAllMobilePushTokens = async (req, res) => {
         res.json({ message: 'All mobile push tokens removed for this user.' });
     }
     catch (error) {
-        console.error('Unregister all mobile push tokens error:', error);
+        logger_1.default.error('Unregister all mobile push tokens error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };

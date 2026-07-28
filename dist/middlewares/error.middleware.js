@@ -7,6 +7,7 @@ exports.errorHandler = exports.handleValidationErrors = void 0;
 const express_validator_1 = require("express-validator");
 const multer_1 = __importDefault(require("multer"));
 const env_1 = __importDefault(require("../config/env"));
+const logger_1 = __importDefault(require("../utils/logger"));
 const handleValidationErrors = (req, res, next) => {
     const errors = (0, express_validator_1.validationResult)(req);
     if (!errors.isEmpty()) {
@@ -22,14 +23,13 @@ const errorHandler = (err, req, res, _next) => {
     }
     const requestId = String(res.locals.requestId || 'unknown-request');
     const appError = err;
-    console.error(JSON.stringify({
-        level: 'error',
+    // `req.path` omits the query string (which can carry tokens); `err` preserves stack/code.
+    logger_1.default.error('Unhandled request error', {
         requestId,
         method: req.method,
-        path: req.originalUrl,
-        message: appError.message,
-        stack: appError.stack,
-    }));
+        path: req.path,
+        err: appError,
+    });
     if (appError.message === 'CORS origin not allowed') {
         res.status(403).json({ message: 'Request origin is not allowed', requestId });
         return;

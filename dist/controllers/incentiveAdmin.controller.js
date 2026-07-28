@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.adminIncentiveAnalytics = exports.adminListCouponRedemptions = exports.adminRejectRewardClaim = exports.adminApproveRewardClaim = exports.adminListRewardClaims = exports.adminUpdateMilestone = exports.adminUpsertMilestone = exports.adminListMilestones = exports.adminDeletePromotion = exports.adminTogglePromotion = exports.adminUpdatePromotion = exports.adminCreatePromotion = exports.adminListPromotions = exports.adminDeleteCoupon = exports.adminToggleCoupon = exports.adminUpdateCoupon = exports.adminCreateCoupon = exports.adminListCoupons = void 0;
+const logger_1 = __importDefault(require("../utils/logger"));
 const CouponCampaign_1 = __importDefault(require("../models/CouponCampaign"));
 const CouponRedemption_1 = __importDefault(require("../models/CouponRedemption"));
 const WorkerPromotion_1 = __importDefault(require("../models/WorkerPromotion"));
@@ -24,7 +25,7 @@ const adminListCoupons = async (_req, res) => {
         res.json({ coupons });
     }
     catch (error) {
-        console.error('adminListCoupons error:', error);
+        logger_1.default.error('adminListCoupons error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -68,7 +69,7 @@ const adminCreateCoupon = async (req, res) => {
         res.status(201).json({ coupon });
     }
     catch (error) {
-        console.error('adminCreateCoupon error:', error);
+        logger_1.default.error('adminCreateCoupon error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -92,7 +93,7 @@ const adminUpdateCoupon = async (req, res) => {
         res.json({ coupon });
     }
     catch (error) {
-        console.error('adminUpdateCoupon error:', error);
+        logger_1.default.error('adminUpdateCoupon error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -113,7 +114,7 @@ const adminToggleCoupon = async (req, res) => {
         res.json({ coupon });
     }
     catch (error) {
-        console.error('adminToggleCoupon error:', error);
+        logger_1.default.error('adminToggleCoupon error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -128,7 +129,7 @@ const adminDeleteCoupon = async (req, res) => {
         res.json({ message: 'Coupon deleted' });
     }
     catch (error) {
-        console.error('adminDeleteCoupon error:', error);
+        logger_1.default.error('adminDeleteCoupon error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -142,7 +143,7 @@ const adminListPromotions = async (_req, res) => {
         res.json({ promotions });
     }
     catch (error) {
-        console.error('adminListPromotions error:', error);
+        logger_1.default.error('adminListPromotions error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -187,7 +188,7 @@ const adminCreatePromotion = async (req, res) => {
         res.status(201).json({ promotion });
     }
     catch (error) {
-        console.error('adminCreatePromotion error:', error);
+        logger_1.default.error('adminCreatePromotion error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -213,7 +214,7 @@ const adminUpdatePromotion = async (req, res) => {
         res.json({ promotion });
     }
     catch (error) {
-        console.error('adminUpdatePromotion error:', error);
+        logger_1.default.error('adminUpdatePromotion error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -234,7 +235,7 @@ const adminTogglePromotion = async (req, res) => {
         res.json({ promotion });
     }
     catch (error) {
-        console.error('adminTogglePromotion error:', error);
+        logger_1.default.error('adminTogglePromotion error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -249,7 +250,7 @@ const adminDeletePromotion = async (req, res) => {
         res.json({ message: 'Promotion deleted' });
     }
     catch (error) {
-        console.error('adminDeletePromotion error:', error);
+        logger_1.default.error('adminDeletePromotion error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -263,7 +264,7 @@ const adminListMilestones = async (_req, res) => {
         res.json({ milestones });
     }
     catch (error) {
-        console.error('adminListMilestones error:', error);
+        logger_1.default.error('adminListMilestones error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -286,7 +287,7 @@ const adminUpsertMilestone = async (req, res) => {
         res.json({ milestone });
     }
     catch (error) {
-        console.error('adminUpsertMilestone error:', error);
+        logger_1.default.error('adminUpsertMilestone error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -307,7 +308,7 @@ const adminUpdateMilestone = async (req, res) => {
         res.json({ milestone });
     }
     catch (error) {
-        console.error('adminUpdateMilestone error:', error);
+        logger_1.default.error('adminUpdateMilestone error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -328,7 +329,7 @@ const adminListRewardClaims = async (req, res) => {
         res.json({ claims });
     }
     catch (error) {
-        console.error('adminListRewardClaims error:', error);
+        logger_1.default.error('adminListRewardClaims error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -374,7 +375,7 @@ const adminApproveRewardClaim = async (req, res) => {
         res.json({ message: 'Reward claim approved and marked paid', claim });
     }
     catch (error) {
-        console.error('adminApproveRewardClaim error:', error);
+        logger_1.default.error('adminApproveRewardClaim error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -412,7 +413,7 @@ const adminRejectRewardClaim = async (req, res) => {
         res.json({ message: 'Reward claim rejected', claim });
     }
     catch (error) {
-        console.error('adminRejectRewardClaim error:', error);
+        logger_1.default.error('adminRejectRewardClaim error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -444,7 +445,7 @@ const adminListCouponRedemptions = async (_req, res) => {
         res.json({ redemptions: rows, totalPlatformCost });
     }
     catch (error) {
-        console.error('adminListCouponRedemptions error:', error);
+        logger_1.default.error('adminListCouponRedemptions error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -492,7 +493,7 @@ const adminIncentiveAnalytics = async (_req, res) => {
         });
     }
     catch (error) {
-        console.error('adminIncentiveAnalytics error:', error);
+        logger_1.default.error('adminIncentiveAnalytics error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };

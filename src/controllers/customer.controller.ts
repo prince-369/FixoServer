@@ -19,7 +19,8 @@ import { generateTicketNumber } from '../services/ticketNumber.service';
 import { uploadBufferToCloudinary } from '../services/cloudinary.service';
 import { sendAccountDeactivationOtpEmail } from '../services/email.service';
 import { removeBookingVoiceNote } from '../services/bookingVoice.service';
-import { notifyRole, notifyUser, sendNotification, sendAdminNotification } from '../socket';
+import { notifyRole, notifyUser, sendNotification, sendAdminNotification, emitNotificationUnreadCount } from '../socket';
+import logger from '../utils/logger';
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const DEACTIVATION_OTP_TTL_MINUTES = 10;
@@ -39,7 +40,7 @@ export const getProfile = async (req: Request, res: Response): Promise<void> => 
     }
     res.json({ user });
   } catch (error) {
-    console.error('Get profile error:', error);
+    logger.error('Get profile error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -61,7 +62,7 @@ export const updateProfile = async (req: Request, res: Response): Promise<void> 
     const user = await User.findByIdAndUpdate(req.user!.id, updateData, { new: true });
     res.json({ message: 'Profile updated', user });
   } catch (error) {
-    console.error('Update profile error:', error);
+    logger.error('Update profile error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -113,7 +114,7 @@ export const deleteAccount = async (req: Request, res: Response): Promise<void> 
 
     res.json({ message: 'Account deleted successfully' });
   } catch (error) {
-    console.error('Delete account error:', error);
+    logger.error('Delete account error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -156,7 +157,7 @@ export const sendDeactivateAccountOtp = async (req: Request, res: Response): Pro
 
     res.json({ message: 'OTP sent to your email address.' });
   } catch (error) {
-    console.error('Send deactivation OTP error:', error);
+    logger.error('Send deactivation OTP error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -229,7 +230,7 @@ export const confirmDeactivateAccount = async (req: Request, res: Response): Pro
 
     res.json({ message: 'Account deactivated successfully.' });
   } catch (error) {
-    console.error('Confirm deactivate account error:', error);
+    logger.error('Confirm deactivate account error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -240,7 +241,7 @@ export const getCategories = async (_req: Request, res: Response): Promise<void>
     const categories = await Category.find({ isActive: true }).sort({ order: 1 });
     res.json({ categories });
   } catch (error) {
-    console.error('Get categories error:', error);
+    logger.error('Get categories error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -265,7 +266,7 @@ export const getServiceAvailability = async (req: Request, res: Response): Promi
     });
     res.json({ available: count > 0, workerCount: count });
   } catch (error) {
-    console.error('Service availability error:', error);
+    logger.error('Service availability error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -301,7 +302,7 @@ export const joinWaitlist = async (req: Request, res: Response): Promise<void> =
 
     res.status(201).json({ message: 'Added to waitlist' });
   } catch (error) {
-    console.error('Join waitlist error:', error);
+    logger.error('Join waitlist error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -326,7 +327,7 @@ export const getCategoryDetail = async (req: Request, res: Response): Promise<vo
     }
     res.json({ category });
   } catch (error) {
-    console.error('Get category detail error:', error);
+    logger.error('Get category detail error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -356,7 +357,7 @@ export const getBanners = async (_req: Request, res: Response): Promise<void> =>
     }).sort({ order: 1 });
     res.json({ banners });
   } catch (error) {
-    console.error('Get banners error:', error);
+    logger.error('Get banners error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -382,7 +383,7 @@ export const getBookings = async (req: Request, res: Response): Promise<void> =>
 
     res.json({ bookings });
   } catch (error) {
-    console.error('Get bookings error:', error);
+    logger.error('Get bookings error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -415,7 +416,7 @@ export const getBookingDetail = async (req: Request, res: Response): Promise<voi
 
     res.json({ booking, workerBusy });
   } catch (error) {
-    console.error('Get booking detail error:', error);
+    logger.error('Get booking detail error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -468,7 +469,7 @@ export const revealCompletionCode = async (req: Request, res: Response): Promise
       booking,
     });
   } catch (error) {
-    console.error('Reveal completion code error:', error);
+    logger.error('Reveal completion code error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -495,7 +496,7 @@ export const getTransactions = async (req: Request, res: Response): Promise<void
 
     res.json({ transactions: sanitizedTransactions });
   } catch (error) {
-    console.error('Get transactions error:', error);
+    logger.error('Get transactions error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -605,7 +606,7 @@ export const cancelBooking = async (req: Request, res: Response): Promise<void> 
     });
     res.json({ message: 'Booking cancelled', booking });
   } catch (error) {
-    console.error('Cancel booking error:', error);
+    logger.error('Cancel booking error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -645,7 +646,7 @@ export const submitRefundDetails = async (req: Request, res: Response): Promise<
 
     res.json({ message: 'Refund details submitted. Refund will be processed within 3-10 business days.' });
   } catch (error) {
-    console.error('Submit refund details error:', error);
+    logger.error('Submit refund details error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -708,7 +709,7 @@ export const submitReview = async (req: Request, res: Response): Promise<void> =
 
     res.json({ message: 'Review submitted', review: booking.review });
   } catch (error) {
-    console.error('Submit review error:', error);
+    logger.error('Submit review error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -722,7 +723,7 @@ export const getNotifications = async (req: Request, res: Response): Promise<voi
 
     res.json({ notifications });
   } catch (error) {
-    console.error('Get notifications error:', error);
+    logger.error('Get notifications error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -734,9 +735,11 @@ export const markNotificationRead = async (req: Request, res: Response): Promise
       { _id: req.params.id, recipient: req.user!.id },
       { isRead: true }
     );
+    // Push the fresh badge count only after the write succeeded (best-effort).
+    void emitNotificationUnreadCount(req.user!.id, 'User');
     res.json({ message: 'Marked as read' });
   } catch (error) {
-    console.error('Mark notification read error:', error);
+    logger.error('Mark notification read error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -748,9 +751,10 @@ export const markAllNotificationsRead = async (req: Request, res: Response): Pro
       { recipient: req.user!.id, recipientModel: 'User', isRead: false },
       { isRead: true }
     );
+    void emitNotificationUnreadCount(req.user!.id, 'User');
     res.json({ message: 'All marked as read' });
   } catch (error) {
-    console.error('Mark all read error:', error);
+    logger.error('Mark all read error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -759,6 +763,7 @@ export const markAllNotificationsRead = async (req: Request, res: Response): Pro
 export const deleteNotification = async (req: Request, res: Response): Promise<void> => {
   try {
     await Notification.findOneAndDelete({ _id: req.params.id, recipient: req.user!.id });
+    void emitNotificationUnreadCount(req.user!.id, 'User');
     res.json({ message: 'Deleted' });
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
@@ -791,7 +796,7 @@ export const getChatbotQA = async (req: Request, res: Response): Promise<void> =
 
     res.json({ qas, categories });
   } catch (error) {
-    console.error('Get chatbot QA error:', error);
+    logger.error('Get chatbot QA error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -850,7 +855,7 @@ export const createHelpTicket = async (req: Request, res: Response): Promise<voi
 
     res.status(201).json({ message: 'Ticket created', ticket });
   } catch (error) {
-    console.error('Create help ticket error:', error);
+    logger.error('Create help ticket error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -894,7 +899,7 @@ export const getHelpTickets = async (req: Request, res: Response): Promise<void>
       },
     });
   } catch (error) {
-    console.error('Get help tickets error:', error);
+    logger.error('Get help tickets error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -909,7 +914,7 @@ export const getHelpTicketDetail = async (req: Request, res: Response): Promise<
     }
     res.json({ ticket });
   } catch (error) {
-    console.error('Get ticket detail error:', error);
+    logger.error('Get ticket detail error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -950,7 +955,7 @@ export const appendHelpTicketMessage = async (req: Request, res: Response): Prom
 
     res.json({ message: 'Message sent', ticket });
   } catch (error) {
-    console.error('Append help ticket message error:', error);
+    logger.error('Append help ticket message error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -992,7 +997,7 @@ export const escalateHelpTicket = async (req: Request, res: Response): Promise<v
 
     res.json({ message: 'Ticket escalated', ticket });
   } catch (error) {
-    console.error('Escalate help ticket error:', error);
+    logger.error('Escalate help ticket error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };

@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.sendWebPushNotification = exports.getWebPushPublicKey = exports.isWebPushEnabled = void 0;
 const web_push_1 = __importDefault(require("web-push"));
 const env_1 = __importDefault(require("../config/env"));
+const logger_1 = __importDefault(require("../utils/logger"));
 const PushSubscription_1 = __importDefault(require("../models/PushSubscription"));
 let vapidConfigured = false;
 const isConfigComplete = () => {
@@ -25,7 +26,7 @@ const ensureVapidConfigured = () => {
         return true;
     }
     catch (error) {
-        console.error('Failed to configure web push VAPID details:', error);
+        logger_1.default.error('Failed to configure web push VAPID details', { err: error });
         return false;
     }
 };
@@ -107,7 +108,7 @@ const sendWebPushNotification = async (params) => {
             if ([404, 410].includes(statusCode)) {
                 endpointsToDeactivate.push(subscription.endpoint);
             }
-            console.error('Web push send error:', error?.message || error);
+            logger_1.default.warn('Web push send failed', { err: error });
         }
     }));
     if (endpointsToDeactivate.length > 0) {

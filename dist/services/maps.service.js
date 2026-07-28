@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getDistanceMatrix = exports.geocodeAddress = void 0;
 const axios_1 = __importDefault(require("axios"));
 const env_1 = __importDefault(require("../config/env"));
+const logger_1 = __importDefault(require("../utils/logger"));
 const REQUEST_HEADERS = {
     'User-Agent': 'Fixo/1.0 (+https://fixo.app)',
     Accept: 'application/json',
@@ -51,7 +52,7 @@ const geocodeAddress = async (address) => {
         return null;
     }
     catch (error) {
-        console.error('Geocoding error:', error);
+        logger_1.default.warn('Geocoding failed', { err: error });
         return null;
     }
 };
@@ -74,7 +75,7 @@ const getDistanceMatrix = async (originLat, originLng, destLat, destLng) => {
         return null;
     }
     catch (error) {
-        console.error('Distance matrix error:', error);
+        logger_1.default.warn('Distance matrix failed', { err: error });
         return null;
     }
 };

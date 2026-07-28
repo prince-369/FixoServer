@@ -38,6 +38,7 @@ const workBidSchema = new mongoose_1.Schema({
     booking: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Booking', required: true },
     worker: { type: mongoose_1.Schema.Types.ObjectId, ref: 'Worker', required: true },
     priceOffered: { type: Number, required: true, min: 1 },
+    message: { type: String, default: '', maxlength: 500 },
     status: {
         type: String,
         enum: ['pending', 'accepted', 'rejected'],

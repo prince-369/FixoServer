@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import logger from '../utils/logger';
 import mongoose from 'mongoose';
 import CouponCampaign from '../models/CouponCampaign';
 import CouponRedemption from '../models/CouponRedemption';
@@ -21,7 +22,7 @@ export const adminListCoupons = async (_req: Request, res: Response): Promise<vo
     const coupons = await CouponCampaign.find().sort({ createdAt: -1 });
     res.json({ coupons });
   } catch (error) {
-    console.error('adminListCoupons error:', error);
+    logger.error('adminListCoupons error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -72,7 +73,7 @@ export const adminCreateCoupon = async (req: Request, res: Response): Promise<vo
     await logAdminActivity(req, { action: 'coupon.create', category: 'coupons', targetType: 'coupon', targetId: String(coupon._id) });
     res.status(201).json({ coupon });
   } catch (error) {
-    console.error('adminCreateCoupon error:', error);
+    logger.error('adminCreateCoupon error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -94,7 +95,7 @@ export const adminUpdateCoupon = async (req: Request, res: Response): Promise<vo
     }
     res.json({ coupon });
   } catch (error) {
-    console.error('adminUpdateCoupon error:', error);
+    logger.error('adminUpdateCoupon error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -118,7 +119,7 @@ export const adminToggleCoupon = async (req: Request, res: Response): Promise<vo
     });
     res.json({ coupon });
   } catch (error) {
-    console.error('adminToggleCoupon error:', error);
+    logger.error('adminToggleCoupon error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -132,7 +133,7 @@ export const adminDeleteCoupon = async (req: Request, res: Response): Promise<vo
     }
     res.json({ message: 'Coupon deleted' });
   } catch (error) {
-    console.error('adminDeleteCoupon error:', error);
+    logger.error('adminDeleteCoupon error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -146,7 +147,7 @@ export const adminListPromotions = async (_req: Request, res: Response): Promise
     const promotions = await WorkerPromotion.find().sort({ createdAt: -1 });
     res.json({ promotions });
   } catch (error) {
-    console.error('adminListPromotions error:', error);
+    logger.error('adminListPromotions error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -198,7 +199,7 @@ export const adminCreatePromotion = async (req: Request, res: Response): Promise
     await logAdminActivity(req, { action: 'promotion.create', category: 'promotions', targetType: 'promotion', targetId: String(promotion._id) });
     res.status(201).json({ promotion });
   } catch (error) {
-    console.error('adminCreatePromotion error:', error);
+    logger.error('adminCreatePromotion error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -221,7 +222,7 @@ export const adminUpdatePromotion = async (req: Request, res: Response): Promise
     }
     res.json({ promotion });
   } catch (error) {
-    console.error('adminUpdatePromotion error:', error);
+    logger.error('adminUpdatePromotion error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -245,7 +246,7 @@ export const adminTogglePromotion = async (req: Request, res: Response): Promise
     });
     res.json({ promotion });
   } catch (error) {
-    console.error('adminTogglePromotion error:', error);
+    logger.error('adminTogglePromotion error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -259,7 +260,7 @@ export const adminDeletePromotion = async (req: Request, res: Response): Promise
     }
     res.json({ message: 'Promotion deleted' });
   } catch (error) {
-    console.error('adminDeletePromotion error:', error);
+    logger.error('adminDeletePromotion error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -273,7 +274,7 @@ export const adminListMilestones = async (_req: Request, res: Response): Promise
     const milestones = await RewardMilestone.find().sort({ order: 1, bookingsRequired: 1 });
     res.json({ milestones });
   } catch (error) {
-    console.error('adminListMilestones error:', error);
+    logger.error('adminListMilestones error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -299,7 +300,7 @@ export const adminUpsertMilestone = async (req: Request, res: Response): Promise
     );
     res.json({ milestone });
   } catch (error) {
-    console.error('adminUpsertMilestone error:', error);
+    logger.error('adminUpsertMilestone error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -318,7 +319,7 @@ export const adminUpdateMilestone = async (req: Request, res: Response): Promise
     }
     res.json({ milestone });
   } catch (error) {
-    console.error('adminUpdateMilestone error:', error);
+    logger.error('adminUpdateMilestone error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -339,7 +340,7 @@ export const adminListRewardClaims = async (req: Request, res: Response): Promis
       .sort({ createdAt: -1 });
     res.json({ claims });
   } catch (error) {
-    console.error('adminListRewardClaims error:', error);
+    logger.error('adminListRewardClaims error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -389,7 +390,7 @@ export const adminApproveRewardClaim = async (req: Request, res: Response): Prom
 
     res.json({ message: 'Reward claim approved and marked paid', claim });
   } catch (error) {
-    console.error('adminApproveRewardClaim error:', error);
+    logger.error('adminApproveRewardClaim error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -430,7 +431,7 @@ export const adminRejectRewardClaim = async (req: Request, res: Response): Promi
 
     res.json({ message: 'Reward claim rejected', claim });
   } catch (error) {
-    console.error('adminRejectRewardClaim error:', error);
+    logger.error('adminRejectRewardClaim error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -465,7 +466,7 @@ export const adminListCouponRedemptions = async (_req: Request, res: Response): 
 
     res.json({ redemptions: rows, totalPlatformCost });
   } catch (error) {
-    console.error('adminListCouponRedemptions error:', error);
+    logger.error('adminListCouponRedemptions error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -524,7 +525,7 @@ export const adminIncentiveAnalytics = async (_req: Request, res: Response): Pro
       totalIncentiveCost,
     });
   } catch (error) {
-    console.error('adminIncentiveAnalytics error:', error);
+    logger.error('adminIncentiveAnalytics error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };

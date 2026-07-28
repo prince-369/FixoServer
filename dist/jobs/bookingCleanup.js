@@ -7,6 +7,7 @@ exports.cleanupClosedBookingVoiceNotes = exports.notifyDueScheduledBookings = ex
 const Booking_1 = __importDefault(require("../models/Booking"));
 const socket_1 = require("../socket");
 const env_1 = __importDefault(require("../config/env"));
+const logger_1 = __importDefault(require("../utils/logger"));
 const cloudinary_service_1 = require("../services/cloudinary.service");
 /**
  * Auto-cancel stale bookings that are still in 'finding_workers' status
@@ -47,12 +48,12 @@ const cancelStaleBookings = async () => {
             });
         }
         if (cancelledCount > 0) {
-            console.log(`Auto-cancelled ${cancelledCount} stale booking(s)`);
+            logger_1.default.info('Auto-cancelled stale bookings', { count: cancelledCount });
         }
         return cancelledCount;
     }
     catch (error) {
-        console.error('Stale booking cleanup error:', error);
+        logger_1.default.error('Stale booking cleanup failed', { err: error });
         return 0;
     }
 };
@@ -102,12 +103,12 @@ const notifyDueScheduledBookings = async () => {
             }
         }
         if (notifiedCount > 0) {
-            console.log(`Notified ${notifiedCount} scheduled booking(s) whose time arrived`);
+            logger_1.default.info('Notified due scheduled bookings', { count: notifiedCount });
         }
         return notifiedCount;
     }
     catch (error) {
-        console.error('Scheduled booking notify error:', error);
+        logger_1.default.error('Scheduled booking notify failed', { err: error });
         return 0;
     }
 };
@@ -131,18 +132,19 @@ const cleanupClosedBookingVoiceNotes = async () => {
                 await (0, cloudinary_service_1.deleteFromCloudinary)(booking.voiceNote.publicId, 'video');
             }
             catch (error) {
-                console.error('Failed to delete closed-booking voice note from Cloudinary:', error);
+                // Recoverable: the next cleanup run retries this deletion.
+                logger_1.default.warn('Failed to delete closed-booking voice note from Cloudinary', { err: error });
             }
             await Booking_1.default.updateOne({ _id: booking._id }, { $unset: { voiceNote: 1 } });
             cleanedCount += 1;
         }
         if (cleanedCount > 0) {
-            console.log(`Cleaned ${cleanedCount} closed-booking voice note(s)`);
+            logger_1.default.info('Cleaned closed-booking voice notes', { count: cleanedCount });
         }
         return cleanedCount;
     }
     catch (error) {
-        console.error('Closed booking voice note cleanup error:', error);
+        logger_1.default.error('Closed booking voice note cleanup failed', { err: error });
         return 0;
     }
 };

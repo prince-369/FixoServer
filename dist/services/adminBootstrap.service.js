@@ -6,6 +6,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getSeedAdminBootstrapStatus = exports.syncSeedAdminCredentials = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const Admin_1 = __importDefault(require("../models/Admin"));
+const logger_1 = __importDefault(require("../utils/logger"));
+const mask_1 = require("../utils/mask");
 const sanitizeEnvValue = (value) => value.trim().replace(/^['"]+|['"]+$/g, '').trim();
 const getSeedAdminEmail = () => {
     const raw = process.env.ADMIN_SEED_EMAIL;
@@ -23,12 +25,12 @@ const syncSeedAdminCredentials = async () => {
     const seedEmail = getSeedAdminEmail();
     const seedPassword = getSeedAdminPassword();
     if (!seedEmail || !seedPassword) {
-        console.log('[INFO] Admin bootstrap sync skipped. Set ADMIN_SEED_EMAIL and ADMIN_SEED_PASSWORD in env.');
+        logger_1.default.info('Admin bootstrap sync skipped (ADMIN_SEED_EMAIL/ADMIN_SEED_PASSWORD not set)');
         return;
     }
     const hashedPassword = await bcryptjs_1.default.hash(seedPassword, 12);
     const admin = await Admin_1.default.findOneAndUpdate({ $or: [{ email: seedEmail }, { role: 'superadmin' }] }, { $set: { email: seedEmail, password: hashedPassword, role: 'superadmin' } }, { upsert: true, returnDocument: 'after', sort: { createdAt: 1 }, setDefaultsOnInsert: true });
-    console.log(`[OK] Admin credentials synced from env for ${admin?.email || seedEmail}`);
+    logger_1.default.info('Admin credentials synced from env', { recipientMasked: (0, mask_1.maskEmail)(admin?.email || seedEmail) });
 };
 exports.syncSeedAdminCredentials = syncSeedAdminCredentials;
 const getSeedAdminBootstrapStatus = async () => {

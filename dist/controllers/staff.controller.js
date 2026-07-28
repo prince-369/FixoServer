@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getStaffActivity = exports.deleteStaff = exports.updateStaff = exports.createStaff = exports.listStaff = exports.getStaffMeta = void 0;
+const logger_1 = __importDefault(require("../utils/logger"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const Admin_1 = __importDefault(require("../models/Admin"));
@@ -42,7 +43,7 @@ const listStaff = async (_req, res) => {
         res.json({ staff: result });
     }
     catch (error) {
-        console.error('List staff error:', error);
+        logger_1.default.error('List staff error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -98,7 +99,7 @@ const createStaff = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Create staff error:', error);
+        logger_1.default.error('Create staff error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -143,7 +144,7 @@ const updateStaff = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Update staff error:', error);
+        logger_1.default.error('Update staff error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -168,7 +169,7 @@ const deleteStaff = async (req, res) => {
         res.json({ message: 'Staff removed' });
     }
     catch (error) {
-        console.error('Delete staff error:', error);
+        logger_1.default.error('Delete staff error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -202,7 +203,7 @@ const getStaffActivity = async (req, res) => {
         res.json({ summary: byStaff, recent });
     }
     catch (error) {
-        console.error('Get staff activity error:', error);
+        logger_1.default.error('Get staff activity error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };

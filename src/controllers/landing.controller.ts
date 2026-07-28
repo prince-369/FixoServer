@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import logger from '../utils/logger';
 import LaunchSignup from '../models/LaunchSignup';
 import PartnerRequest from '../models/PartnerRequest';
 import { sendWaitlistSignupEmail, sendPartnerRequestEmail } from '../services/email.service';
@@ -88,7 +89,7 @@ export const joinLaunchWaitlist = async (req: Request, res: Response): Promise<v
       data: { contact: key, role, total },
     });
   } catch (error) {
-    console.error('Join launch waitlist error:', error);
+    logger.error('Join launch waitlist error:', { err: error });
     if (!res.headersSent) res.status(500).json({ message: 'Could not sign you up. Please try again.' });
   }
 };
@@ -141,7 +142,7 @@ export const submitPartnerRequest = async (req: Request, res: Response): Promise
       data: { fullName, company, phone, email, city, partnershipType },
     });
   } catch (error) {
-    console.error('Submit partner request error:', error);
+    logger.error('Submit partner request error:', { err: error });
     if (!res.headersSent) res.status(500).json({ message: 'Could not send your request. Please try again.' });
   }
 };
@@ -178,7 +179,7 @@ export const getLaunchWaitlist = async (req: Request, res: Response): Promise<vo
       stats: { all: customers + workers, customers, workers, notified },
     });
   } catch (error) {
-    console.error('Get launch waitlist error:', error);
+    logger.error('Get launch waitlist error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -209,7 +210,7 @@ export const getPartnerRequests = async (req: Request, res: Response): Promise<v
       stats: { all: newCount + contacted + closed, new: newCount, contacted, closed },
     });
   } catch (error) {
-    console.error('Get partner requests error:', error);
+    logger.error('Get partner requests error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -229,7 +230,7 @@ export const updatePartnerRequestStatus = async (req: Request, res: Response): P
     }
     res.json({ message: 'Status updated', item });
   } catch (error) {
-    console.error('Update partner request status error:', error);
+    logger.error('Update partner request status error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -249,7 +250,7 @@ export const markSignupNotified = async (req: Request, res: Response): Promise<v
     }
     res.json({ message: 'Updated', item });
   } catch (error) {
-    console.error('Mark signup notified error:', error);
+    logger.error('Mark signup notified error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };

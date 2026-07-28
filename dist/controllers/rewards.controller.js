@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.claimPromotionBonus = exports.getPromotionHistory = exports.getWorkerPromotions = exports.validateCoupon = exports.getAvailableCoupons = exports.getRewardClaims = exports.claimReward = exports.getRewards = exports.ensureDefaultMilestones = void 0;
+const logger_1 = __importDefault(require("../utils/logger"));
 const mongoose_1 = __importDefault(require("mongoose"));
 const RewardMilestone_1 = __importDefault(require("../models/RewardMilestone"));
 const RewardClaim_1 = __importDefault(require("../models/RewardClaim"));
@@ -30,7 +31,7 @@ const ensureDefaultMilestones = async () => {
         await RewardMilestone_1.default.insertMany(DEFAULT_MILESTONES);
     }
     catch (error) {
-        console.error('ensureDefaultMilestones error:', error);
+        logger_1.default.error('ensureDefaultMilestones error:', { err: error });
     }
 };
 exports.ensureDefaultMilestones = ensureDefaultMilestones;
@@ -79,7 +80,7 @@ const getRewards = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Get rewards error:', error);
+        logger_1.default.error('Get rewards error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -179,7 +180,7 @@ const claimReward = async (req, res) => {
         res.status(201).json({ message: 'Reward claim submitted for review', claim });
     }
     catch (error) {
-        console.error('Claim reward error:', error);
+        logger_1.default.error('Claim reward error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -193,7 +194,7 @@ const getRewardClaims = async (req, res) => {
         res.json({ claims });
     }
     catch (error) {
-        console.error('Get reward claims error:', error);
+        logger_1.default.error('Get reward claims error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -235,7 +236,7 @@ const getAvailableCoupons = async (req, res) => {
         res.json({ coupons: available });
     }
     catch (error) {
-        console.error('Get available coupons error:', error);
+        logger_1.default.error('Get available coupons error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -272,7 +273,7 @@ const validateCoupon = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Validate coupon error:', error);
+        logger_1.default.error('Validate coupon error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -341,7 +342,7 @@ const getWorkerPromotions = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Get worker promotions error:', error);
+        logger_1.default.error('Get worker promotions error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -355,7 +356,7 @@ const getPromotionHistory = async (req, res) => {
         res.json({ history: redemptions });
     }
     catch (error) {
-        console.error('Get promotion history error:', error);
+        logger_1.default.error('Get promotion history error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };
@@ -389,7 +390,7 @@ const claimPromotionBonus = async (req, res) => {
         });
     }
     catch (error) {
-        console.error('Claim promotion bonus error:', error);
+        logger_1.default.error('Claim promotion bonus error:', { err: error });
         res.status(500).json({ message: 'Server error' });
     }
 };

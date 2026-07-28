@@ -16,6 +16,7 @@ import { generateOTP, storeOTP, verifyOTP, sendOTP } from '../services/sms.servi
 import { sendPasswordResetEmail } from '../services/email.service';
 import { uploadBufferToCloudinary } from '../services/cloudinary.service';
 import env from '../config/env';
+import logger from '../utils/logger';
 
 const REFRESH_TOKEN_DAYS = 365;
 const EMAIL_RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
@@ -123,7 +124,8 @@ const handleGoogleErrorResponse = (
   fallback500Message: string
 ): void => {
   if (error instanceof GoogleAudienceMismatchError) {
-    console.error('Google audience mismatch', {
+    // OAuth client IDs are config, not secrets — safe to log for diagnosing the mismatch.
+    logger.warn('Google audience mismatch', {
       audience: error.audience,
       authorizedParty: error.authorizedParty,
       allowedClientIds: error.allowedClientIds,
@@ -265,6 +267,7 @@ const toWorkerAuthPayload = (worker: {
   aadhaarFront?: string;
   aadhaarBack?: string;
   skills?: unknown[];
+  updatedAt?: Date | string | null;
 }) => ({
   id: worker._id,
   fullName: worker.fullName,
@@ -276,6 +279,8 @@ const toWorkerAuthPayload = (worker: {
   verificationSlot: worker.verificationSlot,
   whatsappNumber: worker.whatsappNumber,
   rejectionReason: worker.rejectionReason,
+  // Monotonic version marker for the client's stale-response guard (Phase 4).
+  updatedAt: worker.updatedAt ? new Date(worker.updatedAt).toISOString() : undefined,
   profileCompleted: worker.profileCompleted,
   isActive: worker.isActive,
   balance: worker.balance,
@@ -325,7 +330,7 @@ export const registerCustomer = async (req: Request, res: Response): Promise<voi
       },
     });
   } catch (error) {
-    console.error('Register customer error:', error);
+    logger.error('Register customer error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -380,7 +385,7 @@ export const googleAuthCustomer = async (req: Request, res: Response): Promise<v
       },
     });
   } catch (error) {
-    console.error('Google auth error:', error);
+    logger.error('Google auth error:', { err: error });
     handleGoogleErrorResponse(res, error, 'Google authentication failed');
   }
 };
@@ -473,7 +478,7 @@ export const completeGoogleRegistration = async (req: Request, res: Response): P
       },
     });
   } catch (error) {
-    console.error('Complete Google registration error:', error);
+    logger.error('Complete Google registration error:', { err: error });
     handleGoogleErrorResponse(res, error, 'Server error');
   }
 };
@@ -528,7 +533,7 @@ export const loginCustomer = async (req: Request, res: Response): Promise<void> 
       },
     });
   } catch (error) {
-    console.error('Login customer error:', error);
+    logger.error('Login customer error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -574,7 +579,7 @@ export const googleAuthWorker = async (req: Request, res: Response): Promise<voi
       worker: toWorkerAuthPayload(worker),
     });
   } catch (error) {
-    console.error('Worker Google auth error:', error);
+    logger.error('Worker Google auth error:', { err: error });
     handleGoogleErrorResponse(res, error, 'Google authentication failed');
   }
 };
@@ -693,7 +698,7 @@ export const registerWorkerWithGoogle = async (req: Request, res: Response): Pro
       worker: toWorkerAuthPayload(worker),
     });
   } catch (error) {
-    console.error('Register worker with Google error:', error);
+    logger.error('Register worker with Google error:', { err: error });
     handleGoogleErrorResponse(res, error, 'Server error');
   }
 };
@@ -765,7 +770,7 @@ export const registerWorker = async (req: Request, res: Response): Promise<void>
       worker: toWorkerAuthPayload(worker),
     });
   } catch (error) {
-    console.error('Register worker error:', error);
+    logger.error('Register worker error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -816,7 +821,7 @@ export const loginWorker = async (req: Request, res: Response): Promise<void> =>
       worker: toWorkerAuthPayload(worker),
     });
   } catch (error) {
-    console.error('Login worker error:', error);
+    logger.error('Login worker error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -869,7 +874,7 @@ export const loginAdmin = async (req: Request, res: Response): Promise<void> => 
       },
     });
   } catch (error) {
-    console.error('Login admin error:', error);
+    logger.error('Login admin error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -946,7 +951,7 @@ export const forgotPassword = async (req: Request, res: Response): Promise<void>
       }
     }
   } catch (error) {
-    console.error('Forgot password error:', error);
+    logger.error('Forgot password error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -979,7 +984,7 @@ export const verifyOTPHandler = async (req: Request, res: Response): Promise<voi
 
     res.json({ message: 'OTP verified', resetToken: rawToken });
   } catch (error) {
-    console.error('Verify OTP error:', error);
+    logger.error('Verify OTP error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1012,7 +1017,7 @@ export const resetPassword = async (req: Request, res: Response): Promise<void> 
 
     res.json({ message: 'Password reset successful' });
   } catch (error) {
-    console.error('Reset password error:', error);
+    logger.error('Reset password error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1071,7 +1076,7 @@ export const changePassword = async (req: Request, res: Response): Promise<void>
 
     res.json({ message: 'Password changed successfully' });
   } catch (error) {
-    console.error('Change password error:', error);
+    logger.error('Change password error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1138,7 +1143,7 @@ export const getMe = async (req: Request, res: Response): Promise<void> => {
       }
     }
   } catch (error) {
-    console.error('Get me error:', error);
+    logger.error('Get me error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1185,7 +1190,7 @@ export const sendPasswordSetupOtp = async (req: Request, res: Response): Promise
 
     res.json({ message: 'OTP sent to your email', email: email.replace(/(.{2})(.*)(@.*)/, '$1***$3') });
   } catch (error) {
-    console.error('Send password setup OTP error:', error);
+    logger.error('Send password setup OTP error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1249,7 +1254,7 @@ export const setPasswordForOAuthUser = async (req: Request, res: Response): Prom
 
     res.json({ message: 'Password set successfully! You can now login with email/phone and password.' });
   } catch (error) {
-    console.error('Set password error:', error);
+    logger.error('Set password error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1285,7 +1290,7 @@ export const refresh = async (req: Request, res: Response): Promise<void> => {
 
     res.json({ accessToken, role: stored.role });
   } catch (error) {
-    console.error('Refresh token error:', error);
+    logger.error('Refresh token error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1300,7 +1305,7 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
     res.clearCookie('refreshToken', refreshCookieClearOptions);
     res.json({ message: 'Logged out' });
   } catch (error) {
-    console.error('Logout error:', error);
+    logger.error('Logout error:', { err: error });
     res.clearCookie('refreshToken', refreshCookieClearOptions);
     res.json({ message: 'Logged out' });
   }

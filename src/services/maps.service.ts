@@ -1,5 +1,6 @@
 import axios from 'axios';
 import env from '../config/env';
+import logger from '../utils/logger';
 
 interface NominatimSearchItem {
   lat: string;
@@ -59,7 +60,7 @@ export const geocodeAddress = async (address: string): Promise<{ lat: number; ln
 
     return null;
   } catch (error) {
-    console.error('Geocoding error:', error);
+    logger.warn('Geocoding failed', { err: error });
     return null;
   }
 };
@@ -91,7 +92,7 @@ export const getDistanceMatrix = async (
 
     return null;
   } catch (error) {
-    console.error('Distance matrix error:', error);
+    logger.warn('Distance matrix failed', { err: error });
     return null;
   }
 };

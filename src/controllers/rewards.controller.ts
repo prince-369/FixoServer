@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import logger from '../utils/logger';
 import mongoose from 'mongoose';
 import RewardMilestone from '../models/RewardMilestone';
 import RewardClaim from '../models/RewardClaim';
@@ -30,7 +31,7 @@ export const ensureDefaultMilestones = async (): Promise<void> => {
     if (count > 0) return;
     await RewardMilestone.insertMany(DEFAULT_MILESTONES);
   } catch (error) {
-    console.error('ensureDefaultMilestones error:', error);
+    logger.error('ensureDefaultMilestones error:', { err: error });
   }
 };
 
@@ -84,7 +85,7 @@ export const getRewards = async (req: Request, res: Response): Promise<void> => 
       totalClaimedAmount,
     });
   } catch (error) {
-    console.error('Get rewards error:', error);
+    logger.error('Get rewards error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -189,7 +190,7 @@ export const claimReward = async (req: Request, res: Response): Promise<void> =>
 
     res.status(201).json({ message: 'Reward claim submitted for review', claim });
   } catch (error) {
-    console.error('Claim reward error:', error);
+    logger.error('Claim reward error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -202,7 +203,7 @@ export const getRewardClaims = async (req: Request, res: Response): Promise<void
       .sort({ createdAt: -1 });
     res.json({ claims });
   } catch (error) {
-    console.error('Get reward claims error:', error);
+    logger.error('Get reward claims error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -246,7 +247,7 @@ export const getAvailableCoupons = async (req: Request, res: Response): Promise<
 
     res.json({ coupons: available });
   } catch (error) {
-    console.error('Get available coupons error:', error);
+    logger.error('Get available coupons error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -286,7 +287,7 @@ export const validateCoupon = async (req: Request, res: Response): Promise<void>
       orderAmount,
     });
   } catch (error) {
-    console.error('Validate coupon error:', error);
+    logger.error('Validate coupon error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -366,7 +367,7 @@ export const getWorkerPromotions = async (req: Request, res: Response): Promise<
       },
     });
   } catch (error) {
-    console.error('Get worker promotions error:', error);
+    logger.error('Get worker promotions error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -379,7 +380,7 @@ export const getPromotionHistory = async (req: Request, res: Response): Promise<
       .sort({ createdAt: -1 });
     res.json({ history: redemptions });
   } catch (error) {
-    console.error('Get promotion history error:', error);
+    logger.error('Get promotion history error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -416,7 +417,7 @@ export const claimPromotionBonus = async (req: Request, res: Response): Promise<
       newBalance: result.newBalance,
     });
   } catch (error) {
-    console.error('Claim promotion bonus error:', error);
+    logger.error('Claim promotion bonus error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };

@@ -7,6 +7,7 @@ import env from './config/env';
 import { cancelStaleBookings, cleanupClosedBookingVoiceNotes, notifyDueScheduledBookings } from './jobs/bookingCleanup';
 import { closeRateLimiterStore } from './middlewares/rateLimit.middleware';
 import { syncSeedAdminCredentials } from './services/adminBootstrap.service';
+import logger from './utils/logger';
 
 const server = http.createServer(app);
 let cleanupTimer: NodeJS.Timeout | null = null;
@@ -34,10 +35,11 @@ const start = async () => {
   cleanupTimer.unref();
   
   server.listen(env.PORT, () => {
-    console.log(`Fixo server running on port ${env.PORT}`);
-    console.log(`Environment: ${env.NODE_ENV}`);
-    console.log(`Trusted origins: ${env.CLIENT_URLS.join(', ')}`);
-    console.log(`Google OAuth client IDs loaded: ${env.GOOGLE_CLIENT_IDS.length ? env.GOOGLE_CLIENT_IDS.join(', ') : '(none)'}`);
+    logger.info('Fixo server started', { port: env.PORT, env: env.NODE_ENV });
+    logger.debug('Startup config', {
+      trustedOrigins: env.CLIENT_URLS,
+      googleClientIdCount: env.GOOGLE_CLIENT_IDS.length,
+    });
   });
 };
 
@@ -45,10 +47,10 @@ const gracefulShutdown = async (reason: string): Promise<void> => {
   if (shuttingDown) return;
   shuttingDown = true;
 
-  console.warn(`Shutting down server (${reason})`);
+  logger.warn('Server shutting down', { reason });
 
   const hardTimeout = setTimeout(() => {
-    console.error('Forced shutdown after timeout');
+    logger.error('Forced shutdown after timeout');
     process.exit(1);
   }, 15_000);
   hardTimeout.unref();
@@ -70,14 +72,14 @@ const gracefulShutdown = async (reason: string): Promise<void> => {
     clearTimeout(hardTimeout);
     process.exit(0);
   } catch (error) {
-    console.error('Graceful shutdown failed:', error);
+    logger.error('Graceful shutdown failed', { err: error });
     clearTimeout(hardTimeout);
     process.exit(1);
   }
 };
 
 start().catch((error) => {
-  console.error('Failed to start server:', error);
+  logger.error('Failed to start server', { err: error });
   process.exit(1);
 });
 
@@ -90,11 +92,11 @@ process.on('SIGTERM', () => {
 });
 
 process.on('unhandledRejection', (reason) => {
-  console.error('Unhandled promise rejection:', reason);
+  logger.error('Unhandled promise rejection', { err: reason });
   void gracefulShutdown('unhandledRejection');
 });
 
 process.on('uncaughtException', (error) => {
-  console.error('Uncaught exception:', error);
+  logger.error('Uncaught exception', { err: error });
   void gracefulShutdown('uncaughtException');
 });

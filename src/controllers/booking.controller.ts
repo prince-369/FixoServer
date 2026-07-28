@@ -9,6 +9,7 @@ import { generatePin } from '../utils/generatePin';
 import { generateTID } from '../utils/generateTID';
 import Transaction from '../models/Transaction';
 import { notifyWorkers, notifyUser, sendNotification, sendAdminNotification } from '../socket';
+import logger from '../utils/logger';
 import { validateAndPriceCoupon, recordCouponRedemption } from '../services/incentive.service';
 
 const RAZORPAY_SUCCESS_EVENTS = new Set(['payment.captured', 'order.paid']);
@@ -70,21 +71,35 @@ const isGeoIndexMissingError = (error: unknown): boolean => {
   );
 };
 
+// Eligibility parity with /worker/work-requests: an eligible worker's effective location
+// is `currentLocation ?? location`. A single $near query can only target one indexed
+// field, and $or+$near is illegal — so we run two indexed queries and merge:
+//   Q1: workers WITH a live currentLocation, matched on the currentLocation 2dsphere.
+//   Q2: workers WITHOUT currentLocation, matched on the registered location 2dsphere.
+// Both apply the same eligibility filters. No new index; both fields are already 2dsphere.
 const findNearbyWorkers = async (categoryId: string, coordinates: [number, number]) => {
-  return Worker.find({
-    accountStatus: 'live',
-    isActive: true,
-    categories: categoryId,
-    location: {
+  const base = { accountStatus: 'live', isActive: true, categories: categoryId };
+  const near = (field: 'currentLocation' | 'location') => ({
+    [field]: {
       $nearSphere: {
-        $geometry: {
-          type: 'Point',
-          coordinates,
-        },
+        $geometry: { type: 'Point', coordinates },
         $maxDistance: WORKER_SEARCH_RADIUS_METERS,
       },
     },
-  }).select('_id fullName');
+  });
+
+  const [withCurrent, withoutCurrent] = await Promise.all([
+    Worker.find({ ...base, ...near('currentLocation'), 'currentLocation.coordinates': { $exists: true } })
+      .select('_id fullName').lean(),
+    Worker.find({ ...base, ...near('location'), 'currentLocation.coordinates': { $exists: false } })
+      .select('_id fullName').lean(),
+  ]);
+
+  const merged = new Map<string, { _id: { toString(): string }; fullName: string }>();
+  [...withCurrent, ...withoutCurrent].forEach((w: any) => {
+    merged.set(String(w._id), { _id: w._id, fullName: w.fullName || '' });
+  });
+  return [...merged.values()];
 };
 
 const resolveMatchingWorkers = async (categoryId: string, coordinates: [number, number]) => {
@@ -95,7 +110,7 @@ const resolveMatchingWorkers = async (categoryId: string, coordinates: [number, 
       throw error;
     }
 
-    console.error('Geo index missing for worker location. Attempting self-heal.', error);
+    logger.error('Geo index missing for worker location. Attempting self-heal.', { err: error });
 
     try {
       await Worker.collection.createIndex(
@@ -104,7 +119,7 @@ const resolveMatchingWorkers = async (categoryId: string, coordinates: [number, 
       );
       return await findNearbyWorkers(categoryId, coordinates);
     } catch (retryError) {
-      console.error('Geo index self-heal failed. Proceeding without worker notifications.', retryError);
+      logger.error('Geo index self-heal failed. Proceeding without worker notifications.', { err: retryError });
       return [];
     }
   }
@@ -172,11 +187,11 @@ const resolveWorkerAvailabilitySummary = async (
     return await fetchWorkerAvailabilitySummary(categoryId, coordinates);
   } catch (error) {
     if (!isGeoIndexMissingError(error)) {
-      console.error('Primary availability summary query failed. Falling back to manual distance scan.', error);
+      logger.error('Primary availability summary query failed. Falling back to manual distance scan.', { err: error });
       return computeWorkerAvailabilitySummaryFallback(categoryId, coordinates);
     }
 
-    console.error('Geo index missing while fetching worker availability summary. Attempting self-heal.', error);
+    logger.error('Geo index missing while fetching worker availability summary. Attempting self-heal.', { err: error });
 
     try {
       await Worker.collection.createIndex(
@@ -186,7 +201,7 @@ const resolveWorkerAvailabilitySummary = async (
 
       return await fetchWorkerAvailabilitySummary(categoryId, coordinates);
     } catch (retryError) {
-      console.error('Geo index self-heal failed while fetching worker availability summary. Falling back to manual distance scan.', retryError);
+      logger.error('Geo index self-heal failed while fetching worker availability summary. Falling back to manual distance scan.', { err: retryError });
       return computeWorkerAvailabilitySummaryFallback(categoryId, coordinates);
     }
   }
@@ -221,7 +236,7 @@ export const getWorkerAvailabilitySummary = async (req: Request, res: Response):
       },
     });
   } catch (error) {
-    console.error('Get worker availability summary error:', error);
+    logger.error('Get worker availability summary error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -421,17 +436,42 @@ export const createBooking = async (req: Request, res: Response): Promise<void> 
     try {
       matchingWorkers = await resolveMatchingWorkers(String(category), coordinates);
     } catch (workerLookupError) {
-      console.error('Worker lookup failed after booking creation. Returning success without notifications.', workerLookupError);
+      logger.error('Worker lookup failed after booking creation. Returning success without notifications.', { err: workerLookupError });
     }
 
     const populated = await Booking.findById(booking._id)
       .populate('category', 'name slug image');
 
+    // Minimal available-job card for the broadcast — only what the worker's pre-bid card
+    // renders. Deliberately omits customer identity, payment method/status, razorpay,
+    // refund/completion/review and other unrelated booking fields. (Address + coordinates
+    // + voice note are kept because the current card shows distance, the locality and a
+    // voice-note player before a bid is placed.)
+    const cat = populated?.category as any;
+    const jobCard = populated ? {
+      _id: populated._id,
+      status: populated.status,
+      category: cat && typeof cat === 'object'
+        ? { _id: cat._id, name: cat.name, slug: cat.slug, image: cat.image }
+        : cat,
+      workDescription: populated.workDescription,
+      customerLocation: populated.customerLocation
+        ? { type: 'Point', coordinates: populated.customerLocation.coordinates, address: populated.customerLocation.address }
+        : undefined,
+      amount: populated.amount,
+      voiceNote: populated.voiceNote?.url
+        ? { url: populated.voiceNote.url, durationSec: populated.voiceNote.durationSec }
+        : undefined,
+      timeSlot: populated.timeSlot,
+      scheduledAt: populated.scheduledAt,
+      createdAt: populated.createdAt,
+    } : null;
+
     // Real-time: Notify matching workers about new work request
     const workerIds = matchingWorkers.map((w) => w._id.toString());
     if (workerIds.length > 0) {
       notifyWorkers(workerIds, 'new_job_request', {
-        booking: populated,
+        booking: jobCard,
         bookingId: booking._id,
         status: booking.status,
         message: `New ${(populated?.category as any)?.name || 'service'} request nearby!`,
@@ -458,7 +498,7 @@ export const createBooking = async (req: Request, res: Response): Promise<void> 
       workersNotified: matchingWorkers.length,
     });
   } catch (error) {
-    console.error('Create booking error:', error);
+    logger.error('Create booking error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -486,7 +526,7 @@ export const getBookingBids = async (req: Request, res: Response): Promise<void>
 
     res.json({ bids: activeBids });
   } catch (error) {
-    console.error('Get booking bids error:', error);
+    logger.error('Get booking bids error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -581,7 +621,7 @@ export const acceptBid = async (req: Request, res: Response): Promise<void> => {
       booking: populatedBooking,
     });
   } catch (error) {
-    console.error('Accept bid error:', error);
+    logger.error('Accept bid error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -641,7 +681,7 @@ export const counterBid = async (req: Request, res: Response): Promise<void> => 
 
     res.json({ message: 'Counter offer sent', bid });
   } catch (error) {
-    console.error('Counter bid error:', error);
+    logger.error('Counter bid error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -733,7 +773,7 @@ export const initiatePayment = async (req: Request, res: Response): Promise<void
       payableAmount,
     });
   } catch (error) {
-    console.error('Initiate payment error:', error);
+    logger.error('Initiate payment error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -772,7 +812,7 @@ export const verifyBookingPayment = async (req: Request, res: Response): Promise
       booking,
     });
   } catch (error) {
-    console.error('Verify payment error:', error);
+    logger.error('Verify payment error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -817,7 +857,7 @@ export const reconcileBookingPayment = async (req: Request, res: Response): Prom
       booking,
     });
   } catch (error) {
-    console.error('Reconcile payment error:', error);
+    logger.error('Reconcile payment error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -871,7 +911,7 @@ export const handleRazorpayWebhook = async (req: Request, res: Response): Promis
 
     res.status(200).json({ received: true, reconciled: true, alreadyFinalized });
   } catch (error) {
-    console.error('Razorpay webhook error:', error);
+    logger.error('Razorpay webhook error:', { err: error });
     res.status(500).json({ message: 'Server error' });
   }
 };

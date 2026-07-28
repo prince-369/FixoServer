@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importDefault(require("mongoose"));
 const env_1 = __importDefault(require("./env"));
+const logger_1 = __importDefault(require("../utils/logger"));
 const Worker_1 = __importDefault(require("../models/Worker"));
 const Booking_1 = __importDefault(require("../models/Booking"));
 const ensureOperationalIndexes = async () => {
@@ -12,13 +13,13 @@ const ensureOperationalIndexes = async () => {
         await Worker_1.default.collection.createIndex({ location: '2dsphere' }, { name: 'location_2dsphere' });
     }
     catch (error) {
-        console.error('Failed to ensure worker location geo index:', error);
+        logger_1.default.error('Failed to ensure worker location geo index', { err: error });
     }
     try {
         await Booking_1.default.collection.createIndex({ customerLocation: '2dsphere' }, { name: 'customerLocation_2dsphere' });
     }
     catch (error) {
-        console.error('Failed to ensure booking customer location geo index:', error);
+        logger_1.default.error('Failed to ensure booking customer location geo index', { err: error });
     }
 };
 const connectDB = async () => {
@@ -34,16 +35,16 @@ const connectDB = async () => {
             autoIndex: env_1.default.NODE_ENV !== 'production',
         });
         mongoose_1.default.connection.on('error', (error) => {
-            console.error('MongoDB runtime error:', error);
+            logger_1.default.error('MongoDB runtime error', { err: error });
         });
         mongoose_1.default.connection.on('disconnected', () => {
-            console.warn('MongoDB disconnected');
+            logger_1.default.warn('MongoDB disconnected');
         });
         await ensureOperationalIndexes();
-        console.log(`MongoDB Connected: ${conn.connection.host}`);
+        logger_1.default.info('MongoDB connected', { host: conn.connection.host });
     }
     catch (error) {
-        console.error('MongoDB connection error:', error);
+        logger_1.default.error('MongoDB connection failed', { err: error });
         process.exit(1);
     }
 };
