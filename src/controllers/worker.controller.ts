@@ -29,6 +29,38 @@ import logger from '../utils/logger';
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const WORKER_SEARCH_RADIUS_METERS = 10_000;
 
+/**
+ * An Aadhaar may only back ONE active worker account.
+ *
+ * "Active" mirrors the admin approve-time guard: approved / pending / resubmitted. A
+ * REJECTED account is deliberately not blocking — that person is legitimately
+ * re-applying, and blocking them would trap them permanently.
+ *
+ * Returns the account already holding this Aadhaar, or null when it's free.
+ */
+const BLOCKING_VERIFICATION_STATUSES = ['approved', 'pending', 'resubmitted'];
+
+const findActiveAadhaarHolder = async (
+  aadhaarDigits: string,
+  excludeWorkerId?: string,
+): Promise<{ fullName: string; verificationStatus: string } | null> => {
+  if (!isValidAadhaarNumber(aadhaarDigits)) return null;
+
+  const query: Record<string, unknown> = {
+    aadhaarNumberHash: hashAadhaarNumber(aadhaarDigits),
+    verificationStatus: { $in: BLOCKING_VERIFICATION_STATUSES },
+  };
+  if (excludeWorkerId) query._id = { $ne: excludeWorkerId };
+
+  const holder = await Worker.findOne(query).select('fullName verificationStatus').lean();
+  return holder ? { fullName: holder.fullName || 'another worker', verificationStatus: holder.verificationStatus } : null;
+};
+
+/** Single wording for the block, so the app and the API always say the same thing. */
+const duplicateAadhaarMessage = (holderName: string): string =>
+  `This Aadhaar card is already registered with another Fixo account (${holderName}). ` +
+  'Please use a different Aadhaar card.';
+
 const hasValidCoordinates = (coordinates: unknown): coordinates is [number, number] => {
   if (!Array.isArray(coordinates) || coordinates.length !== 2) return false;
   return Number.isFinite(Number(coordinates[0])) && Number.isFinite(Number(coordinates[1]));
@@ -302,7 +334,19 @@ export const resubmitVerification = async (req: Request, res: Response): Promise
       const ocrDigits = details.aadhaarNumber ? normaliseAadhaarDigits(details.aadhaarNumber) : '';
       const manualDigits = normaliseAadhaarDigits(String(req.body?.aadhaarNumber || ''));
       const digits = isValidAadhaarNumber(ocrDigits) ? ocrDigits : isValidAadhaarNumber(manualDigits) ? manualDigits : '';
+
+      // Same duplicate gate as onboarding — a rejected worker re-applying must not be
+      // able to slip in someone else's Aadhaar. Runs before the upload.
       if (digits) {
+        const holder = await findActiveAadhaarHolder(digits, worker.id);
+        if (holder) {
+          res.status(409).json({
+            message: duplicateAadhaarMessage(holder.fullName),
+            duplicate: true,
+            holderName: holder.fullName,
+          });
+          return;
+        }
         worker.aadhaarNumberHash = hashAadhaarNumber(digits);
         worker.aadhaarNumberLast4 = digits.slice(-4);
       }
@@ -477,6 +521,31 @@ export const validateAadhaarScan = async (req: Request, res: Response): Promise<
   }
 };
 
+// ─── Aadhaar duplicate pre-check (worker-facing) ───
+// Called by the scanner BEFORE the worker can continue, so a duplicate is caught at the
+// scan step instead of after an upload. Also covers the manually-typed number for cards
+// whose printed number OCR couldn't read.
+export const checkOwnAadhaarDuplicate = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const digits = normaliseAadhaarDigits(String(req.body?.aadhaarNumber || ''));
+    if (!isValidAadhaarNumber(digits)) {
+      res.status(400).json({ message: 'Enter a valid 12-digit Aadhaar number.' });
+      return;
+    }
+
+    // Exclude the caller: re-scanning your own card (e.g. after a rejection) is normal.
+    const holder = await findActiveAadhaarHolder(digits, req.user!.id);
+    if (holder) {
+      res.json({ duplicate: true, holderName: holder.fullName, message: duplicateAadhaarMessage(holder.fullName) });
+      return;
+    }
+    res.json({ duplicate: false });
+  } catch (error) {
+    logger.error('Check own aadhaar duplicate failed', { err: error });
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 // ─── Onboarding Step 1: Upload Aadhaar ───
 export const submitOnboardingAadhaar = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -505,6 +574,27 @@ export const submitOnboardingAadhaar = async (req: Request, res: Response): Prom
       return;
     }
 
+    // Number for the duplicate-detection hash: prefer the OCR-read one, else the
+    // number the worker typed in when OCR couldn't read it. Both are Verhoeff-checked.
+    const details = frontInspect.details;
+    const ocrDigits = details.aadhaarNumber ? normaliseAadhaarDigits(details.aadhaarNumber) : '';
+    const manualDigits = normaliseAadhaarDigits(String(req.body?.aadhaarNumber || ''));
+    const digits = isValidAadhaarNumber(ocrDigits) ? ocrDigits : isValidAadhaarNumber(manualDigits) ? manualDigits : '';
+
+    // Duplicate gate runs BEFORE the upload: the app pre-checks, but a client can be
+    // bypassed, and we must not store another account's Aadhaar images.
+    if (digits) {
+      const holder = await findActiveAadhaarHolder(digits, worker.id);
+      if (holder) {
+        res.status(409).json({
+          message: duplicateAadhaarMessage(holder.fullName),
+          duplicate: true,
+          holderName: holder.fullName,
+        });
+        return;
+      }
+    }
+
     const [frontUpload, backUpload] = await Promise.all([
       uploadBufferToCloudinary(front.buffer, 'aadhaar'),
       uploadBufferToCloudinary(back.buffer, 'aadhaar'),
@@ -512,12 +602,6 @@ export const submitOnboardingAadhaar = async (req: Request, res: Response): Prom
 
     // Persist the extracted details (number stored only as a hash) so admins can
     // detect duplicate accounts made with the same Aadhaar.
-    const details = frontInspect.details;
-    // Number for the duplicate-detection hash: prefer the OCR-read one, else the
-    // number the worker typed in when OCR couldn't read it. Both are Verhoeff-checked.
-    const ocrDigits = details.aadhaarNumber ? normaliseAadhaarDigits(details.aadhaarNumber) : '';
-    const manualDigits = normaliseAadhaarDigits(String(req.body?.aadhaarNumber || ''));
-    const digits = isValidAadhaarNumber(ocrDigits) ? ocrDigits : isValidAadhaarNumber(manualDigits) ? manualDigits : '';
     if (digits) {
       worker.aadhaarNumberHash = hashAadhaarNumber(digits);
       worker.aadhaarNumberLast4 = digits.slice(-4);

@@ -10,6 +10,7 @@ import {
   updateProfile,
   resubmitVerification,
   validateAadhaarScan,
+  checkOwnAadhaarDuplicate,
   submitOnboardingAadhaar,
   submitOnboardingSkills,
   completeProfile,
@@ -63,6 +64,8 @@ router.put('/profile', uploadSingle, updateProfile);
 router.post('/complete-profile', uploadSingle, completeProfile);
 // Post-signup onboarding (account-first): aadhaar → skills → verification schedule → submit.
 router.post('/onboarding/aadhaar/validate', uploadScanImage, validateAadhaarScan);
+// Pre-check a scanned/typed Aadhaar number so a duplicate is caught before uploading.
+router.post('/onboarding/aadhaar/check-duplicate', checkOwnAadhaarDuplicate);
 router.put('/onboarding/aadhaar', mutationGuard, uploadAadhaar, submitOnboardingAadhaar);
 router.put('/onboarding/skills', mutationGuard, submitOnboardingSkills);
 // Manual verification: submit once, resubmit (with editable details) after a rejection.
