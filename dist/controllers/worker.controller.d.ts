@@ -5,6 +5,7 @@ export declare const submitVerification: (req: Request, res: Response) => Promis
 export declare const resubmitVerification: (req: Request, res: Response) => Promise<void>;
 export declare const completeProfile: (req: Request, res: Response) => Promise<void>;
 export declare const validateAadhaarScan: (req: Request, res: Response) => Promise<void>;
+export declare const checkOwnAadhaarDuplicate: (req: Request, res: Response) => Promise<void>;
 export declare const submitOnboardingAadhaar: (req: Request, res: Response) => Promise<void>;
 export declare const submitOnboardingSkills: (req: Request, res: Response) => Promise<void>;
 export declare const toggleActive: (req: Request, res: Response) => Promise<void>;

@@ -18,6 +18,8 @@ router.put('/profile', upload_middleware_1.uploadSingle, worker_controller_1.upd
 router.post('/complete-profile', upload_middleware_1.uploadSingle, worker_controller_1.completeProfile);
 // Post-signup onboarding (account-first): aadhaar → skills → verification schedule → submit.
 router.post('/onboarding/aadhaar/validate', upload_middleware_1.uploadScanImage, worker_controller_1.validateAadhaarScan);
+// Pre-check a scanned/typed Aadhaar number so a duplicate is caught before uploading.
+router.post('/onboarding/aadhaar/check-duplicate', worker_controller_1.checkOwnAadhaarDuplicate);
 router.put('/onboarding/aadhaar', mutationGuard, upload_middleware_1.uploadAadhaar, worker_controller_1.submitOnboardingAadhaar);
 router.put('/onboarding/skills', mutationGuard, worker_controller_1.submitOnboardingSkills);
 // Manual verification: submit once, resubmit (with editable details) after a rejection.

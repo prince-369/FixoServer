@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.unselectSkill = exports.bumpSkillExperience = exports.requestSkill = exports.getSkills = exports.escalateHelpTicket = exports.appendHelpTicketMessage = exports.getHelpTicketDetail = exports.getHelpTickets = exports.createHelpTicket = exports.getChatbotQA = exports.deleteNotification = exports.markAllNotificationsRead = exports.markNotificationRead = exports.getNotifications = exports.getWithdrawals = exports.requestWithdrawal = exports.saveBankDetails = exports.getWalletTransactions = exports.getEarningsHistory = exports.getFunds = exports.completeWork = exports.requestCompletionCode = exports.sendMessage = exports.cancelBookingByWorker = exports.rejectBooking = exports.approveBooking = exports.respondToNegotiation = exports.submitBid = exports.getWorkRequestDetail = exports.getWorkRequests = exports.getReviews = exports.getDashboard = exports.updateCurrentLocation = exports.updateLocation = exports.toggleActive = exports.submitOnboardingSkills = exports.submitOnboardingAadhaar = exports.validateAadhaarScan = exports.completeProfile = exports.resubmitVerification = exports.submitVerification = exports.updateProfile = exports.getProfile = void 0;
+exports.unselectSkill = exports.bumpSkillExperience = exports.requestSkill = exports.getSkills = exports.escalateHelpTicket = exports.appendHelpTicketMessage = exports.getHelpTicketDetail = exports.getHelpTickets = exports.createHelpTicket = exports.getChatbotQA = exports.deleteNotification = exports.markAllNotificationsRead = exports.markNotificationRead = exports.getNotifications = exports.getWithdrawals = exports.requestWithdrawal = exports.saveBankDetails = exports.getWalletTransactions = exports.getEarningsHistory = exports.getFunds = exports.completeWork = exports.requestCompletionCode = exports.sendMessage = exports.cancelBookingByWorker = exports.rejectBooking = exports.approveBooking = exports.respondToNegotiation = exports.submitBid = exports.getWorkRequestDetail = exports.getWorkRequests = exports.getReviews = exports.getDashboard = exports.updateCurrentLocation = exports.updateLocation = exports.toggleActive = exports.submitOnboardingSkills = exports.submitOnboardingAadhaar = exports.checkOwnAadhaarDuplicate = exports.validateAadhaarScan = exports.completeProfile = exports.resubmitVerification = exports.submitVerification = exports.updateProfile = exports.getProfile = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const Worker_1 = __importStar(require("../models/Worker"));
 const aadhaarValidation_service_1 = require("../services/aadhaarValidation.service");
@@ -59,6 +59,31 @@ const socket_1 = require("../socket");
 const logger_1 = __importDefault(require("../utils/logger"));
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const WORKER_SEARCH_RADIUS_METERS = 10000;
+/**
+ * An Aadhaar may only back ONE active worker account.
+ *
+ * "Active" mirrors the admin approve-time guard: approved / pending / resubmitted. A
+ * REJECTED account is deliberately not blocking — that person is legitimately
+ * re-applying, and blocking them would trap them permanently.
+ *
+ * Returns the account already holding this Aadhaar, or null when it's free.
+ */
+const BLOCKING_VERIFICATION_STATUSES = ['approved', 'pending', 'resubmitted'];
+const findActiveAadhaarHolder = async (aadhaarDigits, excludeWorkerId) => {
+    if (!(0, verhoeff_1.isValidAadhaarNumber)(aadhaarDigits))
+        return null;
+    const query = {
+        aadhaarNumberHash: (0, aadhaarValidation_service_1.hashAadhaarNumber)(aadhaarDigits),
+        verificationStatus: { $in: BLOCKING_VERIFICATION_STATUSES },
+    };
+    if (excludeWorkerId)
+        query._id = { $ne: excludeWorkerId };
+    const holder = await Worker_1.default.findOne(query).select('fullName verificationStatus').lean();
+    return holder ? { fullName: holder.fullName || 'another worker', verificationStatus: holder.verificationStatus } : null;
+};
+/** Single wording for the block, so the app and the API always say the same thing. */
+const duplicateAadhaarMessage = (holderName) => `This Aadhaar card is already registered with another Fixo account (${holderName}). ` +
+    'Please use a different Aadhaar card.';
 const hasValidCoordinates = (coordinates) => {
     if (!Array.isArray(coordinates) || coordinates.length !== 2)
         return false;
@@ -303,7 +328,18 @@ const resubmitVerification = async (req, res) => {
             const ocrDigits = details.aadhaarNumber ? (0, aadhaarValidation_service_1.normaliseAadhaarDigits)(details.aadhaarNumber) : '';
             const manualDigits = (0, aadhaarValidation_service_1.normaliseAadhaarDigits)(String(req.body?.aadhaarNumber || ''));
             const digits = (0, verhoeff_1.isValidAadhaarNumber)(ocrDigits) ? ocrDigits : (0, verhoeff_1.isValidAadhaarNumber)(manualDigits) ? manualDigits : '';
+            // Same duplicate gate as onboarding — a rejected worker re-applying must not be
+            // able to slip in someone else's Aadhaar. Runs before the upload.
             if (digits) {
+                const holder = await findActiveAadhaarHolder(digits, worker.id);
+                if (holder) {
+                    res.status(409).json({
+                        message: duplicateAadhaarMessage(holder.fullName),
+                        duplicate: true,
+                        holderName: holder.fullName,
+                    });
+                    return;
+                }
                 worker.aadhaarNumberHash = (0, aadhaarValidation_service_1.hashAadhaarNumber)(digits);
                 worker.aadhaarNumberLast4 = digits.slice(-4);
             }
@@ -467,6 +503,31 @@ const validateAadhaarScan = async (req, res) => {
     }
 };
 exports.validateAadhaarScan = validateAadhaarScan;
+// ─── Aadhaar duplicate pre-check (worker-facing) ───
+// Called by the scanner BEFORE the worker can continue, so a duplicate is caught at the
+// scan step instead of after an upload. Also covers the manually-typed number for cards
+// whose printed number OCR couldn't read.
+const checkOwnAadhaarDuplicate = async (req, res) => {
+    try {
+        const digits = (0, aadhaarValidation_service_1.normaliseAadhaarDigits)(String(req.body?.aadhaarNumber || ''));
+        if (!(0, verhoeff_1.isValidAadhaarNumber)(digits)) {
+            res.status(400).json({ message: 'Enter a valid 12-digit Aadhaar number.' });
+            return;
+        }
+        // Exclude the caller: re-scanning your own card (e.g. after a rejection) is normal.
+        const holder = await findActiveAadhaarHolder(digits, req.user.id);
+        if (holder) {
+            res.json({ duplicate: true, holderName: holder.fullName, message: duplicateAadhaarMessage(holder.fullName) });
+            return;
+        }
+        res.json({ duplicate: false });
+    }
+    catch (error) {
+        logger_1.default.error('Check own aadhaar duplicate failed', { err: error });
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+exports.checkOwnAadhaarDuplicate = checkOwnAadhaarDuplicate;
 // ─── Onboarding Step 1: Upload Aadhaar ───
 const submitOnboardingAadhaar = async (req, res) => {
     try {
@@ -492,18 +553,31 @@ const submitOnboardingAadhaar = async (req, res) => {
             res.status(400).json({ message: 'Please upload valid Aadhaar card photos (front and back).' });
             return;
         }
+        // Number for the duplicate-detection hash: prefer the OCR-read one, else the
+        // number the worker typed in when OCR couldn't read it. Both are Verhoeff-checked.
+        const details = frontInspect.details;
+        const ocrDigits = details.aadhaarNumber ? (0, aadhaarValidation_service_1.normaliseAadhaarDigits)(details.aadhaarNumber) : '';
+        const manualDigits = (0, aadhaarValidation_service_1.normaliseAadhaarDigits)(String(req.body?.aadhaarNumber || ''));
+        const digits = (0, verhoeff_1.isValidAadhaarNumber)(ocrDigits) ? ocrDigits : (0, verhoeff_1.isValidAadhaarNumber)(manualDigits) ? manualDigits : '';
+        // Duplicate gate runs BEFORE the upload: the app pre-checks, but a client can be
+        // bypassed, and we must not store another account's Aadhaar images.
+        if (digits) {
+            const holder = await findActiveAadhaarHolder(digits, worker.id);
+            if (holder) {
+                res.status(409).json({
+                    message: duplicateAadhaarMessage(holder.fullName),
+                    duplicate: true,
+                    holderName: holder.fullName,
+                });
+                return;
+            }
+        }
         const [frontUpload, backUpload] = await Promise.all([
             (0, cloudinary_service_1.uploadBufferToCloudinary)(front.buffer, 'aadhaar'),
             (0, cloudinary_service_1.uploadBufferToCloudinary)(back.buffer, 'aadhaar'),
         ]);
         // Persist the extracted details (number stored only as a hash) so admins can
         // detect duplicate accounts made with the same Aadhaar.
-        const details = frontInspect.details;
-        // Number for the duplicate-detection hash: prefer the OCR-read one, else the
-        // number the worker typed in when OCR couldn't read it. Both are Verhoeff-checked.
-        const ocrDigits = details.aadhaarNumber ? (0, aadhaarValidation_service_1.normaliseAadhaarDigits)(details.aadhaarNumber) : '';
-        const manualDigits = (0, aadhaarValidation_service_1.normaliseAadhaarDigits)(String(req.body?.aadhaarNumber || ''));
-        const digits = (0, verhoeff_1.isValidAadhaarNumber)(ocrDigits) ? ocrDigits : (0, verhoeff_1.isValidAadhaarNumber)(manualDigits) ? manualDigits : '';
         if (digits) {
             worker.aadhaarNumberHash = (0, aadhaarValidation_service_1.hashAadhaarNumber)(digits);
             worker.aadhaarNumberLast4 = digits.slice(-4);
