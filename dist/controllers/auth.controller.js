@@ -1064,7 +1064,14 @@ const sendPasswordSetupOtp = async (req, res) => {
         const otp = (0, sms_service_1.generateOTP)();
         await (0, sms_service_1.storeOTP)(email, otp);
         const { sendPasswordSetupOtpEmail } = await Promise.resolve().then(() => __importStar(require('../services/email.service')));
-        await sendPasswordSetupOtpEmail(email, otp, name);
+        const sent = await sendPasswordSetupOtpEmail(email, otp, name);
+        // The mailer reports delivery failure by returning false rather than throwing. Ignoring it
+        // told the user "OTP sent" while nothing left the server — drop the unusable OTP instead.
+        if (!sent) {
+            await (0, sms_service_1.clearOTP)(email);
+            res.status(502).json({ message: 'Unable to send OTP email. Please try again.' });
+            return;
+        }
         res.json({ message: 'OTP sent to your email', email: email.replace(/(.{2})(.*)(@.*)/, '$1***$3') });
     }
     catch (error) {

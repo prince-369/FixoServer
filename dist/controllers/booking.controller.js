@@ -15,16 +15,12 @@ const Transaction_1 = __importDefault(require("../models/Transaction"));
 const socket_1 = require("../socket");
 const logger_1 = __importDefault(require("../utils/logger"));
 const incentive_service_1 = require("../services/incentive.service");
+const workerGeo_1 = require("../utils/workerGeo");
 const RAZORPAY_SUCCESS_EVENTS = new Set(['payment.captured', 'order.paid']);
 const WORKER_SEARCH_RADIUS_METERS = 10000;
 // Customer availability preview uses the SAME radius as real job matching (10 km),
 // so the counts shown to the customer reflect exactly who could actually serve them.
 const WORKER_SUMMARY_RADIUS_METERS = WORKER_SEARCH_RADIUS_METERS;
-const hasValidCoordinates = (coordinates) => {
-    if (!Array.isArray(coordinates) || coordinates.length !== 2)
-        return false;
-    return Number.isFinite(Number(coordinates[0])) && Number.isFinite(Number(coordinates[1]));
-};
 const toRadians = (value) => (value * Math.PI) / 180;
 const distanceMetersBetween = (a, b) => {
     // Coordinates are [longitude, latitude]
@@ -94,17 +90,13 @@ const resolveMatchingWorkers = async (categoryId, coordinates) => {
     }
 };
 const fetchWorkerAvailabilitySummary = async (categoryId, coordinates) => {
+    // Matches on `currentLocation ?? location`, exactly like findNearbyWorkers above. Counting
+    // on `location` alone made a worker who had travelled away from their registered address
+    // invisible here, so the customer was told "no workers available" while that worker was
+    // standing nearby and would in fact have been notified about the job.
     const nearbyFilter = {
         categories: categoryId,
-        location: {
-            $nearSphere: {
-                $geometry: {
-                    type: 'Point',
-                    coordinates,
-                },
-                $maxDistance: WORKER_SUMMARY_RADIUS_METERS,
-            },
-        },
+        ...(0, workerGeo_1.effectiveLocationWithin)(coordinates, WORKER_SUMMARY_RADIUS_METERS),
     };
     const [total, active] = await Promise.all([
         Worker_1.default.countDocuments(nearbyFilter),
@@ -114,15 +106,15 @@ const fetchWorkerAvailabilitySummary = async (categoryId, coordinates) => {
 };
 const computeWorkerAvailabilitySummaryFallback = async (categoryId, targetCoordinates) => {
     const workers = await Worker_1.default.find({ categories: categoryId })
-        .select('location isActive accountStatus')
+        .select('currentLocation location isActive accountStatus')
         .lean();
     let total = 0;
     let active = 0;
     for (const worker of workers) {
-        const coordinates = worker?.location?.coordinates;
-        if (!hasValidCoordinates(coordinates))
+        // Same `currentLocation ?? location` rule as the indexed query it stands in for.
+        const workerCoordinates = (0, workerGeo_1.effectiveWorkerCoordinates)(worker);
+        if (!workerCoordinates)
             continue;
-        const workerCoordinates = [Number(coordinates[0]), Number(coordinates[1])];
         const distance = distanceMetersBetween(workerCoordinates, targetCoordinates);
         if (distance > WORKER_SUMMARY_RADIUS_METERS)
             continue;

@@ -57,6 +57,7 @@ const ticketNumber_service_1 = require("../services/ticketNumber.service");
 const cloudinary_service_1 = require("../services/cloudinary.service");
 const email_service_1 = require("../services/email.service");
 const bookingVoice_service_1 = require("../services/bookingVoice.service");
+const workerGeo_1 = require("../utils/workerGeo");
 const socket_1 = require("../socket");
 const logger_1 = __importDefault(require("../utils/logger"));
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -263,11 +264,13 @@ const getServiceAvailability = async (req, res) => {
             res.status(400).json({ message: 'Valid lat and lng are required' });
             return;
         }
-        const within = { $geoWithin: { $centerSphere: [[lng, lat], SERVICE_RADIUS_METERS / EARTH_RADIUS_METERS] } };
+        // `currentLocation ?? location`. The previous plain OR also matched a worker's registered
+        // address even after they had reported a live position elsewhere, so someone who had
+        // travelled away still counted as available back home.
         const count = await Worker_1.default.countDocuments({
             accountStatus: 'live',
             isActive: true,
-            $or: [{ currentLocation: within }, { location: within }],
+            ...(0, workerGeo_1.effectiveLocationWithin)([lng, lat], SERVICE_RADIUS_METERS),
         });
         res.json({ available: count > 0, workerCount: count });
     }

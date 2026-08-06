@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sendPasswordSetupOtpEmail = exports.sendAccountDeactivationOtpEmail = exports.sendPasswordResetEmail = exports.sendPartnerRequestEmail = exports.sendWaitlistSignupEmail = void 0;
+exports.sendPasswordSetupOtpEmail = exports.sendAccountDeactivationOtpEmail = exports.sendPasswordResetEmail = exports.sendPartnerRequestEmail = exports.sendWaitlistSignupEmail = exports.verifyEmailTransport = void 0;
 const nodemailer_1 = __importDefault(require("nodemailer"));
 const env_1 = __importDefault(require("../config/env"));
 const logger_1 = __importDefault(require("../utils/logger"));
@@ -17,6 +17,67 @@ const transporter = nodemailer_1.default.createTransport({
         pass: env_1.default.SMTP_PASS,
     },
 });
+const isConfigured = () => Boolean(env_1.default.SMTP_USER && env_1.default.SMTP_PASS);
+/**
+ * Report an unconfigured provider once per call site, then fail.
+ *
+ * This used to `return true`, which told callers the mail was delivered when nothing had been
+ * sent — the OTP flows then answered "OTP sent to your email" and the user waited forever for
+ * a message that was never going to arrive. A send that did not happen is a failure.
+ */
+const notConfigured = (context, meta) => {
+    logger_1.default.warn(`${context} not sent: email provider is not configured`, { provider: 'smtp', ...meta });
+    return false;
+};
+/**
+ * Probe SMTP credentials at boot so a revoked app password shows up in the startup logs
+ * instead of silently breaking every OTP until someone reports it.
+ *
+ * Deliberately non-fatal: the API must still serve traffic when only email is broken.
+ */
+const verifyEmailTransport = async () => {
+    if (!isConfigured()) {
+        logger_1.default.warn('Email provider is not configured; OTP and password-reset emails will fail', {
+            provider: 'smtp',
+            host: env_1.default.SMTP_HOST,
+        });
+        return false;
+    }
+    try {
+        await transporter.verify();
+        logger_1.default.info('Email transport ready', { provider: 'smtp', host: env_1.default.SMTP_HOST, port: env_1.default.SMTP_PORT });
+        return true;
+    }
+    catch (error) {
+        const e = error;
+        logger_1.default.error('Email transport verification FAILED — OTP and password-reset emails will not be delivered', {
+            provider: 'smtp',
+            host: env_1.default.SMTP_HOST,
+            port: env_1.default.SMTP_PORT,
+            code: e?.code,
+            response: e?.response,
+        });
+        return false;
+    }
+};
+exports.verifyEmailTransport = verifyEmailTransport;
+/**
+ * Pull the diagnostic fields off an SMTP failure.
+ *
+ * The logger's Error serializer keeps only name/message/stack/code, so nodemailer's `response`
+ * — the line that actually says *why* the server refused, e.g. "535-5.7.8 Username and Password
+ * not accepted" — was being dropped. It carries no user data, so it is safe to log.
+ */
+const smtpErrorMeta = (error) => {
+    const e = error;
+    return {
+        provider: 'smtp',
+        code: e?.code,
+        command: e?.command,
+        responseCode: e?.responseCode,
+        response: e?.response,
+    };
+};
 // ─── Landing site notifications (→ support inbox) ───
 const escapeHtml = (v) => String(v ?? '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -42,9 +103,9 @@ const shell = (title, accent, rows, footer) => `
 /** Someone joined the pre-launch waitlist on the marketing site. */
 const sendWaitlistSignupEmail = async (data) => {
     try {
-        if (!env_1.default.SMTP_USER) {
-            logger_1.default.debug('Waitlist signup captured (email provider not configured)', { role: data.role, source: data.source });
-            return true;
+        if (!isConfigured()) {
+            // The signup itself is already persisted; only the support notification is lost.
+            return notConfigured('Waitlist signup notification', { role: data.role, source: data.source });
         }
         await transporter.sendMail({
             from: `"Fixo Waitlist" <${env_1.default.SMTP_USER}>`,
@@ -61,7 +122,7 @@ const sendWaitlistSignupEmail = async (data) => {
         return true;
     }
     catch (error) {
-        logger_1.default.error('Waitlist signup email failed', { err: error });
+        logger_1.default.error('Waitlist signup email failed', smtpErrorMeta(error));
         return false;
     }
 };
@@ -69,9 +130,12 @@ exports.sendWaitlistSignupEmail = sendWaitlistSignupEmail;
 /** Someone submitted the "Partner with Fixo" form. */
 const sendPartnerRequestEmail = async (data) => {
     try {
-        if (!env_1.default.SMTP_USER) {
-            logger_1.default.debug('Partner request captured (email provider not configured)', { partnershipType: data.partnershipType, city: data.city });
-            return true;
+        if (!isConfigured()) {
+            // The request itself is already persisted; only the support notification is lost.
+            return notConfigured('Partner request notification', {
+                partnershipType: data.partnershipType,
+                city: data.city,
+            });
         }
         await transporter.sendMail({
             from: `"Fixo Partnerships" <${env_1.default.SMTP_USER}>`,
@@ -91,7 +155,7 @@ const sendPartnerRequestEmail = async (data) => {
         return true;
     }
     catch (error) {
-        logger_1.default.error('Partner request email failed', { err: error });
+        logger_1.default.error('Partner request email failed', smtpErrorMeta(error));
         return false;
     }
 };
@@ -101,10 +165,9 @@ const sendPasswordResetEmail = async (email, resetToken, role) => {
         // Use correct frontend URL based on role
         const baseUrl = role === 'worker' ? env_1.default.WORKER_CLIENT_URL : env_1.default.CLIENT_URL;
         const resetUrl = `${baseUrl}/reset-password?token=${resetToken}`;
-        if (!env_1.default.SMTP_USER) {
-            // Never log the reset link/token. Provider not configured → treat as a no-op success.
-            logger_1.default.debug('Password reset email skipped (provider not configured)', { recipientMasked: (0, mask_1.maskEmail)(email) });
-            return true;
+        if (!isConfigured()) {
+            // Never log the reset link/token — only the masked recipient.
+            return notConfigured('Password reset email', { recipientMasked: (0, mask_1.maskEmail)(email) });
         }
         await transporter.sendMail({
             from: `"Fixo" <${env_1.default.SMTP_USER}>`,
@@ -123,17 +186,19 @@ const sendPasswordResetEmail = async (email, resetToken, role) => {
         return true;
     }
     catch (error) {
-        logger_1.default.error('Password reset email failed', { err: error, recipientMasked: (0, mask_1.maskEmail)(email) });
+        logger_1.default.error('Password reset email failed', {
+            ...smtpErrorMeta(error),
+            recipientMasked: (0, mask_1.maskEmail)(email),
+        });
         return false;
     }
 };
 exports.sendPasswordResetEmail = sendPasswordResetEmail;
 const sendAccountDeactivationOtpEmail = async (email, otp, name) => {
     try {
-        if (!env_1.default.SMTP_USER) {
-            // Never log the OTP. Provider not configured → treat as a no-op success.
-            logger_1.default.debug('Deactivation OTP email skipped (provider not configured)', { recipientMasked: (0, mask_1.maskEmail)(email) });
-            return true;
+        if (!isConfigured()) {
+            // Never log the OTP — only the masked recipient.
+            return notConfigured('Deactivation OTP email', { recipientMasked: (0, mask_1.maskEmail)(email) });
         }
         await transporter.sendMail({
             from: `"Fixo" <${env_1.default.SMTP_USER}>`,
@@ -156,17 +221,19 @@ const sendAccountDeactivationOtpEmail = async (email, otp, name) => {
         return true;
     }
     catch (error) {
-        logger_1.default.error('Deactivation OTP email failed', { err: error, recipientMasked: (0, mask_1.maskEmail)(email) });
+        logger_1.default.error('Deactivation OTP email failed', {
+            ...smtpErrorMeta(error),
+            recipientMasked: (0, mask_1.maskEmail)(email),
+        });
         return false;
     }
 };
 exports.sendAccountDeactivationOtpEmail = sendAccountDeactivationOtpEmail;
 const sendPasswordSetupOtpEmail = async (email, otp, name) => {
     try {
-        if (!env_1.default.SMTP_USER) {
-            // Never log the OTP. Provider not configured → treat as a no-op success.
-            logger_1.default.debug('Password setup OTP email skipped (provider not configured)', { recipientMasked: (0, mask_1.maskEmail)(email) });
-            return true;
+        if (!isConfigured()) {
+            // Never log the OTP — only the masked recipient.
+            return notConfigured('Password setup OTP email', { recipientMasked: (0, mask_1.maskEmail)(email) });
         }
         await transporter.sendMail({
             from: `"Fixo" <${env_1.default.SMTP_USER}>`,
@@ -189,7 +256,10 @@ const sendPasswordSetupOtpEmail = async (email, otp, name) => {
         return true;
     }
     catch (error) {
-        logger_1.default.error('Password setup OTP email failed', { err: error, recipientMasked: (0, mask_1.maskEmail)(email) });
+        logger_1.default.error('Password setup OTP email failed', {
+            ...smtpErrorMeta(error),
+            recipientMasked: (0, mask_1.maskEmail)(email),
+        });
         return false;
     }
 };

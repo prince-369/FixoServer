@@ -7,6 +7,7 @@ import env from './config/env';
 import { cancelStaleBookings, cleanupClosedBookingVoiceNotes, notifyDueScheduledBookings } from './jobs/bookingCleanup';
 import { closeRateLimiterStore } from './middlewares/rateLimit.middleware';
 import { syncSeedAdminCredentials } from './services/adminBootstrap.service';
+import { verifyEmailTransport } from './services/email.service';
 import logger from './utils/logger';
 
 const server = http.createServer(app);
@@ -34,6 +35,11 @@ const start = async () => {
   }, env.JOB_CLEANUP_INTERVAL_MS);
   cleanupTimer.unref();
   
+  // Probe SMTP once at boot. Deliberately not awaited and never fatal: a revoked app password
+  // must not stop the API from serving, but it should be visible in the startup logs rather
+  // than only surfacing as users failing to receive OTPs.
+  void verifyEmailTransport();
+
   server.listen(env.PORT, () => {
     logger.info('Fixo server started', { port: env.PORT, env: env.NODE_ENV });
     logger.debug('Startup config', {

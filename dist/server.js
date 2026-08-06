@@ -12,6 +12,7 @@ const env_1 = __importDefault(require("./config/env"));
 const bookingCleanup_1 = require("./jobs/bookingCleanup");
 const rateLimit_middleware_1 = require("./middlewares/rateLimit.middleware");
 const adminBootstrap_service_1 = require("./services/adminBootstrap.service");
+const email_service_1 = require("./services/email.service");
 const logger_1 = __importDefault(require("./utils/logger"));
 const server = http_1.default.createServer(app_1.default);
 let cleanupTimer = null;
@@ -33,6 +34,10 @@ const start = async () => {
         void (0, bookingCleanup_1.notifyDueScheduledBookings)();
     }, env_1.default.JOB_CLEANUP_INTERVAL_MS);
     cleanupTimer.unref();
+    // Probe SMTP once at boot. Deliberately not awaited and never fatal: a revoked app password
+    // must not stop the API from serving, but it should be visible in the startup logs rather
+    // than only surfacing as users failing to receive OTPs.
+    void (0, email_service_1.verifyEmailTransport)();
     server.listen(env_1.default.PORT, () => {
         logger_1.default.info('Fixo server started', { port: env_1.default.PORT, env: env_1.default.NODE_ENV });
         logger_1.default.debug('Startup config', {

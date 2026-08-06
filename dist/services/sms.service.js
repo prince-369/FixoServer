@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sendOTP = exports.verifyOTP = exports.storeOTP = exports.generateOTP = void 0;
+exports.sendOTP = exports.verifyOTP = exports.clearOTP = exports.storeOTP = exports.generateOTP = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const twilio_1 = __importDefault(require("twilio"));
 const env_1 = __importDefault(require("../config/env"));
@@ -38,6 +38,16 @@ const storeOTP = async (phone, otp) => {
     });
 };
 exports.storeOTP = storeOTP;
+/**
+ * Discard a stored OTP.
+ *
+ * Used when the code was generated but could not actually be delivered — leaving it behind
+ * would let a stale, unusable OTP occupy the record until it expires.
+ */
+const clearOTP = async (phone) => {
+    await OtpCode_1.default.deleteOne({ phone: String(phone), purpose: OTP_PURPOSE });
+};
+exports.clearOTP = clearOTP;
 const verifyOTP = async (phone, otp) => {
     const record = await OtpCode_1.default.findOne({ phone: String(phone), purpose: OTP_PURPOSE });
     if (!record)

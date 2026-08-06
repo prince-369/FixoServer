@@ -1,3 +1,10 @@
+/**
+ * Probe SMTP credentials at boot so a revoked app password shows up in the startup logs
+ * instead of silently breaking every OTP until someone reports it.
+ *
+ * Deliberately non-fatal: the API must still serve traffic when only email is broken.
+ */
+export declare const verifyEmailTransport: () => Promise<boolean>;
 /** Someone joined the pre-launch waitlist on the marketing site. */
 export declare const sendWaitlistSignupEmail: (data: {
     contact: string;

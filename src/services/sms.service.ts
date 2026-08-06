@@ -44,6 +44,16 @@ export const storeOTP = async (phone: string, otp: string): Promise<void> => {
   );
 };
 
+/**
+ * Discard a stored OTP.
+ *
+ * Used when the code was generated but could not actually be delivered — leaving it behind
+ * would let a stale, unusable OTP occupy the record until it expires.
+ */
+export const clearOTP = async (phone: string): Promise<void> => {
+  await OtpCode.deleteOne({ phone: String(phone), purpose: OTP_PURPOSE });
+};
+
 export const verifyOTP = async (phone: string, otp: string): Promise<OtpVerifyResult> => {
   const record = await OtpCode.findOne({ phone: String(phone), purpose: OTP_PURPOSE });
   if (!record) return { ok: false, reason: 'invalid' };

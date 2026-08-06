@@ -19,6 +19,7 @@ import { generateTicketNumber } from '../services/ticketNumber.service';
 import { uploadBufferToCloudinary } from '../services/cloudinary.service';
 import { sendAccountDeactivationOtpEmail } from '../services/email.service';
 import { removeBookingVoiceNote } from '../services/bookingVoice.service';
+import { effectiveLocationWithin } from '../utils/workerGeo';
 import { notifyRole, notifyUser, sendNotification, sendAdminNotification, emitNotificationUnreadCount } from '../socket';
 import logger from '../utils/logger';
 
@@ -258,11 +259,13 @@ export const getServiceAvailability = async (req: Request, res: Response): Promi
       res.status(400).json({ message: 'Valid lat and lng are required' });
       return;
     }
-    const within = { $geoWithin: { $centerSphere: [[lng, lat], SERVICE_RADIUS_METERS / EARTH_RADIUS_METERS] } };
+    // `currentLocation ?? location`. The previous plain OR also matched a worker's registered
+    // address even after they had reported a live position elsewhere, so someone who had
+    // travelled away still counted as available back home.
     const count = await Worker.countDocuments({
       accountStatus: 'live',
       isActive: true,
-      $or: [{ currentLocation: within }, { location: within }],
+      ...effectiveLocationWithin([lng, lat], SERVICE_RADIUS_METERS),
     });
     res.json({ available: count > 0, workerCount: count });
   } catch (error) {
