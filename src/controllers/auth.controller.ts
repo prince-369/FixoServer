@@ -11,35 +11,32 @@ import { blockPayload, clearExpiredBlock } from '../utils/userBlock';
 import { parseSkillsInput } from '../utils/workerSkills';
 import RefreshToken from '../models/RefreshToken';
 import PasswordResetToken from '../models/PasswordResetToken';
-import { generateAccessToken, generateRefreshTokenString } from '../utils/generateToken';
+import {
+  createSession,
+  rotateSession,
+  revokeSessionByToken,
+  revokeAllSessions,
+  revokeSessionById,
+  listSessions,
+  readRefreshToken,
+  readDeviceContext,
+  setRefreshCookie,
+  clearRefreshCookie,
+  isNativeClient,
+  checkAccountUsable,
+} from '../services/authSession.service';
 import { generateOTP, storeOTP, verifyOTP, sendOTP, clearOTP } from '../services/sms.service';
 import { sendPasswordResetEmail } from '../services/email.service';
 import { uploadBufferToCloudinary } from '../services/cloudinary.service';
 import env from '../config/env';
 import logger from '../utils/logger';
 
-const REFRESH_TOKEN_DAYS = 365;
 const EMAIL_RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
 const OTP_RESET_TOKEN_TTL_MS = 10 * 60 * 1000;
-const REFRESH_COOKIE_MAX_AGE_MS = REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000;
-const IS_PRODUCTION = process.env.NODE_ENV === 'production';
-// Only set secure cookies when clients are actually on HTTPS (not localhost dev)
-const CLIENT_IS_HTTPS = (env.CLIENT_URL || '').startsWith('https://');
 
-const refreshCookieOptions = {
-  httpOnly: true,
-  secure: IS_PRODUCTION && CLIENT_IS_HTTPS,
-  sameSite: (IS_PRODUCTION && CLIENT_IS_HTTPS) ? 'none' as const : 'lax' as const,
-  maxAge: REFRESH_COOKIE_MAX_AGE_MS,
-  path: '/',
-};
-
-const refreshCookieClearOptions = {
-  httpOnly: true,
-  secure: IS_PRODUCTION && CLIENT_IS_HTTPS,
-  sameSite: (IS_PRODUCTION && CLIENT_IS_HTTPS) ? 'none' as const : 'lax' as const,
-  path: '/',
-};
+// Refresh-token cookie attributes and TTLs now live in services/authSession.service.ts,
+// driven entirely by env (REFRESH_COOKIE_* / REFRESH_TOKEN_TTL). Nothing about token
+// lifetime or cookie security is decided in this file any more.
 
 type PasswordResetRole = 'customer' | 'worker';
 
@@ -231,21 +228,33 @@ const sendEmailResetLink = async (
   return true;
 };
 
-// ─── Helper: Set auth tokens & cookie ───
-const issueTokens = async (res: Response, userId: string, role: 'customer' | 'worker' | 'admin') => {
-  const accessToken = generateAccessToken({ id: userId, role });
-  const refreshToken = generateRefreshTokenString();
+/**
+ * Establishes a persistent session and returns the access token.
+ *
+ * Every authentication method funnels through here — password, Google, and (later)
+ * phone OTP. Those methods only *prove identity*; session creation, token lifetimes
+ * and transport are decided in exactly one place, so adding an OTP login later needs
+ * no changes to any of this.
+ *
+ * Transport:
+ *   • browser  → refresh token goes out as an HttpOnly cookie, never in the body.
+ *   • native   → no usable cookie jar, so it is stashed on res.locals and merged into
+ *                the JSON body by the `refreshTokenTransport` middleware.
+ */
+const issueTokens = async (
+  req: Request,
+  res: Response,
+  userId: string,
+  role: 'customer' | 'worker' | 'admin'
+): Promise<string> => {
+  const device = readDeviceContext(req);
+  const { accessToken, refreshToken } = await createSession(userId, role, device);
 
-  // Store refresh token in DB
-  await RefreshToken.create({
-    userId,
-    role,
-    token: refreshToken,
-    expiresAt: new Date(Date.now() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000),
-  });
-
-  // For Vercel client + Render server cross-site auth, production cookie must be SameSite=None; Secure.
-  res.cookie('refreshToken', refreshToken, refreshCookieOptions);
+  if (isNativeClient(req)) {
+    res.locals.pendingRefreshToken = refreshToken;
+  } else {
+    setRefreshCookie(res, refreshToken);
+  }
 
   return accessToken;
 };
@@ -316,7 +325,7 @@ export const registerCustomer = async (req: Request, res: Response): Promise<voi
       password: hashedPassword,
     });
 
-    const accessToken = await issueTokens(res, user._id.toString(), 'customer');
+    const accessToken = await issueTokens(req, res, user._id.toString(), 'customer');
 
     res.status(201).json({
       message: 'Registration successful',
@@ -371,7 +380,7 @@ export const googleAuthCustomer = async (req: Request, res: Response): Promise<v
       return;
     }
 
-    const accessToken = await issueTokens(res, user._id.toString(), 'customer');
+    const accessToken = await issueTokens(req, res, user._id.toString(), 'customer');
 
     res.json({
       message: 'Login successful',
@@ -441,7 +450,7 @@ export const completeGoogleRegistration = async (req: Request, res: Response): P
       existingByGoogle.profileImage = existingByGoogle.profileImage || profileImage;
       await existingByGoogle.save();
 
-      const accessToken = await issueTokens(res, existingByGoogle._id.toString(), 'customer');
+      const accessToken = await issueTokens(req, res, existingByGoogle._id.toString(), 'customer');
       res.json({
         message: 'Login successful',
         accessToken,
@@ -464,7 +473,7 @@ export const completeGoogleRegistration = async (req: Request, res: Response): P
       profileImage,
     });
 
-    const accessToken = await issueTokens(res, user._id.toString(), 'customer');
+    const accessToken = await issueTokens(req, res, user._id.toString(), 'customer');
 
     res.status(201).json({
       message: 'Registration successful',
@@ -519,7 +528,7 @@ export const loginCustomer = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const accessToken = await issueTokens(res, user._id.toString(), 'customer');
+    const accessToken = await issueTokens(req, res, user._id.toString(), 'customer');
 
     res.json({
       message: 'Login successful',
@@ -571,7 +580,7 @@ export const googleAuthWorker = async (req: Request, res: Response): Promise<voi
     }
     await worker.save();
 
-    const accessToken = await issueTokens(res, worker._id.toString(), 'worker');
+    const accessToken = await issueTokens(req, res, worker._id.toString(), 'worker');
 
     res.json({
       message: 'Login successful',
@@ -658,7 +667,7 @@ export const registerWorkerWithGoogle = async (req: Request, res: Response): Pro
 
       await existingWorker.save();
 
-      const accessToken = await issueTokens(res, existingWorker._id.toString(), 'worker');
+      const accessToken = await issueTokens(req, res, existingWorker._id.toString(), 'worker');
       res.json({
         message: 'Login successful',
         accessToken,
@@ -690,7 +699,7 @@ export const registerWorkerWithGoogle = async (req: Request, res: Response): Pro
       skills: gSkills,
     });
 
-    const accessToken = await issueTokens(res, worker._id.toString(), 'worker');
+    const accessToken = await issueTokens(req, res, worker._id.toString(), 'worker');
 
     res.status(201).json({
       message: 'Registration successful. Complete your profile to start working.',
@@ -762,7 +771,7 @@ export const registerWorker = async (req: Request, res: Response): Promise<void>
       skills,
     });
 
-    const accessToken = await issueTokens(res, worker._id.toString(), 'worker');
+    const accessToken = await issueTokens(req, res, worker._id.toString(), 'worker');
 
     res.status(201).json({
       message: 'Registration successful. Complete your profile to start working.',
@@ -813,7 +822,7 @@ export const loginWorker = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    const accessToken = await issueTokens(res, worker._id.toString(), 'worker');
+    const accessToken = await issueTokens(req, res, worker._id.toString(), 'worker');
 
     res.json({
       message: 'Login successful',
@@ -859,7 +868,7 @@ export const loginAdmin = async (req: Request, res: Response): Promise<void> => 
     admin.lastLoginAt = new Date();
     await admin.save();
 
-    const accessToken = await issueTokens(res, admin._id.toString(), 'admin');
+    const accessToken = await issueTokens(req, res, admin._id.toString(), 'admin');
 
     res.json({
       message: 'Login successful',
@@ -1015,6 +1024,13 @@ export const resetPassword = async (req: Request, res: Response): Promise<void> 
       await Worker.findByIdAndUpdate(tokenData.id, { password: hashedPassword });
     }
 
+    // A reset is the remediation path for a lost or compromised account, so EVERY
+    // session dies — including any the attacker holds. No exception for the caller:
+    // they came in unauthenticated and must sign in with the new password.
+    await revokeAllSessions(tokenData.id, tokenData.role, 'password_reset');
+    await RefreshToken.deleteMany({ userId: tokenData.id }).catch(() => undefined);
+    clearRefreshCookie(res);
+
     res.json({ message: 'Password reset successful' });
   } catch (error) {
     logger.error('Reset password error:', { err: error });
@@ -1074,7 +1090,18 @@ export const changePassword = async (req: Request, res: Response): Promise<void>
     account.password = hashedPassword;
     await account.save();
 
-    res.json({ message: 'Password changed successfully' });
+    // Sign out every OTHER device: if the old password leaked, those sessions are
+    // suspect. The acting session is preserved (req.user.sessionId) so the user is
+    // not bounced to the login screen for changing their own password.
+    const revoked = await revokeAllSessions(
+      req.user.id,
+      req.user.role,
+      'password_changed',
+      req.user.sessionId
+    );
+    await RefreshToken.deleteMany({ userId: req.user.id }).catch(() => undefined);
+
+    res.json({ message: 'Password changed successfully', otherSessionsRevoked: revoked });
   } catch (error) {
     logger.error('Change password error:', { err: error });
     res.status(500).json({ message: 'Server error' });
@@ -1267,55 +1294,261 @@ export const setPasswordForOAuthUser = async (req: Request, res: Response): Prom
   }
 };
 
-// ─── Refresh Token ───
+// --- Refresh / session restore ---
+/**
+ * Rotating refresh endpoint. This is the call every client makes on startup to
+ * restore a session, and the call the API client makes when an access token expires.
+ *
+ * On success the presented refresh token is retired and a new one issued, so no
+ * refresh token is ever usable twice. The response also carries the full user
+ * profile, so a client can restore a session in ONE round trip instead of
+ * refresh-then-/auth/me.
+ */
 export const refresh = async (req: Request, res: Response): Promise<void> => {
   try {
-    const token = req.cookies?.refreshToken;
-    if (!token) {
-      res.status(401).json({ message: 'No refresh token' });
-      return;
-    }
+    const presented = readRefreshToken(req);
+    const device = readDeviceContext(req);
 
-    const stored = await RefreshToken.findOne({ token });
-    if (!stored || stored.expiresAt < new Date()) {
-      if (stored) await stored.deleteOne();
-      res.clearCookie('refreshToken', refreshCookieClearOptions);
-      res.status(401).json({ message: 'Invalid or expired refresh token' });
-      return;
-    }
+    // -- Legacy migration ----------------------------------------------------
+    // Sessions created before rotation existed live in the old `RefreshToken`
+    // collection with the token stored in plaintext. Rather than logging those
+    // users out, the old token is redeemed once for a real AuthSession and then
+    // destroyed. Existing users therefore stay signed in across this deploy.
+    if (presented) {
+      const legacy = await RefreshToken.findOne({ token: presented });
+      if (legacy) {
+        await legacy.deleteOne();
 
-    if (stored.role === 'customer') {
-      const customer = await User.findById(stored.userId).select('isActive');
-      if (!customer || customer.isActive === false) {
-        await stored.deleteOne();
-        res.clearCookie('refreshToken', refreshCookieClearOptions);
-        res.status(401).json({ message: 'Account is deactivated' });
+        if (legacy.expiresAt < new Date()) {
+          clearRefreshCookie(res);
+          res.status(401).json({ message: 'Session expired', code: 'SESSION_EXPIRED' });
+          return;
+        }
+
+        const status = await checkAccountUsable(legacy.userId.toString(), legacy.role);
+        if (!status.usable) {
+          clearRefreshCookie(res);
+          res.status(401).json({ message: status.reason, code: 'SESSION_INVALID' });
+          return;
+        }
+
+        const accessToken = await issueTokens(req, res, legacy.userId.toString(), legacy.role);
+        logger.info('Legacy refresh token migrated to AuthSession', {
+          userId: legacy.userId.toString(),
+          role: legacy.role,
+        });
+        await respondWithSession(res, accessToken, legacy.role, legacy.userId.toString());
         return;
       }
     }
 
-    const accessToken = generateAccessToken({ id: stored.userId.toString(), role: stored.role });
+    const result = await rotateSession(presented, device);
 
-    res.json({ accessToken, role: stored.role });
+    if (!result.ok) {
+      clearRefreshCookie(res);
+      // A stable machine-readable code lets clients tell "your session ended" from
+      // "the network failed" -- the latter must never wipe local credentials.
+      const code =
+        result.failure === 'reuse_detected' ? 'SESSION_REVOKED'
+        : result.failure === 'expired' ? 'SESSION_EXPIRED'
+        : result.failure === 'no_token' ? 'NO_SESSION'
+        : 'SESSION_INVALID';
+      res.status(401).json({ message: result.message, code });
+      return;
+    }
+
+    if (isNativeClient(req)) {
+      res.locals.pendingRefreshToken = result.refreshToken;
+    } else {
+      setRefreshCookie(res, result.refreshToken);
+    }
+
+    await respondWithSession(
+      res,
+      result.accessToken,
+      result.session.role,
+      String(result.session.userId)
+    );
   } catch (error) {
     logger.error('Refresh token error:', { err: error });
+    // 500, NOT 401 -- a database blip must not be read by the client as "logged out".
     res.status(500).json({ message: 'Server error' });
   }
 };
 
-// ─── Logout ───
+/**
+ * Shared body for /auth/refresh, so session restore is a single round trip.
+ * Mirrors the shape of /auth/me.
+ */
+const respondWithSession = async (
+  res: Response,
+  accessToken: string,
+  role: 'customer' | 'worker' | 'admin',
+  userId: string
+): Promise<void> => {
+  const base = { accessToken, role };
+
+  if (role === 'customer') {
+    const user = await User.findById(userId);
+    if (user) await clearExpiredBlock(user);
+    res.json({ ...base, user, block: blockPayload(user?.block) });
+    return;
+  }
+
+  if (role === 'worker') {
+    const worker = await Worker.findById(userId).populate('categories');
+    if (worker) await clearExpiredBlock(worker);
+    const workerPayload = worker
+      ? {
+          ...worker.toObject(),
+          aadhaarSubmitted: Boolean(worker.aadhaarFront && worker.aadhaarBack),
+          skillsCount: Array.isArray(worker.skills) ? worker.skills.length : 0,
+        }
+      : worker;
+    res.json({ ...base, worker: workerPayload, block: blockPayload(worker?.block) });
+    return;
+  }
+
+  const admin = await Admin.findById(userId);
+  res.json({
+    ...base,
+    admin: admin
+      ? {
+          id: admin._id,
+          name: admin.name,
+          email: admin.email,
+          role: admin.role,
+          permissions: effectivePermissions(admin),
+        }
+      : null,
+  });
+};
+
+// --- Logout (this device) ---
+/**
+ * Logout is a backend action: the session row is revoked so the refresh token is
+ * dead server-side. Clearing client state alone would leave a usable token behind.
+ */
 export const logout = async (req: Request, res: Response): Promise<void> => {
   try {
-    const token = req.cookies?.refreshToken;
-    if (token) {
-      await RefreshToken.deleteOne({ token });
+    const presented = readRefreshToken(req);
+    await revokeSessionByToken(presented, 'logout');
+    // Drain any legacy row for the same token so it cannot resurrect the session.
+    if (presented) {
+      await RefreshToken.deleteOne({ token: presented }).catch(() => undefined);
     }
-    res.clearCookie('refreshToken', refreshCookieClearOptions);
-    res.json({ message: 'Logged out' });
   } catch (error) {
     logger.error('Logout error:', { err: error });
-    res.clearCookie('refreshToken', refreshCookieClearOptions);
+  } finally {
+    // Always clear the cookie and report success -- a client must never be stuck
+    // "logged in" because logout bookkeeping failed.
+    clearRefreshCookie(res);
     res.json({ message: 'Logged out' });
   }
 };
 
+// --- Logout everywhere ---
+export const logoutAll = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ message: 'Not authorized' });
+      return;
+    }
+
+    const count = await revokeAllSessions(req.user.id, req.user.role, 'logout_all');
+    await RefreshToken.deleteMany({ userId: req.user.id }).catch(() => undefined);
+
+    clearRefreshCookie(res);
+    res.json({ message: 'Signed out on all devices', sessionsRevoked: count });
+  } catch (error) {
+    logger.error('Logout-all error:', { err: error });
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+/**
+ * Exchanges a valid access token for a persistent session.
+ *
+ * Needed for one case: mobile installs upgraded from the previous version, which
+ * persisted an ACCESS token in the keychain and had no refresh token at all. Those
+ * users would otherwise be forced to sign in again on first launch after the update.
+ *
+ * It is `protect`-guarded, so the caller must already hold a valid, unexpired access
+ * token — this grants no authority the caller does not already have; it only makes
+ * that authority renewable. Idempotent per device: `createSession` replaces any
+ * existing session for the same deviceId rather than stacking new ones.
+ */
+export const bootstrapSession = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ message: 'Not authorized' });
+      return;
+    }
+
+    // A token already bound to a session has nothing to bootstrap.
+    if (req.user.sessionId) {
+      res.json({ message: 'Session already active', sessionId: req.user.sessionId });
+      return;
+    }
+
+    const status = await checkAccountUsable(req.user.id, req.user.role);
+    if (!status.usable) {
+      res.status(401).json({ message: status.reason, code: 'SESSION_INVALID' });
+      return;
+    }
+
+    const accessToken = await issueTokens(req, res, req.user.id, req.user.role);
+    logger.info('Bootstrapped session from legacy access token', {
+      userId: req.user.id,
+      role: req.user.role,
+    });
+
+    res.json({ accessToken, role: req.user.role });
+  } catch (error) {
+    logger.error('Bootstrap session error:', { err: error });
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// --- Active sessions (multi-device) ---
+export const getSessions = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ message: 'Not authorized' });
+      return;
+    }
+
+    const sessions = await listSessions(req.user.id, req.user.role, req.user.sessionId);
+    res.json({ sessions });
+  } catch (error) {
+    logger.error('List sessions error:', { err: error });
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+export const revokeSession = async (req: Request, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ message: 'Not authorized' });
+      return;
+    }
+
+    const sessionId = String(req.params.sessionId || '');
+    // Scoped to req.user.id, so one user can never revoke another user's session.
+    const revoked = await revokeSessionById(sessionId, req.user.id, 'logout');
+    if (!revoked) {
+      res.status(404).json({ message: 'Session not found' });
+      return;
+    }
+
+    // Revoking your own current session is a logout -- clear the cookie too.
+    if (req.user.sessionId === sessionId) {
+      clearRefreshCookie(res);
+    }
+
+    res.json({ message: 'Session revoked' });
+  } catch (error) {
+    logger.error('Revoke session error:', { err: error });
+    res.status(500).json({ message: 'Server error' });
+  }
+};

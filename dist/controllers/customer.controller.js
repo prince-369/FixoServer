@@ -386,7 +386,10 @@ const getBookings = async (req, res) => {
         else if (status === 'cancelled') {
             query.status = 'cancelled';
         }
+        // +completionPin: the customer owns this code and now sees it as soon as the
+        // booking is paid, so it must be present in their own booking payloads.
         const bookings = await Booking_1.default.find(query)
+            .select('+completionPin')
             .populate('category', 'name slug image')
             .populate('assignedWorker', 'fullName phone profileImage rating')
             .sort({ createdAt: -1 });
@@ -402,6 +405,7 @@ exports.getBookings = getBookings;
 const getBookingDetail = async (req, res) => {
     try {
         const booking = await Booking_1.default.findOne({ _id: req.params.id, customer: req.user.id })
+            .select('+completionPin')
             .populate('category', 'name slug image')
             .populate('assignedWorker', 'fullName phone regularPhone profileImage rating bio location totalWorkDone categories')
             .populate('acceptedBid', 'priceOffered');
@@ -436,7 +440,7 @@ const revealCompletionCode = async (req, res) => {
             _id: req.params.id,
             customer: req.user.id,
             status: { $in: ['payment_done', 'in_progress'] },
-        });
+        }).select('+completionPin');
         if (!booking) {
             res.status(404).json({ message: 'Booking not found' });
             return;
@@ -445,10 +449,10 @@ const revealCompletionCode = async (req, res) => {
             res.status(400).json({ message: 'Completion code is not available yet' });
             return;
         }
-        if (!booking.completionRequestedByWorkerAt) {
-            res.status(400).json({ message: 'Worker has not requested completion code yet' });
-            return;
-        }
+        // NOTE: the "worker must request first" precondition was removed along with the
+        // reveal gate — the customer already holds the code from the moment they pay.
+        // This endpoint is kept only so older app builds keep working; it now just
+        // stamps the reveal timestamp and returns the booking.
         if (!booking.completionCodeRevealedAt) {
             booking.completionCodeRevealedAt = new Date();
             await booking.save();

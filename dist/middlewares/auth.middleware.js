@@ -19,7 +19,9 @@ const protect = async (req, res, next) => {
             return;
         }
         const decoded = (0, generateToken_1.verifyAccessToken)(token);
-        req.user = { id: decoded.id, role: decoded.role };
+        // Identity comes exclusively from the verified token. A role in the body, query
+        // or a header is never consulted — a client cannot promote itself.
+        req.user = { id: decoded.id, role: decoded.role, sessionId: decoded.sid };
         next();
     }
     catch (error) {
@@ -51,7 +53,11 @@ const verifyUser = async (req, res, next) => {
                 break;
             }
             case 'worker':
-                userExists = !!(await Worker_1.default.findById(req.user.id));
+                // `isActive` is the online/offline toggle and `block` is a temporary state the
+                // apps render a block screen for — neither means "not a user". Existence is
+                // the only check here, matching the account-status policy in
+                // services/authSession.service.ts.
+                userExists = !!(await Worker_1.default.findById(req.user.id).select('_id'));
                 break;
             case 'admin':
                 userExists = !!(await Admin_1.default.findById(req.user.id));

@@ -94,7 +94,13 @@ app.get(env_1.default.METRICS_ROUTE, async (req, res) => {
 });
 // Baseline traffic protection
 app.use('/api', rateLimit_middleware_1.apiLimiter);
-app.use('/api/auth', rateLimit_middleware_1.authLimiter);
+// `/auth/refresh` has its own limiter (see refreshLimiter): it is called routinely
+// by every healthy client, so the login-attempt budget must not apply to it.
+app.use('/api/auth', (req, res, next) => {
+    if (req.path === '/refresh')
+        return next();
+    return (0, rateLimit_middleware_1.authLimiter)(req, res, next);
+});
 app.use('/api/booking', rateLimit_middleware_1.mutationLimiter);
 app.use('/api/customer', rateLimit_middleware_1.mutationLimiter);
 app.use('/api/worker', rateLimit_middleware_1.mutationLimiter);

@@ -10,6 +10,11 @@ declare global {
       user?: {
         id: string;
         role: 'customer' | 'worker' | 'admin';
+        /**
+         * AuthSession this request's access token was minted from. Absent only for
+         * tokens issued before session tracking existed.
+         */
+        sessionId?: string;
       };
     }
   }
@@ -29,7 +34,9 @@ export const protect = async (req: Request, res: Response, next: NextFunction): 
     }
 
     const decoded = verifyAccessToken(token);
-    req.user = { id: decoded.id, role: decoded.role };
+    // Identity comes exclusively from the verified token. A role in the body, query
+    // or a header is never consulted — a client cannot promote itself.
+    req.user = { id: decoded.id, role: decoded.role, sessionId: decoded.sid };
     next();
   } catch (error) {
     res.status(401).json({ message: 'Not authorized, token invalid' });
@@ -61,7 +68,11 @@ export const verifyUser = async (req: Request, res: Response, next: NextFunction
         break;
       }
       case 'worker':
-        userExists = !!(await Worker.findById(req.user.id));
+        // `isActive` is the online/offline toggle and `block` is a temporary state the
+        // apps render a block screen for — neither means "not a user". Existence is
+        // the only check here, matching the account-status policy in
+        // services/authSession.service.ts.
+        userExists = !!(await Worker.findById(req.user.id).select('_id'));
         break;
       case 'admin':
         userExists = !!(await Admin.findById(req.user.id));

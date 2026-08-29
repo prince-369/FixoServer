@@ -108,7 +108,57 @@ const resolveLogLevel = () => {
     }
     return nodeEnv === 'development' ? 'debug' : 'warn';
 };
+/**
+ * Parses a JWT-style duration ("15m", "30d", "900s", or bare seconds) into ms.
+ * Used to keep the refresh cookie Max-Age and the AuthSession expiresAt in lockstep
+ * with REFRESH_TOKEN_TTL, so the TTL is configured in exactly one place.
+ */
+const parseDurationMs = (raw, fallbackMs) => {
+    const value = raw.trim();
+    const match = /^(\d+(?:\.\d+)?)\s*(ms|s|m|h|d|w|y)?$/i.exec(value);
+    if (!match)
+        return fallbackMs;
+    const amount = Number(match[1]);
+    if (!Number.isFinite(amount) || amount <= 0)
+        return fallbackMs;
+    const unit = (match[2] || 's').toLowerCase();
+    const multipliers = {
+        ms: 1,
+        s: 1000,
+        m: 60000,
+        h: 3600000,
+        d: 86400000,
+        w: 604800000,
+        y: 31536000000,
+    };
+    return amount * (multipliers[unit] ?? 1000);
+};
+const parseSameSiteEnv = () => {
+    const raw = (process.env.REFRESH_COOKIE_SAMESITE || '').trim().toLowerCase();
+    if (raw === 'lax' || raw === 'strict' || raw === 'none')
+        return raw;
+    if (raw) {
+        throw new Error(`Invalid REFRESH_COOKIE_SAMESITE="${raw}". Expected "lax", "strict" or "none".`);
+    }
+    // Default: "lax". Both supported topologies (same-origin proxy, and API on a
+    // sibling subdomain under one registrable domain) are same-site, so Lax is
+    // correct and gives CSRF protection for free. Only a genuinely cross-site
+    // deployment needs "none" — and that combination is validated below.
+    return 'lax';
+};
 const clientUrl = getEnvOrDefault('CLIENT_URL', 'http://localhost:3000', { requiredInProduction: true });
+const accessTokenTtl = (process.env.ACCESS_TOKEN_TTL || process.env.JWT_EXPIRE || '15m').trim();
+const refreshTokenTtl = (process.env.REFRESH_TOKEN_TTL || '30d').trim();
+const refreshCookieSameSite = parseSameSiteEnv();
+// Secure is mandatory in production and whenever SameSite=None (browsers reject
+// `SameSite=None` without `Secure`). Dev over plain http://localhost may opt out.
+const refreshCookieSecure = parseBooleanEnv('REFRESH_COOKIE_SECURE', nodeEnv === 'production' || refreshCookieSameSite === 'none');
+if (refreshCookieSameSite === 'none' && !refreshCookieSecure) {
+    throw new Error('REFRESH_COOKIE_SAMESITE="none" requires REFRESH_COOKIE_SECURE=true.');
+}
+if (nodeEnv === 'production' && !refreshCookieSecure) {
+    throw new Error('REFRESH_COOKIE_SECURE must be true in production.');
+}
 const googleClientIds = parseGoogleClientIds();
 const env = {
     NODE_ENV: nodeEnv,
@@ -121,9 +171,27 @@ const env = {
     MONGODB_CONNECT_TIMEOUT_MS: parseNumberEnv('MONGODB_CONNECT_TIMEOUT_MS', 10000, { min: 1000 }),
     MONGODB_MAX_IDLE_TIME_MS: parseNumberEnv('MONGODB_MAX_IDLE_TIME_MS', 30000, { min: 5000 }),
     JWT_SECRET: getRequiredEnv('JWT_SECRET'),
-    // Short-lived access token. Revocation relies on refresh-token rotation, so a
-    // stolen access token is only valid for this window (default 30 minutes).
-    JWT_EXPIRE: process.env.JWT_EXPIRE || '30m',
+    // Legacy alias. ACCESS_TOKEN_TTL is authoritative; JWT_EXPIRE is still read as a
+    // fallback so an existing deployment keeps booting, but it no longer controls
+    // session lifetime — persistence comes from the refresh token, not this value.
+    JWT_EXPIRE: accessTokenTtl,
+    ACCESS_TOKEN_TTL: accessTokenTtl,
+    REFRESH_TOKEN_TTL: refreshTokenTtl,
+    REFRESH_TOKEN_TTL_MS: parseDurationMs(refreshTokenTtl, 30 * 86400000),
+    // Keyed hash for refresh tokens at rest. Defaults to JWT_SECRET so existing
+    // deployments boot unchanged; set a distinct value to decouple the two.
+    REFRESH_TOKEN_HASH_SECRET: process.env.REFRESH_TOKEN_HASH_SECRET || getRequiredEnv('JWT_SECRET'),
+    // Window in which replaying the immediately-previous refresh token is treated as
+    // a benign client retry (lost response / flaky network) rather than theft.
+    REFRESH_REUSE_GRACE_MS: parseNumberEnv('REFRESH_REUSE_GRACE_MS', 60000, { min: 0, max: 600000 }),
+    REFRESH_COOKIE_NAME: (process.env.REFRESH_COOKIE_NAME || 'fixo_rt').trim(),
+    REFRESH_COOKIE_PATH: parseRouteEnv('REFRESH_COOKIE_PATH', '/api/auth'),
+    // Empty = host-only cookie (proxy / same-origin mode). Set to ".fixoservice.in"
+    // to share one cookie across app./worker./api. subdomains.
+    REFRESH_COOKIE_DOMAIN: (process.env.REFRESH_COOKIE_DOMAIN || '').trim(),
+    REFRESH_COOKIE_SAMESITE: refreshCookieSameSite,
+    REFRESH_COOKIE_SECURE: refreshCookieSecure,
+    MAX_SESSIONS_PER_USER: parseNumberEnv('MAX_SESSIONS_PER_USER', 10, { min: 1, max: 100 }),
     CLIENT_URL: clientUrl,
     CLIENT_URLS: parseClientOrigins(clientUrl),
     WORKER_CLIENT_URL: process.env.WORKER_CLIENT_URL || 'https://fixoworker.vercel.app',
@@ -142,6 +210,7 @@ const env = {
     RATE_LIMIT_WINDOW_MS: parseNumberEnv('RATE_LIMIT_WINDOW_MS', 15 * 60 * 1000, { min: 1000 }),
     RATE_LIMIT_MAX: parseNumberEnv('RATE_LIMIT_MAX', 600, { min: 50 }),
     AUTH_RATE_LIMIT_MAX: parseNumberEnv('AUTH_RATE_LIMIT_MAX', 30, { min: 5 }),
+    REFRESH_RATE_LIMIT_MAX: parseNumberEnv('REFRESH_RATE_LIMIT_MAX', 60, { min: 10 }),
     MUTATION_RATE_LIMIT_MAX: parseNumberEnv('MUTATION_RATE_LIMIT_MAX', 150, { min: 10 }),
     IDEMPOTENCY_TTL_MS: parseNumberEnv('IDEMPOTENCY_TTL_MS', 15000, { min: 3000 }),
     REDIS_URL: process.env.REDIS_URL || '',

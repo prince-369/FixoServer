@@ -24,6 +24,30 @@ services:
         sync: false
       - key: JWT_SECRET
         generateValue: true
+      # Persistent auth. Session lifetime comes from the rotating refresh token,
+      # never from a long access-token TTL. See docs/AUTH.md.
+      - key: ACCESS_TOKEN_TTL
+        value: 15m
+      - key: REFRESH_TOKEN_TTL
+        value: 30d
+      # Distinct from JWT_SECRET so a DB dump alone cannot pre-compute token hashes.
+      - key: REFRESH_TOKEN_HASH_SECRET
+        generateValue: true
+      - key: REFRESH_COOKIE_NAME
+        value: fixo_rt
+      - key: REFRESH_COOKIE_PATH
+        value: /api/auth
+      # Empty in proxy mode; set to ".fixoservice.in" when moving to custom domains.
+      - key: REFRESH_COOKIE_DOMAIN
+        sync: false
+      - key: REFRESH_COOKIE_SAMESITE
+        value: lax
+      - key: REFRESH_COOKIE_SECURE
+        value: "true"
+      - key: MAX_SESSIONS_PER_USER
+        value: "10"
+      - key: REFRESH_RATE_LIMIT_MAX
+        value: "60"
       - key: RAZORPAY_KEY_ID
         sync: false
       - key: RAZORPAY_KEY_SECRET

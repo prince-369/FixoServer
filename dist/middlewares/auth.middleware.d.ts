@@ -5,6 +5,11 @@ declare global {
             user?: {
                 id: string;
                 role: 'customer' | 'worker' | 'admin';
+                /**
+                 * AuthSession this request's access token was minted from. Absent only for
+                 * tokens issued before session tracking existed.
+                 */
+                sessionId?: string;
             };
         }
     }

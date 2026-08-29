@@ -682,11 +682,13 @@ export const counterBid = async (req: Request, res: Response): Promise<void> => 
 export const initiatePayment = async (req: Request, res: Response): Promise<void> => {
   try {
     const { method } = req.body;
+    // +completionPin: the cash path generates the PIN here and returns it to the
+    // customer straight away.
     const booking = await Booking.findOne({
       _id: req.params.id,
       customer: req.user!.id,
       status: 'worker_approved',
-    });
+    }).select('+completionPin');
 
     if (!booking) {
       res.status(404).json({ message: 'Booking not found or not approved yet' });
@@ -781,11 +783,13 @@ export const verifyBookingPayment = async (req: Request, res: Response): Promise
       return;
     }
 
+    // +completionPin: finalize must see an existing PIN so a retried verification
+    // does not mint a second one, and the response hands it to the customer.
     const booking = await Booking.findOne({
       _id: req.params.id,
       customer: req.user!.id,
       razorpayOrderId: razorpay_order_id,
-    });
+    }).select('+completionPin');
 
     if (!booking) {
       res.status(404).json({ message: 'Booking not found' });
@@ -816,10 +820,12 @@ export const reconcileBookingPayment = async (req: Request, res: Response): Prom
       ? req.body.razorpay_order_id
       : '';
 
+    // +completionPin: same reason as verifyBookingPayment — finalize must not mint a
+    // second PIN, and the customer gets theirs back in the response.
     const booking = await Booking.findOne({
       _id: req.params.id,
       customer: req.user!.id,
-    });
+    }).select('+completionPin');
 
     if (!booking) {
       res.status(404).json({ message: 'Booking not found' });
@@ -893,7 +899,9 @@ export const handleRazorpayWebhook = async (req: Request, res: Response): Promis
       return;
     }
 
-    const booking = await Booking.findOne({ razorpayOrderId: orderId });
+    // +completionPin: the webhook is the authoritative payment confirmation and runs
+    // finalize, which must see any existing PIN rather than replacing it.
+    const booking = await Booking.findOne({ razorpayOrderId: orderId }).select('+completionPin');
     if (!booking) {
       res.status(200).json({ received: true, ignored: true });
       return;

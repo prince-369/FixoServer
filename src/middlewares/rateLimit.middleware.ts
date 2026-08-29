@@ -225,6 +225,27 @@ export const authLimiter = rateLimit({
   message: { message: 'Too many authentication attempts. Please try again later.' },
 });
 
+/**
+ * /auth/refresh has a different threat model from login: it is called legitimately
+ * by every client on startup and whenever an access token expires, so the login
+ * budget (30 / 15 min, keyed on a credential in the body) is both too tight and
+ * keyed on fields refresh does not send.
+ *
+ * `skipSuccessfulRequests` means only FAILED refreshes count, so a normal user is
+ * never throttled while someone spraying stolen tokens is cut off quickly.
+ */
+export const refreshLimiter = rateLimit({
+  windowMs: env.RATE_LIMIT_WINDOW_MS,
+  max: env.REFRESH_RATE_LIMIT_MAX,
+  passOnStoreError: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: keyByUserOrIp,
+  skipSuccessfulRequests: true,
+  store: getRateLimitStore('fixo:ratelimit:refresh:'),
+  message: { message: 'Too many session refresh attempts. Please try again shortly.' },
+});
+
 export const mutationLimiter = rateLimit({
   windowMs: 5 * 60 * 1000,
   max: env.MUTATION_RATE_LIMIT_MAX,

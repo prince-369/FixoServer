@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.closeRateLimiterStore = exports.partnerLimiter = exports.waitlistLimiter = exports.mutationLimiter = exports.authLimiter = exports.apiLimiter = void 0;
+exports.closeRateLimiterStore = exports.partnerLimiter = exports.waitlistLimiter = exports.mutationLimiter = exports.refreshLimiter = exports.authLimiter = exports.apiLimiter = void 0;
 const express_rate_limit_1 = __importStar(require("express-rate-limit"));
 const ioredis_1 = __importDefault(require("ioredis"));
 const rate_limit_redis_1 = require("rate-limit-redis");
@@ -231,6 +231,26 @@ exports.authLimiter = (0, express_rate_limit_1.default)({
     skipSuccessfulRequests: true,
     store: getRateLimitStore('fixo:ratelimit:auth:'),
     message: { message: 'Too many authentication attempts. Please try again later.' },
+});
+/**
+ * /auth/refresh has a different threat model from login: it is called legitimately
+ * by every client on startup and whenever an access token expires, so the login
+ * budget (30 / 15 min, keyed on a credential in the body) is both too tight and
+ * keyed on fields refresh does not send.
+ *
+ * `skipSuccessfulRequests` means only FAILED refreshes count, so a normal user is
+ * never throttled while someone spraying stolen tokens is cut off quickly.
+ */
+exports.refreshLimiter = (0, express_rate_limit_1.default)({
+    windowMs: env_1.default.RATE_LIMIT_WINDOW_MS,
+    max: env_1.default.REFRESH_RATE_LIMIT_MAX,
+    passOnStoreError: true,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: keyByUserOrIp,
+    skipSuccessfulRequests: true,
+    store: getRateLimitStore('fixo:ratelimit:refresh:'),
+    message: { message: 'Too many session refresh attempts. Please try again shortly.' },
 });
 exports.mutationLimiter = (0, express_rate_limit_1.default)({
     windowMs: 5 * 60 * 1000,

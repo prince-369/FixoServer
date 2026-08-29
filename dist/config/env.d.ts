@@ -11,6 +11,17 @@ interface EnvConfig {
     MONGODB_MAX_IDLE_TIME_MS: number;
     JWT_SECRET: string;
     JWT_EXPIRE: string;
+    ACCESS_TOKEN_TTL: string;
+    REFRESH_TOKEN_TTL: string;
+    REFRESH_TOKEN_TTL_MS: number;
+    REFRESH_TOKEN_HASH_SECRET: string;
+    REFRESH_REUSE_GRACE_MS: number;
+    REFRESH_COOKIE_NAME: string;
+    REFRESH_COOKIE_PATH: string;
+    REFRESH_COOKIE_DOMAIN: string;
+    REFRESH_COOKIE_SAMESITE: 'lax' | 'strict' | 'none';
+    REFRESH_COOKIE_SECURE: boolean;
+    MAX_SESSIONS_PER_USER: number;
     CLIENT_URL: string;
     CLIENT_URLS: string[];
     WORKER_CLIENT_URL: string;
@@ -29,6 +40,7 @@ interface EnvConfig {
     RATE_LIMIT_WINDOW_MS: number;
     RATE_LIMIT_MAX: number;
     AUTH_RATE_LIMIT_MAX: number;
+    REFRESH_RATE_LIMIT_MAX: number;
     MUTATION_RATE_LIMIT_MAX: number;
     IDEMPOTENCY_TTL_MS: number;
     REDIS_URL: string;

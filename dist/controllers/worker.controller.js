@@ -1429,10 +1429,9 @@ const requestCompletionCode = async (req, res) => {
             res.status(404).json({ message: 'Booking not found' });
             return;
         }
-        if (!booking.completionPin) {
-            res.status(400).json({ message: 'Completion code is not generated yet' });
-            return;
-        }
+        // Deliberately does NOT read completionPin — it is `select: false` and this
+        // response is sent to the WORKER. The booking reaching this point is already
+        // filtered to payment_done/in_progress, which is exactly when a PIN exists.
         if (!booking.completionRequestedByWorkerAt) {
             booking.completionRequestedByWorkerAt = new Date();
         }
@@ -1445,7 +1444,7 @@ const requestCompletionCode = async (req, res) => {
             bookingId: booking._id,
             status: booking.status,
             completionCodeRequested: true,
-            message: 'Worker marked work as completed and requested your completion code.',
+            message: 'Worker marked the work as completed.',
         };
         const customerId = booking.customer.toString();
         (0, socket_1.notifyUser)(customerId, 'booking_status_updated', payload);
@@ -1455,7 +1454,7 @@ const requestCompletionCode = async (req, res) => {
             recipientModel: 'User',
             type: 'completion_code_requested',
             title: 'Work Completion Confirmation Needed',
-            message: 'Worker requested your completion code. Reveal and share the code only after work is fully done.',
+            message: 'Your worker has marked the job as done. Share your completion code only once you are satisfied with the work.',
             data: { bookingId: booking._id },
         });
         res.json({
@@ -1473,24 +1472,27 @@ exports.requestCompletionCode = requestCompletionCode;
 const completeWork = async (req, res) => {
     try {
         const { pin } = req.body;
+        const submittedPin = typeof pin === 'string' ? pin.trim() : '';
+        // +completionPin: needed ONLY to compare against what the worker typed. The
+        // booking is never echoed back to the worker with this field selected.
         const booking = await Booking_1.default.findOne({
             _id: req.params.id,
             assignedWorker: req.user.id,
             status: { $in: ['payment_done', 'in_progress'] },
-        });
+        }).select('+completionPin');
         if (!booking) {
             res.status(404).json({ message: 'Booking not found' });
             return;
         }
-        if (!booking.completionRequestedByWorkerAt) {
-            res.status(400).json({ message: 'Please request completion code from customer first' });
+        // The old flow required the worker to request a code and then the customer to
+        // "reveal" it before this point. Both gates are gone: the customer receives the
+        // code the moment their payment succeeds, so knowing the code IS the proof that
+        // the customer handed it over. The PIN match is now the only gate.
+        if (!booking.completionPin) {
+            res.status(400).json({ message: 'Completion code is not available for this booking yet' });
             return;
         }
-        if (!booking.completionCodeRevealedAt) {
-            res.status(400).json({ message: 'Customer has not revealed completion code yet' });
-            return;
-        }
-        if (booking.completionPin !== pin) {
+        if (booking.completionPin !== submittedPin) {
             res.status(400).json({ message: 'Invalid PIN' });
             return;
         }

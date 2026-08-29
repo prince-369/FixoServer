@@ -121,7 +121,13 @@ const bookingSchema = new Schema<IBooking>(
     couponCode: { type: String },
     couponCampaign: { type: Schema.Types.ObjectId, ref: 'CouponCampaign' },
     discountAmount: { type: Number, default: 0 },
-    completionPin: { type: String },
+    /**
+     * Customer's completion PIN. `select: false` so it is NEVER returned by default —
+     * a worker who could read this from any booking payload would be able to close a
+     * job without the customer. Opt in with `.select('+completionPin')` on the few
+     * customer-facing reads and on the worker's PIN comparison, which never echoes it.
+     */
+    completionPin: { type: String, select: false },
     completionRequestedByWorkerAt: { type: Date },
     completionCodeRevealedAt: { type: Date },
     workerMessage: { type: String },
